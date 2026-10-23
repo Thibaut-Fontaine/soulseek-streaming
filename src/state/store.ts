@@ -1,5 +1,5 @@
 import { PermissionsAndroid, Platform } from 'react-native';
-import TrackPlayer from 'react-native-track-player';
+import TrackPlayer, { Event } from 'react-native-track-player';
 import { create } from 'zustand';
 
 import type { ConnectionState } from '../core/soulseekClient';
@@ -20,6 +20,8 @@ import { ensurePlayer, resetPlayer } from '../player/player';
 import { clearCredentials, loadCredentials, loadSettings, saveCredentials, saveSettings } from '../services/settings';
 import type { Credentials, Settings } from '../services/settings';
 import { StreamingService } from '../services/streaming';
+import { debugLog } from '../services/debugLog';
+import type { LogTag } from '../services/debugLog';
 import { createBlobUtilFs } from '../services/blobUtilFs';
 import { TrackCache } from '../services/trackCache';
 import type { CacheEntry } from '../services/trackCache';
@@ -185,6 +187,7 @@ async function requestNotificationPermission(): Promise<void> {
 export const useAppStore = create<AppState>((set, get) => {
   function wire(instance: StreamingService): void {
     instance.events.on('state', payload => {
+      debugLog('net', `connexion : ${payload.state}${payload.error ? ` (${payload.error})` : ''}`);
       set(state => ({
         connection: payload.state,
         connectionError: payload.error ?? (payload.state === 'online' ? null : state.connectionError),
@@ -227,9 +230,13 @@ export const useAppStore = create<AppState>((set, get) => {
 
     instance.events.on('notice', notice => set({ notice }));
     instance.events.on('log', message => {
-      if (__DEV__) {
-        console.log('[soulseek]', message);
-      }
+      // Client messages start with "[peer] ", "[transfer] "… when they belong
+      // to a step of fetching a track.
+      const match = /^\[(peer|transfer|http)\] /.exec(message);
+      debugLog(
+        (match ? match[1] : 'net') as LogTag,
+        match ? message.slice(match[0].length) : message,
+      );
     });
   }
 
@@ -325,6 +332,15 @@ export const useAppStore = create<AppState>((set, get) => {
     const bufferTarget = bufferTargetFor(hit.size, get().settings.bufferMb);
     const prepared = service.prepareStream(hit);
     const id = prepared.transferId;
+    const startedAt = Date.now();
+    const step = (name: string) =>
+      debugLog('play', `${name} après ${Date.now() - startedAt} ms`);
+
+    debugLog(
+      'play',
+      `source ${attempt} : ${hit.username} — ${hit.filename} (${hit.size} o, ${hit.bitrate ?? '?'} kbps, ` +
+        `slot ${hit.slotFree ? 'libre' : 'occupé'}, file ${hit.queueLength}) ; tampon visé ${bufferTarget} o ; URL ${prepared.url}`,
+    );
 
     set({
       current: {
@@ -348,6 +364,7 @@ export const useAppStore = create<AppState>((set, get) => {
       playbackTimeouts.reachPeerMs,
       `Impossible de joindre ${hit.username}`,
     );
+    step('pair joint, QueueUpload envoyé');
 
     await waitForTransfer(
       id,
@@ -356,6 +373,7 @@ export const useAppStore = create<AppState>((set, get) => {
       hit.slotFree ? playbackTimeouts.acceptFreeSlotMs : playbackTimeouts.acceptNoSlotMs,
       `${hit.username} vous a mis en file d'attente`,
     );
+    step('transfert accepté');
 
     await waitForTransfer(
       id,
@@ -364,6 +382,7 @@ export const useAppStore = create<AppState>((set, get) => {
       playbackTimeouts.openFileMs,
       `${hit.username} n'a pas ouvert le transfert`,
     );
+    step('connexion F ouverte, octets en route');
 
     await waitForTransfer(
       id,
@@ -375,6 +394,7 @@ export const useAppStore = create<AppState>((set, get) => {
       'Source trop lente',
       playbackTimeouts.stallMs,
     );
+    step(`tampon atteint (${service.getTransfer(id)?.buffer.total ?? '?'} o)`);
 
     if (sequence !== playSequence) {
       throw new PlaybackCancelled();
@@ -389,8 +409,10 @@ export const useAppStore = create<AppState>((set, get) => {
       duration: hit.durationSec,
       contentType: contentTypeFor(hit.filename),
     });
+    step('piste ajoutée au lecteur');
 
     await TrackPlayer.play();
+    step('lecture demandée');
   }
 
   /**
@@ -412,6 +434,47 @@ export const useAppStore = create<AppState>((set, get) => {
     }
 
     return null;
+  }
+
+  /**
+   * Native player events. Without this, a stream the player cannot read
+   * looks like "playing" forever with no sound and no message.
+   */
+  let watchingPlayer = false;
+
+  function watchPlayer(): void {
+    if (watchingPlayer) {
+      return;
+    }
+
+    watchingPlayer = true;
+
+    TrackPlayer.addEventListener(Event.PlaybackState, event => {
+      const extra = 'error' in event && event.error ? ` : ${event.error.code} ${event.error.message}` : '';
+      debugLog('player', `état ${event.state}${extra}`);
+    });
+
+    TrackPlayer.addEventListener(Event.PlaybackError, event => {
+      debugLog('player', `erreur ${event.code} : ${event.message}`);
+
+      set(state => {
+        if (!state.current || state.current.phase === 'error') {
+          return {};
+        }
+
+        return {
+          current: {
+            ...state.current,
+            phase: 'error',
+            error: `Le lecteur n’a pas pu lire le flux (${event.code} : ${event.message})`,
+          },
+        };
+      });
+    });
+
+    TrackPlayer.addEventListener(Event.PlaybackActiveTrackChanged, event => {
+      debugLog('player', `piste active : ${event.track?.url ?? 'aucune'}`);
+    });
   }
 
   /** Plays a track already on the device. No network involved. */
@@ -494,6 +557,7 @@ export const useAppStore = create<AppState>((set, get) => {
         }
 
         lastError = errorMessage(error);
+        debugLog('play', `source ${attempt} (${hit.username}) abandonnée : ${lastError}`);
 
         if (DENIED_PATTERN.test(lastError)) {
           deniedPeers.set(hit.username.toLowerCase(), lastError);
@@ -509,6 +573,7 @@ export const useAppStore = create<AppState>((set, get) => {
       return;
     }
 
+    debugLog('play', `échec après ${tried.size} source(s) : ${lastError}`);
     set(state => ({
       current: state.current
         ? {
@@ -573,18 +638,15 @@ export const useAppStore = create<AppState>((set, get) => {
           await trackCache.load();
         } catch (error) {
           trackCache = null;
-          if (__DEV__) {
-            console.log('[cache] unavailable', errorMessage(error));
-          }
+          debugLog('app', `cache indisponible : ${errorMessage(error)}`);
         }
 
         try {
           await ensurePlayer();
           set({ playerReady: true });
+          watchPlayer();
         } catch (error) {
-          if (__DEV__) {
-            console.log('[player] unavailable', errorMessage(error));
-          }
+          debugLog('player', `lecteur indisponible : ${errorMessage(error)}`);
         }
 
         const credentials = await loadCredentials();
@@ -802,6 +864,9 @@ export const useAppStore = create<AppState>((set, get) => {
       let closeTimer: ReturnType<typeof setTimeout> | null = null;
       let rankTimer: ReturnType<typeof setTimeout> | null = null;
 
+      debugLog('play', `recherche « ${networkQuery} » (saisie : « ${rawQuery} »)`);
+      const searchStartedAt = Date.now();
+
       set({
         query: rawQuery,
         searching: true,
@@ -841,6 +906,11 @@ export const useAppStore = create<AppState>((set, get) => {
         }
 
         matched = true;
+        debugLog(
+          'play',
+          `meilleur résultat après ${Date.now() - searchStartedAt} ms parmi ${collected.length} : ` +
+            `${best.hit.username} — ${best.hit.filename} (score ${best.score.toFixed(2)})`,
+        );
         // `searching` ends at the match; results keep filling in the
         // background for fallback and the sources list.
         set({ searching: false, searchEmpty: false, matchHit: best.hit });
@@ -893,8 +963,14 @@ export const useAppStore = create<AppState>((set, get) => {
         }
 
         publishResults();
+        debugLog(
+          'play',
+          `recherche terminée : ${collected.length} MP3 reçus, ${get().results.length} retenus, ` +
+            (matched ? 'lecture lancée' : 'aucun résultat assez proche pour la lecture auto'),
+        );
         set({ searching: false, searchEmpty: !matched && get().results.length === 0 });
       } catch (error) {
+        debugLog('play', `recherche en erreur : ${errorMessage(error)}`);
         if (sequence === searchSequence) {
           set({ searching: false, searchError: errorMessage(error) });
         }

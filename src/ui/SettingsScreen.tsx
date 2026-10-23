@@ -17,6 +17,7 @@ import LinearGradient from 'react-native-linear-gradient';
 import type { Settings } from '../services/settings';
 import { useAppStore } from '../state/store';
 import { Button, Dot, ListRow, StepSlider, connectionStatus } from './components';
+import { DebugLogScreen } from './DebugLogScreen';
 import { Icon } from './Icon';
 import { colors, formatBytes, gutter, radius, spacing, type } from './theme';
 
@@ -50,16 +51,26 @@ function parsePort(value: string, allowZero: boolean): number {
 }
 
 export function SettingsScreen() {
-  const [page, setPage] = React.useState<'main' | 'network'>('main');
+  const [page, setPage] = React.useState<'main' | 'network' | 'log'>('main');
+
+  if (page === 'log') {
+    return <DebugLogScreen onBack={() => setPage('main')} />;
+  }
 
   return page === 'network' ? (
     <NetworkSettings onBack={() => setPage('main')} />
   ) : (
-    <MainSettings onOpenNetwork={() => setPage('network')} />
+    <MainSettings onOpenNetwork={() => setPage('network')} onOpenLog={() => setPage('log')} />
   );
 }
 
-function MainSettings({ onOpenNetwork }: { onOpenNetwork: () => void }) {
+function MainSettings({
+  onOpenNetwork,
+  onOpenLog,
+}: {
+  onOpenNetwork: () => void;
+  onOpenLog: () => void;
+}) {
   const settings = useAppStore(state => state.settings);
   const applySettings = useAppStore(state => state.applySettings);
   const username = useAppStore(state => state.username);
@@ -232,7 +243,15 @@ function MainSettings({ onOpenNetwork }: { onOpenNetwork: () => void }) {
           chevron
         />
         <ListRow title="Port d’écoute" value={listenPort > 0 ? String(listenPort) : '—'} />
-        <ListRow title="Port local du lecteur" value={httpPort > 0 ? String(httpPort) : '—'} last />
+        <ListRow title="Port local du lecteur" value={httpPort > 0 ? String(httpPort) : '—'} />
+        <ListRow
+          icon="info"
+          title="Journal de débogage"
+          subtitle="Détail des connexions, transferts et erreurs du lecteur"
+          onPress={onOpenLog}
+          chevron
+          last
+        />
       </View>
 
       <Text style={styles.groupTitle}>Compte</Text>

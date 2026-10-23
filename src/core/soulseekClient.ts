@@ -319,6 +319,7 @@ export class SoulseekClient extends Emitter<SoulseekClientEvents> {
   private readonly transfers = new Map<string, StreamTransfer>();
   private readonly transfersByToken = new Map<number, StreamTransfer>();
   private readonly transfersByKey = new Map<string, StreamTransfer>();
+  private readonly loggedStates = new Map<string, string>();
   private readonly queuePollers = new Map<
     string,
     {
@@ -772,6 +773,8 @@ export class SoulseekClient extends Emitter<SoulseekClientEvents> {
           clearTimeout(waiter.timer);
           this.peerAddressWaiters.delete(address.username);
 
+          this.log(`[peer] adresse de ${address.username} : ${address.ipAddress}:${address.port}`);
+
           if (address.ipAddress === '0.0.0.0' || address.port === 0) {
             waiter.reject(new Error("L'utilisateur est hors ligne"));
           } else {
@@ -785,6 +788,9 @@ export class SoulseekClient extends Emitter<SoulseekClientEvents> {
 
       case ServerCode.CONNECT_TO_PEER: {
         const request = parseConnectToPeer(payload);
+        this.log(
+          `[peer] ${request.username} demande une connexion ${request.connectionType} vers ${request.ipAddress}:${request.port} (token ${request.token})`,
+        );
         void this.acceptIndirectConnection(request);
         break;
       }
@@ -799,7 +805,7 @@ export class SoulseekClient extends Emitter<SoulseekClientEvents> {
           pierce.reject(new Error(`${pierce.username} ne peut pas se connecter à nous`));
         }
 
-        this.log(`Connexion indirecte refusée (token ${token})`);
+        this.log(`[peer] le serveur signale que ${pierce?.username ?? '?'} ne peut pas se connecter à nous (token ${token})`);
         break;
       }
 
@@ -848,6 +854,7 @@ export class SoulseekClient extends Emitter<SoulseekClientEvents> {
       });
 
       socket.write(encodePierceFirewall(request.token));
+      this.log(`[peer] connecté à ${request.username} (${request.connectionType}), PierceFirewall envoyé`);
 
       if (request.connectionType === ConnectionType.PEER) {
         if (this.inboundPeers.size >= MAX_INBOUND_PEERS) {
@@ -859,7 +866,10 @@ export class SoulseekClient extends Emitter<SoulseekClientEvents> {
       } else {
         this.attachIndirectFileConnection(request.username, socket);
       }
-    } catch {
+    } catch (error) {
+      this.log(
+        `[peer] impossible de joindre ${request.username} à ${request.ipAddress}:${request.port} : ${errorText(error)}`,
+      );
       try {
         this.sendServer(encodeCantConnectToPeer(request.token, request.username));
       } catch {
@@ -1042,6 +1052,7 @@ export class SoulseekClient extends Emitter<SoulseekClientEvents> {
     const existing = this.outboundPeers.get(key);
 
     if (existing?.isOpen) {
+      this.log(`[peer] réutilise la connexion sortante vers ${username}`);
       return existing;
     }
 
@@ -1050,6 +1061,7 @@ export class SoulseekClient extends Emitter<SoulseekClientEvents> {
     // when the peer is behind a firewall.
     for (const session of this.inboundPeers) {
       if (session.isOpen && userKey(session.username) === key) {
+        this.log(`[peer] réutilise la connexion entrante de ${username}`);
         session.pin();
         return session;
       }
@@ -1077,6 +1089,8 @@ export class SoulseekClient extends Emitter<SoulseekClientEvents> {
    */
   private async openPeerConnection(username: string): Promise<PeerSession> {
     let settled = false;
+    const startedAt = Date.now();
+    this.log(`[peer] connexion à ${username} : directe + ConnectToPeer en parallèle`);
     const direct = this.connectDirect(username);
     const indirect = this.connectIndirect(username, ConnectionType.PEER, (socket, rest) => {
       const session = this.attachPeerSession(username, socket, 'out', false);
@@ -1105,10 +1119,14 @@ export class SoulseekClient extends Emitter<SoulseekClientEvents> {
     } catch (error) {
       settled = true;
       indirect.cancel();
+      this.log(`[peer] échec de la connexion à ${username} après ${Date.now() - startedAt} ms : ${errorText(error)}`);
       throw error instanceof Error ? error : new Error(`Impossible de joindre ${username}`);
     }
 
     settled = true;
+    this.log(
+      `[peer] connecté à ${username} en ${Date.now() - startedAt} ms (${'session' in winner ? 'indirect, le pair nous a joint' : 'direct'})`,
+    );
 
     if ('session' in winner) {
       // The peer connected to us after our ConnectToPeer; that session is
@@ -1124,11 +1142,16 @@ export class SoulseekClient extends Emitter<SoulseekClientEvents> {
   private connectDirect(username: string): { promise: Promise<SocketLike> } {
     const connect = async () => {
       const address = await this.getPeerAddress(username);
-      return this.transport.connect({
-        host: address.ipAddress,
-        port: address.port,
-        timeoutMs: PEER_CONNECT_TIMEOUT_MS,
-      });
+      try {
+        return await this.transport.connect({
+          host: address.ipAddress,
+          port: address.port,
+          timeoutMs: PEER_CONNECT_TIMEOUT_MS,
+        });
+      } catch (error) {
+        this.log(`[peer] connexion directe à ${username} (${address.ipAddress}:${address.port}) échouée : ${errorText(error)}`);
+        throw error;
+      }
     };
 
     const promise = (async () => {
@@ -1161,6 +1184,7 @@ export class SoulseekClient extends Emitter<SoulseekClientEvents> {
     const promise = new Promise<T>((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pendingPierces.delete(token);
+        this.log(`[peer] ${username} ne s'est pas connecté à nous (ConnectToPeer ${type}, token ${token})`);
         reject(new Error(`${username} ne répond pas`));
       }, INDIRECT_CONNECT_TIMEOUT_MS);
 
@@ -1415,6 +1439,9 @@ export class SoulseekClient extends Emitter<SoulseekClientEvents> {
 
       case PeerCode.TRANSFER_REQUEST: {
         const request = parseTransferRequest(payload);
+        this.log(
+          `[transfer] TransferRequest de ${session.username} : sens ${request.direction}, token ${request.token}, ${request.size ?? '?'} o, ${request.filename}`,
+        );
 
         if (request.direction !== TransferDirection.UPLOAD) {
           return;
@@ -1430,6 +1457,14 @@ export class SoulseekClient extends Emitter<SoulseekClientEvents> {
           !request.size ||
           request.size <= 0
         ) {
+          const why = !transfer
+            ? 'aucun transfert ne correspond (nom de fichier ou utilisateur différent)'
+            : !transfer.isActive
+              ? `transfert inactif (${transfer.state})`
+              : transfer.token !== null
+                ? `déjà un token (${transfer.token})`
+                : 'taille absente';
+          this.log(`[transfer] TransferRequest refusé : ${why}`);
           session.send(encodeTransferResponse(request.token, false, 'Cancelled'));
           return;
         }
@@ -1438,6 +1473,7 @@ export class SoulseekClient extends Emitter<SoulseekClientEvents> {
         this.transfersByToken.set(request.token, transfer);
         this.stopQueuePolling(transfer.id);
         session.send(encodeTransferResponse(request.token, true));
+        this.log(`[transfer] TransferRequest accepté (token ${request.token}), on attend la connexion F`);
         break;
       }
 
@@ -1446,6 +1482,8 @@ export class SoulseekClient extends Emitter<SoulseekClientEvents> {
         const transfer = this.transfersByKey.get(
           hitKey({ username: session.username, filename: response.filename }),
         );
+
+        this.log(`[transfer] ${session.username} : place dans la file ${response.place} pour ${response.filename}`);
 
         if (transfer?.isActive) {
           transfer.setQueuePosition(response.place);
@@ -1460,6 +1498,7 @@ export class SoulseekClient extends Emitter<SoulseekClientEvents> {
           hitKey({ username: session.username, filename: response.filename }),
         );
 
+        this.log(`[transfer] UploadDenied de ${session.username} : ${response.reason} (${response.filename})`);
         transfer?.fail(`Refusé par le pair : ${response.reason}`);
         break;
       }
@@ -1470,6 +1509,7 @@ export class SoulseekClient extends Emitter<SoulseekClientEvents> {
           hitKey({ username: session.username, filename: response.filename }),
         );
 
+        this.log(`[transfer] UploadFailed de ${session.username} (${response.filename})`);
         transfer?.fail('Le pair a signalé un échec du transfert');
         break;
       }
@@ -1521,9 +1561,11 @@ export class SoulseekClient extends Emitter<SoulseekClientEvents> {
       }
 
       session.send(encodeQueueUpload(transfer.hit.filename));
+      this.log(`[transfer] QueueUpload envoyé à ${transfer.hit.username} : ${transfer.hit.filename}`);
       transfer.markQueued();
       this.startQueuePolling(transfer, session);
     } catch (error) {
+      this.log(`[transfer] pas de connexion à ${transfer.hit.username} : ${errorText(error)}`);
       transfer.fail(
         error instanceof Error ? error.message : 'Impossible de joindre le pair',
       );
@@ -1576,7 +1618,17 @@ export class SoulseekClient extends Emitter<SoulseekClientEvents> {
   }
 
   private handleTransferChange(transfer: StreamTransfer): void {
-    this.emit('transfer', transfer.snapshot());
+    const snapshot = transfer.snapshot();
+    this.emit('transfer', snapshot);
+
+    if (this.loggedStates.get(transfer.id) !== transfer.state) {
+      this.loggedStates.set(transfer.id, transfer.state);
+      this.log(
+        `[transfer] ${transfer.hit.username} → ${transfer.state}` +
+          (snapshot.error ? ` : ${snapshot.error}` : '') +
+          ` (${transfer.received}/${transfer.expectedSize || transfer.hit.size} o)`,
+      );
+    }
 
     if (transfer.state === 'complete' || transfer.state === 'failed' || transfer.state === 'cancelled') {
       this.stopQueuePolling(transfer.id);
@@ -1590,6 +1642,8 @@ export class SoulseekClient extends Emitter<SoulseekClientEvents> {
       if (this.transfersByKey.get(key) === transfer) {
         this.transfersByKey.delete(key);
       }
+
+      this.loggedStates.delete(transfer.id);
 
       if (transfer.state !== 'complete') {
         // Keep a bounded history of finished/failed transfers.
@@ -1733,6 +1787,7 @@ export class SoulseekClient extends Emitter<SoulseekClientEvents> {
         if (code === PeerInitCode.PEER_INIT) {
           const init = parsePeerInit(frame.subarray(1));
           clearTimeout(initTimer);
+          this.log(`[peer] connexion entrante de ${init.username} (type ${init.connectionType}) depuis ${socket.remoteAddress ?? '?'}`);
 
           if (init.connectionType === ConnectionType.PEER) {
             if (this.inboundPeers.size >= MAX_INBOUND_PEERS) {
@@ -1769,11 +1824,13 @@ export class SoulseekClient extends Emitter<SoulseekClientEvents> {
           clearTimeout(initTimer);
 
           if (!pierce) {
+            this.log(`[peer] PierceFirewall inconnu (token ${token}), connexion fermée`);
             socket.destroy();
             cleanup();
             return;
           }
 
+          this.log(`[peer] ${pierce.username} nous a joints (PierceFirewall ${pierce.type}, token ${token})`);
           this.pendingPierces.delete(token);
           clearTimeout(pierce.timer);
           // From here the socket belongs to whoever asked for it (a P session
@@ -1797,6 +1854,9 @@ export class SoulseekClient extends Emitter<SoulseekClientEvents> {
         const token = readU32(queue.peek(4), 0);
         queue.skip(4);
         const transfer = this.transfersByToken.get(token) ?? null;
+        this.log(
+          `[transfer] connexion F entrante, token ${token} : ${transfer ? `transfert de ${transfer.hit.username}` : 'inconnu, fermée'}`,
+        );
 
         if (!transfer) {
           socket.destroy();
@@ -1861,6 +1921,10 @@ export class SoulseekClient extends Emitter<SoulseekClientEvents> {
       const rest = queue.take(queue.length);
       const transfer = this.transfersByToken.get(token);
 
+      this.log(
+        `[transfer] connexion F indirecte de ${username}, token ${token} : ${transfer ? 'transfert trouvé' : 'inconnu'}`,
+      );
+
       if (!transfer || (transfer.hit.username !== username && transfer.hit.username.toLowerCase() !== username.toLowerCase())) {
         socket.destroy();
         clearTimeout(timer);
@@ -1898,6 +1962,10 @@ export class SoulseekClient extends Emitter<SoulseekClientEvents> {
   private log(message: string): void {
     this.emit('log', message);
   }
+}
+
+function errorText(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 export class LoginError extends Error {

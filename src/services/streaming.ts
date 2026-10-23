@@ -115,7 +115,9 @@ export class StreamingService {
     await this.stop();
 
     const http = new RangeHttpServer(this.transport, this.settings.streamPort);
+    http.log = message => this.events.emit('log', `[http] ${message}`);
     await http.start();
+    this.events.emit('log', `[http] serveur local du lecteur sur le port ${http.port}`);
     this.http = http;
 
     const client = new SoulseekClient({

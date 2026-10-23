@@ -51,6 +51,8 @@ export class RangeHttpServer {
   private readonly sources = new Map<string, StreamSource>();
   private listener: ListenerLike | null = null;
   private actualPort = 0;
+  /** Debug output: one line per request and how it ended. */
+  log: (message: string) => void = () => {};
 
   constructor(
     private readonly transport: Transport,
@@ -151,6 +153,8 @@ export class RangeHttpServer {
 
   private async respond(socket: SocketLike, request: HttpRequest): Promise<void> {
     const prefix = '/stream/';
+    const label = `${request.method} …${request.path.slice(-6)} Range=${request.headers.range ?? '-'}`;
+    this.log(`requête ${label} (${request.headers['user-agent'] ?? '?'})`);
 
     if (!request.path.startsWith(prefix)) {
       writeResponse(socket, 404, 'Not Found', {}, new Uint8Array(0));
@@ -169,6 +173,7 @@ export class RangeHttpServer {
     const source = this.sources.get(id);
 
     if (!source) {
+      this.log(`${label} → 404 (flux inconnu ou déjà libéré)`);
       writeResponse(socket, 404, 'Not Found', {}, new Uint8Array(0));
       return;
     }
@@ -187,6 +192,7 @@ export class RangeHttpServer {
     const total = Math.max(0, source.getSize());
 
     if (total === 0) {
+      this.log(`${label} → 503 (taille encore inconnue)`);
       writeResponse(socket, 503, 'Service Unavailable', {}, new Uint8Array(0));
       return;
     }
@@ -194,6 +200,7 @@ export class RangeHttpServer {
     const range = parseRange(request.headers.range, total);
 
     if (range === 'invalid') {
+      this.log(`${label} → 416 (taille ${total})`);
       writeResponse(
         socket,
         416,
@@ -222,6 +229,11 @@ export class RangeHttpServer {
     }
 
     writeHead(socket, usingRange ? 206 : 200, usingRange ? 'Partial Content' : 'OK', headers);
+    this.log(
+      `${label} → ${usingRange ? 206 : 200} octets ${start}-${end}/${total}, ${source.buffer.total} déjà reçus`,
+    );
+    const startedAt = Date.now();
+    let endReason = 'terminé';
 
     if (request.method === 'HEAD') {
       socket.end();
@@ -241,15 +253,18 @@ export class RangeHttpServer {
       while (offset <= end && !aborted) {
         if (offset >= source.buffer.total) {
           if (source.buffer.state !== 'open') {
+            endReason = `tampon ${source.buffer.state} à ${source.buffer.total} o`;
             break;
           }
 
+          this.log(`${label} attend l'octet ${offset} (reçus : ${source.buffer.total})`);
           await source.buffer.waitFor(offset, 60000);
         }
 
         const bytes = source.buffer.read(offset, Math.min(CHUNK_SIZE, end - offset + 1));
 
         if (bytes.length === 0) {
+          endReason = `lecture vide à ${offset}`;
           break;
         }
 
@@ -263,9 +278,18 @@ export class RangeHttpServer {
           await yieldToUi();
         }
       }
-    } catch {
+    } catch (error) {
       // Transfer failed, timed out, or the player went away.
+      endReason = `erreur : ${error instanceof Error ? error.message : String(error)}`;
     }
+
+    if (aborted) {
+      endReason = 'le lecteur a fermé la connexion';
+    }
+
+    this.log(
+      `${label} fin : ${offset - start} o envoyés en ${Date.now() - startedAt} ms (${endReason})`,
+    );
 
     if (!aborted) {
       socket.end();
