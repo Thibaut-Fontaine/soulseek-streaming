@@ -14,6 +14,10 @@ function memoryFs(): CacheFs & { files: Map<string, string> } {
     writeText: async (path, data) => void files.set(path, data),
     readText: async path => files.get(path) ?? '',
     unlink: async path => void files.delete(path),
+    move: async (from, to) => {
+      files.set(to, files.get(from) ?? '');
+      files.delete(from);
+    },
   };
 }
 
@@ -85,5 +89,64 @@ describe('track cache', () => {
     await cache.save(hit('x\\Song.mp3', 'a'), bytes(10));
     await cache.save(hit('y\\Song.mp3', 'b'), bytes(10));
     expect(cache.files().map(f => f.path).sort()).toEqual(['SoulStream\\Song (2).mp3', 'SoulStream\\Song.mp3']);
+  });
+
+  test('adds an MP3 from the phone and shares it', async () => {
+    const fs = memoryFs();
+    const cache = new TrackCache(fs, 10_000);
+    await cache.load();
+    fs.files.set('/caches/pick.mp3', Buffer.from(bytes(5000)).toString('base64'));
+
+    const result = await cache.importFile('/caches/pick.mp3', 'Daft Punk - One More Time.mp3', 5000);
+
+    expect(result.status).toBe('added');
+    expect(fs.files.has('/caches/pick.mp3')).toBe(false);
+    expect(cache.files()).toEqual([
+      { path: 'SoulStream\\Daft Punk - One More Time.mp3', size: 5000, bitrate: undefined, durationSec: undefined },
+    ]);
+    expect(cache.importedCount).toBe(1);
+    expect(cache.count).toBe(0);
+    expect(cache.findByQuery('daft punk one more time')?.imported).toBe(true);
+
+    const reader = await cache.open('SoulStream\\Daft Punk - One More Time.mp3');
+    expect(reader?.size).toBe(5000);
+  });
+
+  test('skips non-MP3 files and duplicates', async () => {
+    const fs = memoryFs();
+    const cache = new TrackCache(fs, 10_000);
+    await cache.load();
+    fs.files.set('/c/a', 'AAAA');
+    fs.files.set('/c/b', 'AAAA');
+    fs.files.set('/c/c', 'AAAA');
+
+    expect((await cache.importFile('/c/a', 'song.flac', 3)).status).toBe('skipped');
+    expect((await cache.importFile('/c/b', 'song.mp3', 3)).status).toBe('added');
+    expect((await cache.importFile('/c/c', 'song.mp3', 3)).status).toBe('duplicate');
+    expect(fs.files.has('/c/a') || fs.files.has('/c/c')).toBe(false);
+    expect(cache.importedCount).toBe(1);
+  });
+
+  test('never evicts added files and clears them separately', async () => {
+    const fs = memoryFs();
+    const cache = new TrackCache(fs, 2_000);
+    await cache.load();
+    fs.files.set('/c/big', 'AAAA');
+    await cache.importFile('/c/big', 'mine.mp3', 50_000);
+
+    await cache.save(hit('Music\\A\\one.mp3'), bytes(1500));
+    await cache.save(hit('Music\\A\\two.mp3'), bytes(1500));
+
+    // Only downloads count toward the 2 000-byte limit; the older one goes.
+    expect(cache.importedCount).toBe(1);
+    expect(cache.count).toBe(1);
+
+    await cache.clear();
+    expect(cache.count).toBe(0);
+    expect(cache.importedCount).toBe(1);
+
+    await cache.clear(true);
+    expect(cache.importedCount).toBe(0);
+    expect(cache.files()).toEqual([]);
   });
 });

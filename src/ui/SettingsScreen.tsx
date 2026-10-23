@@ -81,6 +81,8 @@ function MainSettings({
   const logout = useAppStore(state => state.logout);
   const cacheStats = useAppStore(state => state.cacheStats);
   const clearCache = useAppStore(state => state.clearCache);
+  const importTracks = useAppStore(state => state.importTracks);
+  const [importing, setImporting] = React.useState(false);
   // Recomputed on each render; the settings screen is small.
   const stats = cacheStats();
   const [, refresh] = React.useReducer((n: number) => n + 1, 0);
@@ -91,8 +93,8 @@ function MainSettings({
 
   const confirmClear = () => {
     Alert.alert(
-      'Vider les morceaux enregistrés',
-      'Les morceaux déjà écoutés seront supprimés de l’appareil et ne seront plus partagés.',
+      'Vider les morceaux écoutés',
+      'Les morceaux déjà écoutés seront supprimés de l’appareil et ne seront plus partagés. Les morceaux ajoutés restent.',
       [
         { text: 'Annuler', style: 'cancel' },
         {
@@ -100,6 +102,40 @@ function MainSettings({
           style: 'destructive',
           onPress: () => {
             void clearCache().then(refresh);
+          },
+        },
+      ],
+    );
+  };
+
+  const addTracks = async () => {
+    setImporting(true);
+
+    try {
+      const summary = await importTracks();
+
+      if (summary) {
+        Alert.alert('Ajout au partage', summary);
+      }
+    } catch (error) {
+      Alert.alert('Ajout impossible', error instanceof Error ? error.message : String(error));
+    } finally {
+      setImporting(false);
+      refresh();
+    }
+  };
+
+  const confirmRemoveAdded = () => {
+    Alert.alert(
+      'Retirer les morceaux ajoutés',
+      'Les copies faites par SoulStream seront supprimées et ne seront plus partagées. Les fichiers d’origine sur le téléphone ne sont pas touchés.',
+      [
+        { text: 'Annuler', style: 'cancel' },
+        {
+          text: 'Retirer',
+          style: 'destructive',
+          onPress: () => {
+            void clearCache(true).then(refresh);
           },
         },
       ],
@@ -197,14 +233,14 @@ function MainSettings({
       <View style={styles.group}>
         <ListRow
           icon="peer"
-          title="Partager les morceaux écoutés"
+          title="Partager mes morceaux"
           subtitle="Beaucoup de pairs refusent d’envoyer à ceux qui ne partagent rien."
           right={
             <Switch
               value={settings.shareEnabled}
               onValueChange={value => toggle({ shareEnabled: value })}
               trackColor={{ true: colors.accent, false: colors.surfaceHigh }}
-              accessibilityLabel="Partager les morceaux écoutés"
+              accessibilityLabel="Partager mes morceaux"
             />
           }
         />
@@ -222,11 +258,25 @@ function MainSettings({
           }
         />
         <ListRow
-          title="Morceaux sur l’appareil"
-          value={stats ? `${stats.count} · ${formatBytes(stats.bytes)}` : '—'}
+          icon="music"
+          title={importing ? 'Ajout en cours…' : 'Ajouter des morceaux'}
+          subtitle="Choisissez des MP3 sur le téléphone : une copie est partagée tout de suite, même avant votre premier téléchargement."
+          onPress={importing ? undefined : addTracks}
+          chevron
         />
         <ListRow
-          title="Vider les morceaux enregistrés"
+          title="Morceaux ajoutés"
+          value={stats ? `${stats.importedCount} · ${formatBytes(stats.importedBytes)}` : '—'}
+        />
+        <ListRow
+          title="Morceaux écoutés"
+          value={stats ? `${stats.count} · ${formatBytes(stats.bytes)}` : '—'}
+        />
+        {stats && stats.importedCount > 0 ? (
+          <ListRow title="Retirer les morceaux ajoutés" onPress={confirmRemoveAdded} danger />
+        ) : null}
+        <ListRow
+          title="Vider les morceaux écoutés"
           onPress={confirmClear}
           danger
           last
@@ -275,9 +325,9 @@ function MainSettings({
           presque instantanément, sur iOS comme sur Android.
         </Text>
         <Text style={styles.aboutText}>
-          Le partage de fichiers n’est pas encore implémenté. Le partage se configure dans le
-          client, pas dans le compte Soulseek ; certains utilisateurs limitent ou bloquent les
-          téléchargements des pairs qui ne partagent rien.
+          Le partage se configure dans le client, pas dans le compte Soulseek. SoulStream
+          partage les morceaux écoutés et ceux que vous ajoutez ; certains utilisateurs
+          limitent ou bloquent les téléchargements des pairs qui ne partagent rien.
         </Text>
       </View>
     </ScrollView>

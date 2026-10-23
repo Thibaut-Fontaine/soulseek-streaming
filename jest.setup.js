@@ -7,3 +7,10 @@ jest.mock('react-native-blob-util', () => ({
   __esModule: true,
   default: { fs: { dirs: { DocumentDir: '/tmp' } } },
 }));
+jest.mock('@react-native-documents/picker', () => ({
+  pick: jest.fn(async () => []),
+  keepLocalCopy: jest.fn(async () => []),
+  types: { audio: 'audio/*' },
+  errorCodes: { OPERATION_CANCELED: 'OPERATION_CANCELED' },
+  isErrorWithCode: () => false,
+}));

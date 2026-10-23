@@ -16,6 +16,8 @@ export interface CacheFs {
   writeText(path: string, data: string): Promise<void>;
   readText(path: string): Promise<string>;
   unlink(path: string): Promise<void>;
+  /** Moves a file, e.g. a picked file copied to the app's caches first. */
+  move(from: string, to: string): Promise<void>;
 }
 
 export interface CacheEntry {
@@ -31,12 +33,25 @@ export interface CacheEntry {
   sourceFilename: string;
   addedAt: number;
   lastPlayedAt: number;
+  /**
+   * Added by the user from the phone's music, not downloaded. Never evicted
+   * and not counted in the cache limit: it is there to be shared.
+   */
+  imported?: boolean;
 }
+
+/** Result of adding one file from the phone. */
+export type ImportResult =
+  | { status: 'added'; entry: CacheEntry }
+  | { status: 'duplicate'; entry: CacheEntry }
+  | { status: 'skipped'; reason: string };
 
 const INDEX_FILE = 'index.json';
 const SHARE_FOLDER = 'SoulStream';
 /** Larger files are not worth keeping on a phone. */
 const MAX_FILE_BYTES = 40 * 1024 * 1024;
+/** Added files can be longer (mixes, live sets) but stay reasonable. */
+const MAX_IMPORT_BYTES = 150 * 1024 * 1024;
 
 function safeName(value: string): string {
   return value.replace(/[\\/:*?"<>|\u0000-\u001f]/g, '_').slice(0, 150);
@@ -62,12 +77,29 @@ export class TrackCache implements ShareLibrary {
     void this.serialize(() => this.evict());
   }
 
+  /** Downloaded tracks only: the part limited by the cache size setting. */
   get totalBytes(): number {
-    return this.entries.reduce((sum, entry) => sum + entry.size, 0);
+    return this.downloaded().reduce((sum, entry) => sum + entry.size, 0);
   }
 
   get count(): number {
-    return this.entries.length;
+    return this.downloaded().length;
+  }
+
+  get importedBytes(): number {
+    return this.imported().reduce((sum, entry) => sum + entry.size, 0);
+  }
+
+  get importedCount(): number {
+    return this.imported().length;
+  }
+
+  private downloaded(): CacheEntry[] {
+    return this.entries.filter(entry => !entry.imported);
+  }
+
+  private imported(): CacheEntry[] {
+    return this.entries.filter(entry => entry.imported);
   }
 
   async load(): Promise<void> {
@@ -192,6 +224,58 @@ export class TrackCache implements ShareLibrary {
     });
   }
 
+  /**
+   * Adds an MP3 from the phone to the shared folder. `localPath` is a file
+   * the app owns (the picker's local copy); it is moved, not copied again.
+   */
+  importFile(localPath: string, name: string, size: number): Promise<ImportResult> {
+    return this.serialize(async () => {
+      const cleanName = safeName(name.trim()) || 'track.mp3';
+
+      if (!/\.mp3$/i.test(cleanName)) {
+        await this.fs.unlink(localPath).catch(() => {});
+        return { status: 'skipped', reason: 'pas un MP3' };
+      }
+
+      if (size <= 0 || size > MAX_IMPORT_BYTES) {
+        await this.fs.unlink(localPath).catch(() => {});
+        return { status: 'skipped', reason: size <= 0 ? 'fichier vide' : 'fichier trop gros' };
+      }
+
+      const sourceKey = `import:${cleanName.toLowerCase()}:${size}`;
+      const existing = this.entries.find(entry => entry.sourceKey === sourceKey);
+
+      if (existing) {
+        await this.fs.unlink(localPath).catch(() => {});
+        return { status: 'duplicate', entry: existing };
+      }
+
+      let sharedPath = `${SHARE_FOLDER}\\${cleanName}`;
+
+      for (let n = 2; this.entries.some(e => e.sharedPath === sharedPath); n++) {
+        sharedPath = `${SHARE_FOLDER}\\${cleanName.replace(/(\.[^.]+)?$/, ` (${n})$1`)}`;
+      }
+
+      const file = `${Date.now().toString(36)}-${Math.floor(Math.random() * 1e6).toString(36)}.mp3`;
+      await this.fs.move(localPath, `${this.fs.dir}/${file}`);
+
+      const entry: CacheEntry = {
+        sharedPath,
+        file,
+        size,
+        sourceKey,
+        sourceFilename: cleanName,
+        addedAt: Date.now(),
+        lastPlayedAt: 0,
+        imported: true,
+      };
+
+      this.entries.push(entry);
+      await this.saveIndex();
+      return { status: 'added', entry };
+    });
+  }
+
   async open(path: string): Promise<ShareFileReader | null> {
     const entry = this.entries.find(e => e.sharedPath === path);
 
@@ -218,23 +302,32 @@ export class TrackCache implements ShareLibrary {
     };
   }
 
-  async clear(): Promise<void> {
+  /** Deletes downloaded tracks (`imported: false`) or added ones (`true`). */
+  async clear(imported = false): Promise<void> {
     await this.serialize(async () => {
-      for (const entry of this.entries) {
+      const removed = this.entries.filter(entry => Boolean(entry.imported) === imported);
+
+      for (const entry of removed) {
         await this.fs.unlink(`${this.fs.dir}/${entry.file}`).catch(() => {});
       }
 
-      this.entries = [];
+      this.entries = this.entries.filter(entry => Boolean(entry.imported) !== imported);
       await this.saveIndex();
     });
   }
 
-  /** Drops the least recently played tracks until the cache fits. */
+  /**
+   * Drops the least recently played downloads until they fit the limit.
+   * Added files are never dropped.
+   */
   private async evict(): Promise<void> {
-    this.entries.sort((a, b) => b.lastPlayedAt - a.lastPlayedAt);
+    const downloads = this.downloaded().sort((a, b) => b.lastPlayedAt - a.lastPlayedAt);
+    let bytes = downloads.reduce((sum, entry) => sum + entry.size, 0);
 
-    while (this.entries.length > 0 && this.totalBytes > this.maxBytes) {
-      const victim = this.entries.pop()!;
+    while (downloads.length > 0 && bytes > this.maxBytes) {
+      const victim = downloads.pop()!;
+      bytes -= victim.size;
+      this.entries = this.entries.filter(entry => entry !== victim);
       await this.fs.unlink(`${this.fs.dir}/${victim.file}`).catch(() => {});
     }
   }

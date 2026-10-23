@@ -1,6 +1,13 @@
 import { PermissionsAndroid, Platform } from 'react-native';
 import TrackPlayer, { Event } from 'react-native-track-player';
 import { create } from 'zustand';
+import {
+  errorCodes,
+  isErrorWithCode,
+  keepLocalCopy,
+  pick,
+  types,
+} from '@react-native-documents/picker';
 
 import type { ConnectionState } from '../core/soulseekClient';
 import type { TransferSnapshot } from '../core/transfer';
@@ -92,8 +99,19 @@ interface AppState {
   stopPlayback: () => Promise<void>;
   dismissNotice: () => void;
   /** Tracks on the device (shared with others when sharing is on). */
-  cacheStats: () => { count: number; bytes: number } | null;
-  clearCache: () => Promise<void>;
+  cacheStats: () => {
+    count: number;
+    bytes: number;
+    importedCount: number;
+    importedBytes: number;
+  } | null;
+  /** Deletes downloaded tracks, or the tracks added from the phone. */
+  clearCache: (imported?: boolean) => Promise<void>;
+  /**
+   * Opens the system file picker and adds the chosen MP3s to the shared
+   * folder. Resolves with a summary for the user, or null if cancelled.
+   */
+  importTracks: () => Promise<string | null>;
 }
 
 let service: StreamingService | null = null;
@@ -1066,10 +1084,99 @@ export const useAppStore = create<AppState>((set, get) => {
     dismissNotice: () => set({ notice: null }),
 
     cacheStats: () =>
-      trackCache ? { count: trackCache.count, bytes: trackCache.totalBytes } : null,
+      trackCache
+        ? {
+            count: trackCache.count,
+            bytes: trackCache.totalBytes,
+            importedCount: trackCache.importedCount,
+            importedBytes: trackCache.importedBytes,
+          }
+        : null,
 
-    clearCache: async () => {
-      await trackCache?.clear();
+    clearCache: async (imported = false) => {
+      await trackCache?.clear(imported);
+      service?.updateSettings(get().settings);
+    },
+
+    importTracks: async () => {
+      const cache = trackCache;
+
+      if (!cache) {
+        throw new Error('Le stockage de l’appareil est indisponible');
+      }
+
+      let picked;
+
+      try {
+        picked = await pick({ type: [types.audio], allowMultiSelection: true });
+      } catch (error) {
+        if (isErrorWithCode(error) && error.code === errorCodes.OPERATION_CANCELED) {
+          return null;
+        }
+
+        throw error;
+      }
+
+      const files = picked.filter(file => file.uri);
+
+      if (files.length === 0) {
+        return null;
+      }
+
+      debugLog('app', `ajout de ${files.length} fichier(s) au partage`);
+
+      const copies = await keepLocalCopy({
+        files: files.map(file => ({
+          uri: file.uri,
+          fileName: file.name ?? 'track.mp3',
+        })) as [{ uri: string; fileName: string }],
+        destination: 'cachesDirectory',
+      });
+
+      let added = 0;
+      let duplicates = 0;
+      const skipped: string[] = [];
+
+      for (const [index, copy] of copies.entries()) {
+        const file = files[index];
+        const name = file?.name ?? 'track.mp3';
+
+        if (copy.status !== 'success') {
+          skipped.push(`${name} (copie impossible)`);
+          debugLog('app', `copie impossible de ${name} : ${copy.copyError}`);
+          continue;
+        }
+
+        const localPath = decodeURIComponent(copy.localUri.replace(/^file:\/\//, ''));
+
+        try {
+          const result = await cache.importFile(localPath, name, file?.size ?? 0);
+
+          if (result.status === 'added') {
+            added++;
+          } else if (result.status === 'duplicate') {
+            duplicates++;
+          } else {
+            skipped.push(`${name} (${result.reason})`);
+          }
+
+          debugLog('app', `${name} : ${result.status === 'skipped' ? result.reason : result.status}`);
+        } catch (error) {
+          skipped.push(`${name} (${errorMessage(error)})`);
+          debugLog('app', `ajout impossible de ${name} : ${errorMessage(error)}`);
+        }
+      }
+
+      // Announce the new file count to the server and to peers browsing us.
+      service?.updateSettings(get().settings);
+
+      const parts = [
+        added > 0 ? `${added} morceau${added > 1 ? 'x' : ''} ajouté${added > 1 ? 's' : ''} au partage` : null,
+        duplicates > 0 ? `${duplicates} déjà présent${duplicates > 1 ? 's' : ''}` : null,
+        skipped.length > 0 ? `ignorés : ${skipped.join(', ')}` : null,
+      ].filter(Boolean);
+
+      return parts.length > 0 ? parts.join(' · ') : 'Aucun fichier ajouté';
     },
   };
 });

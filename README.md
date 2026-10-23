@@ -258,6 +258,14 @@ utilisateurs, et ils peuvent y télécharger : 1 envoi à la fois, et par défau
 uniquement en Wi-Fi. Le partage se règle dans Réglages → Partage. Un morceau
 déjà présent sur l'appareil est relu depuis le stockage, sans réseau.
 
+Pour ne pas arriver sur le réseau avec un partage vide (certains pairs
+refusent alors d'envoyer quoi que ce soit), **Réglages → Partage → Ajouter des
+morceaux** ouvre le sélecteur de fichiers d'Android : les MP3 choisis sont
+copiés dans le dossier `SoulStream` et annoncés au serveur aussitôt. Ces
+morceaux ajoutés ne sont jamais supprimés pour faire de la place, ne comptent
+pas dans la limite de 1 Go, et se retirent séparément. Les fichiers d'origine
+ne sont pas modifiés.
+
 SoulStream ne participe pas encore à l'arbre de recherche distribué : vos
 fichiers sont consultables et téléchargeables, mais n'apparaissent pas dans les
 recherches des autres.
@@ -268,8 +276,9 @@ Sources : [règles officielles](https://www.slsknet.org/rules.html),
 
 ## Limites connues
 
-- Le partage se limite aux morceaux déjà écoutés, et ils n'apparaissent pas
-  dans les recherches des autres (voir ci-dessus).
+- Le partage se limite aux morceaux écoutés et aux MP3 ajoutés à la main (des
+  copies), et ils n'apparaissent pas dans les recherches des autres (voir
+  ci-dessus).
 - Pas de connexions de pairs obfusquées (comme Nicotine+ ; SoulseekQt les
   propose). Cela peut empêcher de joindre certains pairs.
 - Pas de participation à l'arbre de recherche distribué

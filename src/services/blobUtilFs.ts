@@ -17,5 +17,6 @@ export function createBlobUtilFs(): CacheFs {
     writeText: (path, data) => fs.writeFile(path, data, 'utf8'),
     readText: path => fs.readFile(path, 'utf8'),
     unlink: path => fs.unlink(path),
+    move: (from, to) => fs.mv(from, to).then(() => undefined),
   };
 }
