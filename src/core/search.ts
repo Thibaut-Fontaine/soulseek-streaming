@@ -28,22 +28,38 @@ export function stripDiacritics(value: string): string {
   return value.normalize('NFKD').replace(/[\u0300-\u036f]/g, '');
 }
 
+/**
+ * "feat.", "ft." and "featuring" are written in many ways (or left out) by
+ * different uploaders, so they never count as words to match.
+ */
+const FEATURING = /\b(feat|ft|featuring)\b/g;
+
 /** Normalised form used by the matcher (lowercase, no accents/punctuation). */
 export function normalizeForMatch(value: string): string {
   return stripDiacritics(value)
     .toLowerCase()
     .replace(/&/g, ' and ')
     .replace(/[^a-z0-9]+/g, ' ')
+    .replace(FEATURING, ' ')
     .replace(/\s+/g, ' ')
     .trim();
 }
 
 /**
  * Formats a raw user query before it is sent to the Soulseek network.
- * Keeps the artist/title order and the meaningful words, drops the noise.
+ *
+ * Peers return a file only if every word of the query appears in its path,
+ * so the query keeps the meaningful words and drops everything that could
+ * miss or exclude a file:
+ * - noise ("official video", bitrates, bracketed tags);
+ * - dashes: a word starting with "-" means "exclude" on Soulseek, and a lone
+ *   "-" can exclude every file on some clients;
+ * - "feat." / "ft." / "featuring", written differently by each uploader;
+ * - apostrophes and one-letter leftovers ("l'amour" → "amour").
+ * Accents are kept: file names usually carry them.
  */
 export function formatSearchQuery(raw: string): string {
-  let value = stripDiacritics(raw.trim());
+  let value = raw.trim().normalize('NFC');
 
   value = value.replace(/\([^)]*\)|\[[^\]]*\]|\{[^}]*\}/g, ' ');
 
@@ -51,14 +67,17 @@ export function formatSearchQuery(raw: string): string {
     value = value.replace(pattern, ' ');
   }
 
-  value = value
-    .replace(/[_/|]+/g, ' ')
-    .replace(/\s*[-–—]\s*/g, ' - ')
-    .replace(/\s+/g, ' ')
-    .replace(/^[\s\-–—]+|[\s\-–—]+$/g, '')
-    .trim();
+  const words = value
+    .replace(/[_/|\\,;:!?"“”«»&+]+/g, ' ')
+    .replace(/['’`]/g, ' ')
+    .split(/\s+/)
+    .map(word => word.replace(/^[-–—.]+|[-–—.]+$/g, ''))
+    .filter(word => word.length > 0)
+    .filter(word => !/^(feat|ft|featuring)$/i.test(word))
+    .filter((word, index, all) => word.length > 1 || all.length === 1 || /\d/.test(word));
 
-  return value.length >= 2 ? value : raw.trim();
+  const cleaned = words.join(' ');
+  return cleaned.length >= 2 ? cleaned : raw.trim();
 }
 
 /** Levenshtein distance with a bounded input length. */
@@ -218,11 +237,16 @@ export function matchScore(query: string, hit: SearchHit): number {
   const sortedQuery = sortTokens(normalizedQuery);
   const { artist, title } = parseTrackName(hit.filename);
   const normalizedTitle = normalizeForMatch(title);
+  // The artist is often only in a folder name ("Artist/Album/01 Title.mp3",
+  // "Artist - Album (2001)/01 Title.mp3"), so the two parent folders are
+  // tried with the title too.
+  const folders = hit.filename.replace(/\\/g, '/').split('/').filter(Boolean).slice(-3, -1);
   const variants = new Set(
     [
       normalizedTitle,
       artist ? normalizeForMatch(`${artist} ${title}`) : '',
       normalizeForMatch(baseName(hit.filename).replace(/\.[^.]+$/, '')),
+      ...folders.map(folder => normalizeForMatch(`${folder} ${title}`)),
     ].filter(Boolean),
   );
 

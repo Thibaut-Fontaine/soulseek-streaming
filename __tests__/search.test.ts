@@ -29,11 +29,23 @@ describe('pre-search query formatting', () => {
   test('removes noise and preserves the meaningful title', () => {
     expect(
       formatSearchQuery('Daft Punk - One More Time (Official Video) [HD] 320kbps'),
-    ).toBe('Daft Punk - One More Time');
+    ).toBe('Daft Punk One More Time');
   });
 
-  test('handles slashes and accented characters', () => {
-    expect(formatSearchQuery('Björk / Jóga (clip officiel)')).toBe('Bjork Joga');
+  test('handles slashes and keeps accents, which file names usually carry', () => {
+    expect(formatSearchQuery('Björk / Jóga (clip officiel)')).toBe('Björk Jóga');
+  });
+
+  test('never sends a lone dash, which can exclude every file', () => {
+    expect(formatSearchQuery('Daft Punk - One More Time')).toBe('Daft Punk One More Time');
+    expect(formatSearchQuery('Muse — Uprising')).toBe('Muse Uprising');
+    expect(formatSearchQuery('Blink-182 - Dammit')).toBe('Blink-182 Dammit');
+  });
+
+  test('drops featuring markers and apostrophe leftovers', () => {
+    expect(formatSearchQuery('Drake - One Dance ft. Wizkid')).toBe('Drake One Dance Wizkid');
+    expect(formatSearchQuery("Edith Piaf - L'hymne à l'amour")).toBe('Edith Piaf hymne amour');
+    expect(formatSearchQuery('Simon & Garfunkel - The Boxer')).toBe('Simon Garfunkel The Boxer');
   });
 
   test('never returns an empty query', () => {
@@ -104,6 +116,15 @@ describe('auto-match picks the right recording', () => {
     const ranked = rankHits(query, [interview, live, junk, otherSong, studio], 0);
     expect(ranked[0].hit).toBe(studio);
     expect(ranked[0].score).toBeGreaterThanOrEqual(AUTO_MATCH_SCORE);
+  });
+
+  test('finds the artist in a folder name', () => {
+    for (const filename of [
+      'Music\\Daft Punk - Discovery (2001)\\01 - One More Time.mp3',
+      '@@share\\Daft Punk\\01. One More Time.mp3',
+    ]) {
+      expect(scoreHit(query, hit(filename))).toBeGreaterThanOrEqual(AUTO_MATCH_SCORE);
+    }
   });
 
   test('wrong files never auto-play', () => {

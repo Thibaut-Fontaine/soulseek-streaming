@@ -963,6 +963,15 @@ export const useAppStore = create<AppState>((set, get) => {
         }
 
         publishResults();
+        const top = rankHits(networkQuery, collected, 0).slice(0, 5);
+        debugLog(
+          'play',
+          top.length > 0
+            ? `meilleurs candidats : ${top
+                .map(r => `${r.score.toFixed(2)} ${r.hit.filename}`)
+                .join(' | ')} (lecture auto ≥ ${AUTO_MATCH_SCORE}, liste ≥ ${LIST_SCORE})`
+            : 'aucun MP3 reçu des pairs',
+        );
         debugLog(
           'play',
           `recherche terminée : ${collected.length} MP3 reçus, ${get().results.length} retenus, ` +
