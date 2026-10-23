@@ -24,6 +24,11 @@ La page fournit l'APK, son empreinte SHA-256, les captures d'écran et l'archive
 du code source. L'APK est signé avec une clé de développement : il s'installe
 manuellement et n'est pas destiné à une publication sur le Play Store.
 
+Une page vitrine statique, avec un grand QR code vers cette page de
+téléchargement, se trouve dans [`showcase/`](showcase/index.html). Le dossier
+est autonome (images incluses) et peut être déposé tel quel sur un hébergement
+statique. Elle s'imprime aussi comme une affiche avec le QR code au centre.
+
 ## Fonctionnalités
 
 - Connexion au serveur Soulseek avec votre compte (`server.slsknet.org:2242`).
