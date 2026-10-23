@@ -24,10 +24,26 @@ La page fournit l'APK, son empreinte SHA-256, les captures d'écran et l'archive
 du code source. L'APK est signé avec une clé de développement : il s'installe
 manuellement et n'est pas destiné à une publication sur le Play Store.
 
-Une page vitrine statique, avec un grand QR code vers cette page de
-téléchargement, se trouve dans [`showcase/`](showcase/index.html). Le dossier
-est autonome (images incluses) et peut être déposé tel quel sur un hébergement
-statique. Elle s'imprime aussi comme une affiche avec le QR code au centre.
+### Build de la branche
+
+La branche `ccr-b56e6780-ko4xxa` contient un APK construit à partir de son code,
+dans [`releases/SoulStream.apk`](releases/SoulStream.apk) (build actuelle : ARM uniquement,
+signé avec la clé de debug). Le dépôt étant privé, le téléchargement demande
+d'être connecté à GitHub avec un compte qui a accès au dépôt.
+
+La page vitrine [`showcase/`](showcase/index.html) affiche un grand QR code vers
+cet APK, avec la branche, le commit, la taille et l'empreinte SHA-256. Pour la
+mettre à jour après une nouvelle build :
+
+```bash
+cd android && ./gradlew assembleRelease && cd ..
+node tools/showcase.mjs android/app/build/outputs/apk/release/app-release.apk
+git add releases showcase && git commit -m "build: refresh branch APK"
+```
+
+Le script copie l'APK dans `releases/` et régénère le QR code et les
+informations de build. Il refuse de tourner s'il reste des modifications non
+commitées dans le code de l'application.
 
 ## Fonctionnalités
 
