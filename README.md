@@ -1,7 +1,8 @@
 # SoulStream
 
 Application **React Native (iOS / Android)** de streaming musical qui utilise le
-réseau pair-à-pair **Soulseek**. Recherchez un morceau, choisissez une source,
+réseau pair-à-pair **Soulseek**. Dépôt :
+[Thibaut-Fontaine/soulseek-streaming](https://github.com/Thibaut-Fontaine/soulseek-streaming). Recherchez un morceau, choisissez une source,
 et écoutez-le pendant que les octets arrivent du pair — sans serveur central de
 streaming.
 
