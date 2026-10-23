@@ -61,6 +61,7 @@ function PlayerContent() {
   const setTab = useAppStore(state => state.setTab);
   const stopPlayback = useAppStore(state => state.stopPlayback);
   const retryPlayback = useAppStore(state => state.retryPlayback);
+  const playNextSource = useAppStore(state => state.playNextSource);
   const reconnect = useAppStore(state => state.reconnect);
 
   const { width } = useWindowDimensions();
@@ -100,7 +101,11 @@ function PlayerContent() {
       : hit.durationSec ?? 0;
   const position = Number.isFinite(progress.position) ? progress.position : 0;
   const total = transfer?.size || hit.size || 0;
-  const receivedRatio = transfer?.state === 'complete' ? 1 : percent(transfer?.received ?? 0, total);
+  // A track played from the device is fully available.
+  const receivedRatio =
+    current.source === 'cache' || transfer?.state === 'complete'
+      ? 1
+      : percent(transfer?.received ?? 0, total);
 
   const seekTo = async (seconds: number) => {
     try {
@@ -137,8 +142,7 @@ function PlayerContent() {
     actions.map(action => {
       switch (action) {
         case 'next-source':
-          // TODO(wire): playHit(next candidate) once the store keeps results.
-          return { label: 'Autre source', icon: 'swap', onPress: () => setTab('search') };
+          return { label: 'Autre source', icon: 'swap', onPress: () => void playNextSource() };
         case 'learn-more':
           return {
             label: ACTION_LABELS[action],
@@ -194,7 +198,7 @@ function PlayerContent() {
             bufferTarget={current.bufferTarget}
             speed={speed}
             onCancel={stopPlayback}
-            onOtherSource={() => setTab('search')}
+            onOtherSource={() => void playNextSource()}
           />
         ) : (
           <>
@@ -251,7 +255,30 @@ function PlayerContent() {
           />
         ) : null}
 
-        <SourceChip hit={hit} transfer={transfer} speed={speed} />
+        {current.warning && !failure ? (
+          <StatusCard
+            tone="warn"
+            icon="offline"
+            title={`Source coupée à ${Math.round(receivedRatio * 100)} %`}
+            body="La lecture continue avec ce qui a déjà été reçu."
+            actions={[
+              { label: 'Autre source', icon: 'swap', onPress: () => void playNextSource() },
+            ]}
+            style={styles.card}
+          />
+        ) : null}
+
+        {current.source === 'cache' ? (
+          <StatusCard
+            tone="good"
+            icon="check"
+            title="Sur l’appareil"
+            body="Ce morceau a déjà été écouté : il est lu depuis le stockage, sans réseau."
+            style={styles.card}
+          />
+        ) : (
+          <SourceChip hit={hit} transfer={transfer} speed={speed} />
+        )}
 
         <View style={styles.foot}>
           <Button label="Arrêter" icon="stop" size="sm" variant="ghost" onPress={stopPlayback} />
@@ -303,7 +330,6 @@ function PreparingCard({
           icon="clock"
           title={`En file chez le pair · position ${queuePosition}`}
           body="Ce pair n’a pas de slot libre ; l’attente peut être longue."
-          // TODO(wire): "Essayer @other" with the count of free alternatives.
           actions={[
             { label: 'Autre source', icon: 'swap', onPress: onOtherSource, variant: 'accent' },
             { label: 'Attendre', onPress: noop },

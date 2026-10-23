@@ -46,7 +46,7 @@ function Root() {
       if (
         nextState === 'active' &&
         username &&
-        (connection === 'disconnected' || connection === 'error')
+        (connection === 'disconnected' || connection === 'error' || connection === 'reconnecting')
       ) {
         void reconnect();
       }

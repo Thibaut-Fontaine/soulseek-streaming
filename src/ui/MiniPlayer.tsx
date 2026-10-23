@@ -35,7 +35,9 @@ export function MiniPlayer() {
   const title = displayTitle(hit.filename);
   const received = transfer?.received ?? 0;
   const receivedRatio =
-    transfer?.state === 'complete' ? 1 : percent(received, transfer?.size || hit.size);
+    current.source === 'cache' || transfer?.state === 'complete'
+      ? 1
+      : percent(received, transfer?.size || hit.size);
   const playbackRatio = progress.duration > 0 ? percent(progress.position, progress.duration) : 0;
 
   const toggle = async () => {
@@ -69,7 +71,12 @@ export function MiniPlayer() {
         : transfer?.state === 'streaming'
           ? `Mise en mémoire · ${formatBytes(Math.min(received, current.bufferTarget))} / ${formatBytes(current.bufferTarget)}`
           : 'Connexion au pair…'
-      : [`@${hit.username}`, hit.bitrate ? `${hit.bitrate} kb/s` : null].filter(Boolean).join(' · ');
+      : [
+          current.source === 'cache' ? 'Sur l’appareil' : `@${hit.username}`,
+          hit.bitrate ? `${hit.bitrate} kb/s` : null,
+        ]
+          .filter(Boolean)
+          .join(' · ');
 
   return (
     <View style={styles.wrap}>

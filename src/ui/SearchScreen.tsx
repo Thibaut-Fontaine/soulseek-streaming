@@ -2,7 +2,7 @@ import React from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import { formatSearchQuery } from '../core/search';
-import { displayArtist, displayTitle } from '../core/types';
+import { displayArtist, displayTitle, hitKey } from '../core/types';
 import type { SearchHit } from '../core/types';
 import { useAppStore } from '../state/store';
 import type { CurrentPlayback } from '../state/store';
@@ -20,7 +20,7 @@ import type { CardAction } from './components';
 import { ACTION_LABELS, describePlaybackError } from './errors';
 import type { ErrorAction } from './errors';
 import { Icon } from './Icon';
-import { PeerBadges } from './peer';
+import { PeerBadges, SourcesList } from './peer';
 import { colors, coverSeed, gutter, percent, radius, spacing, type } from './theme';
 
 export function SearchScreen() {
@@ -36,6 +36,10 @@ export function SearchScreen() {
   const runSearch = useAppStore(state => state.runSearch);
   const cancelSearch = useAppStore(state => state.cancelSearch);
   const reconnect = useAppStore(state => state.reconnect);
+  const results = useAppStore(state => state.results);
+  const playHit = useAppStore(state => state.playHit);
+  const playNextSource = useAppStore(state => state.playNextSource);
+  const resultHits = React.useMemo(() => results.map(ranked => ranked.hit), [results]);
 
   const online = connection === 'online';
   const activeHit = current?.hit ?? matchHit;
@@ -52,6 +56,10 @@ export function SearchScreen() {
       switch (action) {
         case 'reconnect':
           return [{ label: ACTION_LABELS.reconnect, onPress: () => void reconnect() }];
+        case 'next-source':
+          return current && results.length > 1
+            ? [{ label: ACTION_LABELS[action], onPress: () => void playNextSource() }]
+            : [];
         case 'retry':
         case 'relaunch-search':
           return canSearch ? [{ label: ACTION_LABELS[action], onPress: submit }] : [];
@@ -167,9 +175,16 @@ export function SearchScreen() {
 
       <View style={styles.body}>{body}</View>
 
-      {/* TODO(wire): store.results — render <SourcesList hits={results}
-          currentKey={current && hitKey(current.hit)} onPick={playHit} /> under a
-          "Morceaux" SectionHeader once the store retains search batches. */}
+      {resultHits.length > 0 ? (
+        <>
+          <SectionHeader title="Morceaux" />
+          <SourcesList
+            hits={resultHits}
+            currentKey={current && current.source === 'network' ? hitKey(current.hit) : null}
+            onPick={hit => void playHit(hit)}
+          />
+        </>
+      ) : null}
     </ScrollView>
   );
 }
@@ -177,6 +192,8 @@ export function SearchScreen() {
 function BestSource({ hit, current }: { hit: SearchHit; current: CurrentPlayback | null }) {
   const setTab = useAppStore(state => state.setTab);
   const retryPlayback = useAppStore(state => state.retryPlayback);
+  const playNextSource = useAppStore(state => state.playNextSource);
+  const hasAlternatives = useAppStore(state => state.results.length > 1);
   const received = useAppStore(state =>
     state.current ? state.transfers[state.current.transferId]?.received ?? 0 : 0,
   );
@@ -187,12 +204,20 @@ function BestSource({ hit, current }: { hit: SearchHit; current: CurrentPlayback
   const phase = current?.phase ?? 'preparing';
   const failure = phase === 'error' ? describePlaybackError(current?.error) : null;
 
+  const fromDevice = current?.source === 'cache';
+  const fallback = current?.fallback;
+  const preparing = `Préparation · ${Math.round(percent(received, current?.bufferTarget ?? 1) * 100)} %`;
+
   const status =
     phase === 'playing'
-      ? `Lecture lancée · @${hit.username}`
+      ? fromDevice
+        ? 'Lecture depuis l’appareil'
+        : `Lecture lancée · @${hit.username}`
       : phase === 'error'
         ? failure?.title ?? 'Lecture interrompue'
-        : `Préparation · ${Math.round(percent(received, current?.bufferTarget ?? 1) * 100)} %`;
+        : fallback
+          ? `@${fallback.username} indisponible → source ${current?.attempt ?? 2} · ${preparing}`
+          : preparing;
 
   return (
     <>
@@ -224,8 +249,15 @@ function BestSource({ hit, current }: { hit: SearchHit; current: CurrentPlayback
           {phase === 'error' ? (
             <Button label="Réessayer" icon="refresh" size="sm" variant="ghost" onPress={retryPlayback} />
           ) : null}
-          {/* TODO(wire): "Autre source" (icon swap) → playHit(next candidate of
-              the same group) once the store keeps results. */}
+          {!fromDevice && hasAlternatives ? (
+            <Button
+              label="Autre source"
+              icon="swap"
+              size="sm"
+              variant="ghost"
+              onPress={() => void playNextSource()}
+            />
+          ) : null}
         </View>
       </Pressable>
       {failure ? <Text style={styles.bestHint}>{failure.body}</Text> : null}

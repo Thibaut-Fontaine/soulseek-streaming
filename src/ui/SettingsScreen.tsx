@@ -1,5 +1,6 @@
 import React from 'react';
 import {
+  Switch,
   Alert,
   KeyboardAvoidingView,
   Platform,
@@ -17,7 +18,7 @@ import type { Settings } from '../services/settings';
 import { useAppStore } from '../state/store';
 import { Button, Dot, ListRow, StepSlider, connectionStatus } from './components';
 import { Icon } from './Icon';
-import { colors, gutter, radius, spacing, type } from './theme';
+import { colors, formatBytes, gutter, radius, spacing, type } from './theme';
 
 /** Buffer sizes offered by the slider, within the 0.25–64 MB bounds of `loadSettings`. */
 const BUFFER_STEPS = [0.25, 0.5, 1, 2, 4, 8, 16, 32, 64] as const;
@@ -67,6 +68,32 @@ function MainSettings({ onOpenNetwork }: { onOpenNetwork: () => void }) {
   const listenPort = useAppStore(state => state.listenPort);
   const httpPort = useAppStore(state => state.httpPort);
   const logout = useAppStore(state => state.logout);
+  const cacheStats = useAppStore(state => state.cacheStats);
+  const clearCache = useAppStore(state => state.clearCache);
+  // Recomputed on each render; the settings screen is small.
+  const stats = cacheStats();
+  const [, refresh] = React.useReducer((n: number) => n + 1, 0);
+
+  const toggle = (patch: Partial<Settings>) => {
+    void applySettings({ ...settings, ...patch });
+  };
+
+  const confirmClear = () => {
+    Alert.alert(
+      'Vider les morceaux enregistrés',
+      'Les morceaux déjà écoutés seront supprimés de l’appareil et ne seront plus partagés.',
+      [
+        { text: 'Annuler', style: 'cancel' },
+        {
+          text: 'Vider',
+          style: 'destructive',
+          onPress: () => {
+            void clearCache().then(refresh);
+          },
+        },
+      ],
+    );
+  };
 
   // Index picked on the slider; null until the user moves it, so a stored
   // value between two steps (e.g. 3 Mo) is shown as is and not rewritten.
@@ -153,7 +180,46 @@ function MainSettings({ onOpenNetwork }: { onOpenNetwork: () => void }) {
             />
           ) : null}
         </View>
-        {/* TODO(wire): auto-fallback toggle and minimum bitrate (phase 2). */}
+      </View>
+
+      <Text style={styles.groupTitle}>Partage</Text>
+      <View style={styles.group}>
+        <ListRow
+          icon="peer"
+          title="Partager les morceaux écoutés"
+          subtitle="Beaucoup de pairs refusent d’envoyer à ceux qui ne partagent rien."
+          right={
+            <Switch
+              value={settings.shareEnabled}
+              onValueChange={value => toggle({ shareEnabled: value })}
+              trackColor={{ true: colors.accent, false: colors.surfaceHigh }}
+              accessibilityLabel="Partager les morceaux écoutés"
+            />
+          }
+        />
+        <ListRow
+          title="Envoyer uniquement en Wi-Fi"
+          subtitle="Évite d’utiliser les données mobiles pour les autres."
+          right={
+            <Switch
+              value={settings.shareWifiOnly}
+              onValueChange={value => toggle({ shareWifiOnly: value })}
+              disabled={!settings.shareEnabled}
+              trackColor={{ true: colors.accent, false: colors.surfaceHigh }}
+              accessibilityLabel="Envoyer uniquement en Wi-Fi"
+            />
+          }
+        />
+        <ListRow
+          title="Morceaux sur l’appareil"
+          value={stats ? `${stats.count} · ${formatBytes(stats.bytes)}` : '—'}
+        />
+        <ListRow
+          title="Vider les morceaux enregistrés"
+          onPress={confirmClear}
+          danger
+          last
+        />
       </View>
 
       <Text style={styles.groupTitle}>Réseau</Text>

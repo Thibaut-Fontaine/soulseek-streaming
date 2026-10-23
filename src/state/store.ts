@@ -714,9 +714,23 @@ export const useAppStore = create<AppState>((set, get) => {
     },
 
     applySettings: async (settings: Settings) => {
+      const previous = get().settings;
       await saveSettings(settings);
       set({ settings });
       trackCache?.setLimit(settings.cacheMb * 1024 * 1024);
+
+      // Only server and port changes need a new connection; the rest applies
+      // live, without stopping the music.
+      const networkChanged =
+        settings.serverHost !== previous.serverHost ||
+        settings.serverPort !== previous.serverPort ||
+        settings.listenPort !== previous.listenPort ||
+        settings.streamPort !== previous.streamPort;
+
+      if (!networkChanged) {
+        service?.updateSettings(settings);
+        return;
+      }
 
       const currentUsername = get().username;
 

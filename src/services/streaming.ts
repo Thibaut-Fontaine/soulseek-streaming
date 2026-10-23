@@ -11,6 +11,7 @@ import type { Transport } from '../transport/types';
 import { contentTypeFor, RangeHttpServer } from '../stream/httpServer';
 import type { Settings } from './settings';
 import type { TrackCache } from './trackCache';
+import type { ShareLibrary } from '../core/uploads';
 
 export interface PreparedStream {
   url: string;
@@ -35,7 +36,7 @@ export class StreamingService {
   readonly events = new Emitter<StreamingEvents>();
 
   private readonly transport: Transport;
-  private readonly settings: Settings;
+  private settings: Settings;
   private client: SoulseekClient | null = null;
   private http: RangeHttpServer | null = null;
   private onUnmeteredNetwork = false;
@@ -58,6 +59,20 @@ export class StreamingService {
   ) {
     this.settings = settings;
     this.transport = transport ?? new ReactNativeTransport();
+  }
+
+  /** Applies settings that need no reconnection (sharing, buffer). */
+  updateSettings(settings: Settings): void {
+    this.settings = settings;
+    this.client?.refreshShares();
+  }
+
+  /** The cache as seen by others: empty while sharing is off. */
+  private sharedLibrary(cache: TrackCache): ShareLibrary {
+    return {
+      files: () => (this.settings.shareEnabled ? cache.files() : []),
+      open: path => (this.settings.shareEnabled ? cache.open(path) : Promise.resolve(null)),
+    };
   }
 
   /** Uploads are allowed when sharing is on and, if asked, on Wi-Fi only. */
@@ -110,7 +125,7 @@ export class StreamingService {
       listenPort: this.settings.listenPort,
       serverHost: this.settings.serverHost,
       serverPort: this.settings.serverPort,
-      shares: this.settings.shareEnabled && this.cache ? this.cache : undefined,
+      shares: this.cache ? this.sharedLibrary(this.cache) : undefined,
       canUpload: () => this.canUpload(),
       description: 'SoulStream : je partage les morceaux que j’écoute.',
     });

@@ -229,11 +229,17 @@ En revanche, la communauté l'attend fortement :
   utilisent une détection de « leech » ; ils peuvent refuser ou bloquer les
   utilisateurs qui ne partagent rien.
 
-SoulStream ne partage pas encore de fichiers. C'est une limite assumée de cette
-version : certains pairs peuvent refuser vos téléchargements, et l'application
-ne respecte pas encore la panoplie complète attendue par les règles du réseau.
-L'ajout du partage (liste de fichiers + upload) est la priorité de la prochaine
-version.
+SoulStream partage les morceaux que vous avez déjà écoutés. Chaque
+téléchargement terminé est gardé sur l'appareil (1 Go par défaut, les moins
+récemment écoutés sont supprimés en premier). Ce dossier `SoulStream` est
+déclaré au serveur (`SharedFoldersFiles`), il est consultable par les autres
+utilisateurs, et ils peuvent y télécharger : 1 envoi à la fois, et par défaut
+uniquement en Wi-Fi. Le partage se règle dans Réglages → Partage. Un morceau
+déjà présent sur l'appareil est relu depuis le stockage, sans réseau.
+
+SoulStream ne participe pas encore à l'arbre de recherche distribué : vos
+fichiers sont consultables et téléchargeables, mais n'apparaissent pas dans les
+recherches des autres.
 
 Sources : [règles officielles](https://www.slsknet.org/rules.html),
 [FAQ](https://www.slsknet.org/news/faq-page) et
@@ -241,13 +247,17 @@ Sources : [règles officielles](https://www.slsknet.org/rules.html),
 
 ## Limites connues
 
-- Pas d'upload ni de partage de fichiers pour l'instant (voir ci-dessus).
+- Le partage se limite aux morceaux déjà écoutés, et ils n'apparaissent pas
+  dans les recherches des autres (voir ci-dessus).
 - Pas de connexions de pairs obfusquées (comme Nicotine+ ; SoulseekQt les
   propose). Cela peut empêcher de joindre certains pairs.
 - Pas de participation à l'arbre de recherche distribué
   (`HaveNoParent`/`AcceptChildren` sont envoyés pour rester léger).
 - Un seul morceau en streaming à la fois.
-- La recherche dure 20 secondes ; les réponses tardives sont ignorées.
+- La recherche dure au plus 10 secondes, et s'arrête 4 secondes après le
+  premier bon résultat ; les réponses tardives sont ignorées.
+- Si une source refuse, met en file d'attente ou ne répond pas, la suivante
+  est essayée automatiquement (jusqu'à 5 sources).
 - Le déplacement dans un morceau n'est possible que dans les octets déjà reçus ;
   au-delà, le lecteur attend que le téléchargement rattrape sa position.
 - L'application ne redémarre pas le transfert à un offset arbitraire : le

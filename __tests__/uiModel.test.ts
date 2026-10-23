@@ -105,7 +105,8 @@ describe('groupSources', () => {
     expect(groups).toHaveLength(2);
     expect(groups[0].hits.map(h => h.username)).toEqual(['fast', 'slow']);
     expect(groups[0].allQueued).toBe(false);
-    expect(groups[1].title).toBe('Radiohead - Fake Plastic Trees (Live)');
+    // Titles are shown without the artist, which is displayed separately.
+    expect(groups[1].title).toBe('Fake Plastic Trees (Live)');
   });
 });
 
