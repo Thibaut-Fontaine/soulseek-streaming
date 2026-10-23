@@ -1,19 +1,27 @@
 import React from 'react';
-import {
-  ActivityIndicator,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  View,
-} from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import { formatSearchQuery } from '../core/search';
 import { displayArtist, displayTitle } from '../core/types';
+import type { SearchHit } from '../core/types';
 import { useAppStore } from '../state/store';
-import { CoverArt } from './components';
-import { colors, spacing } from './theme';
+import type { CurrentPlayback } from '../state/store';
+import {
+  Button,
+  ConnectionPill,
+  CoverArt,
+  EmptyState,
+  ScanBar,
+  SectionHeader,
+  StatusCard,
+  TrackGradient,
+} from './components';
+import type { CardAction } from './components';
+import { ACTION_LABELS, describePlaybackError } from './errors';
+import type { ErrorAction } from './errors';
+import { Icon } from './Icon';
+import { PeerBadges } from './peer';
+import { colors, coverSeed, gutter, percent, radius, spacing, type } from './theme';
 
 export function SearchScreen() {
   const query = useAppStore(state => state.query);
@@ -27,30 +35,81 @@ export function SearchScreen() {
   const connection = useAppStore(state => state.connection);
   const runSearch = useAppStore(state => state.runSearch);
   const cancelSearch = useAppStore(state => state.cancelSearch);
-  const retryPlayback = useAppStore(state => state.retryPlayback);
-  const setTab = useAppStore(state => state.setTab);
+  const reconnect = useAppStore(state => state.reconnect);
 
   const online = connection === 'online';
   const activeHit = current?.hit ?? matchHit;
-  const formattedQuery = formatSearchQuery(query);
   const canSearch = online && query.trim().length > 0;
 
   const submit = () => {
-    if (searching) {
-      cancelSearch();
-      return;
-    }
-
     if (canSearch) {
       void runSearch();
     }
   };
 
-  const submitFromKeyboard = () => {
-    if (canSearch) {
-      void runSearch();
-    }
-  };
+  const errorActions = (actions: ErrorAction[]): CardAction[] =>
+    actions.flatMap(action => {
+      switch (action) {
+        case 'reconnect':
+          return [{ label: ACTION_LABELS.reconnect, onPress: () => void reconnect() }];
+        case 'retry':
+        case 'relaunch-search':
+          return canSearch ? [{ label: ACTION_LABELS[action], onPress: submit }] : [];
+        default:
+          return [];
+      }
+    });
+
+  let body: React.ReactNode;
+
+  if (!online) {
+    body = (
+      <StatusCard
+        tone="warn"
+        icon="offline"
+        title="Hors ligne"
+        body="La recherche reprendra dès que la connexion Soulseek sera rétablie."
+        actions={
+          connection === 'disconnected' || connection === 'error'
+            ? [{ label: ACTION_LABELS.reconnect, onPress: () => void reconnect() }]
+            : undefined
+        }
+      />
+    );
+  } else if (searching) {
+    body = null;
+  } else if (searchError) {
+    const described = describePlaybackError(searchError);
+    body = (
+      <StatusCard
+        tone={described.tone}
+        icon={described.icon}
+        title={matchHit ? described.title : 'Recherche impossible'}
+        body={matchHit ? described.body : searchError}
+        actions={errorActions(matchHit ? described.actions : ['retry'])}
+      />
+    );
+  } else if (searchEmpty) {
+    body = (
+      <StatusCard
+        tone="info"
+        icon="search"
+        title="Aucun MP3 convaincant"
+        body={`Rien de convaincant pour « ${query} ». Essayez « artiste titre », sans le nom de l’album, ou une autre orthographe.`}
+        actions={errorActions(['relaunch-search'])}
+      />
+    );
+  } else if (activeHit) {
+    body = <BestSource hit={activeHit} current={current} />;
+  } else {
+    body = (
+      <EmptyState
+        icon="music"
+        title="Tapez un titre pour lancer la lecture"
+        body="SoulStream choisit le MP3 qui correspond le mieux, le précharge en arrière-plan et démarre sans écran intermédiaire."
+      />
+    );
+  }
 
   return (
     <ScrollView
@@ -59,173 +118,118 @@ export function SearchScreen() {
       keyboardShouldPersistTaps="handled"
       showsVerticalScrollIndicator={false}>
       <View style={styles.header}>
-        <Text style={styles.title}>Écoute</Text>
-        <Text style={styles.subtitle}>
-          Un titre, un MP3 : on trouve la meilleure source et ça joue.
+        <Text style={styles.title} accessibilityRole="header">
+          Rechercher
         </Text>
+        <ConnectionPill connection={connection} />
       </View>
 
-      <View style={styles.searchCard}>
-        <View style={styles.inputRow}>
-          <Text style={styles.searchGlyph}>⌕</Text>
-          <TextInput
-            value={query}
-            onChangeText={setQuery}
-            placeholder="Artiste, titre, album…"
-            placeholderTextColor={colors.textDim}
-            autoCapitalize="none"
-            autoCorrect={false}
-            returnKeyType="search"
-            onSubmitEditing={submitFromKeyboard}
-            style={styles.input}
-          />
-          {query.length > 0 ? (
-            <Pressable
-              accessibilityLabel="Effacer la recherche"
-              onPress={() => setQuery('')}
-              hitSlop={10}
-              style={styles.clearButton}>
-              <Text style={styles.clearText}>×</Text>
-            </Pressable>
-          ) : null}
-        </View>
-
-        <Pressable
-          accessibilityRole="button"
-          onPress={submit}
-          disabled={!searching && !canSearch}
-          style={({ pressed }) => [
-            styles.action,
-            !searching && !canSearch && styles.actionDisabled,
-            pressed && { opacity: 0.85 },
-          ]}>
-          {searching ? (
-            <View style={styles.actionContent}>
-              <ActivityIndicator size="small" color="#ffffff" />
-              <Text style={styles.actionText}>Arrêter</Text>
-            </View>
-          ) : (
-            <View style={styles.actionContent}>
-              <Text style={styles.actionGlyph}>▶</Text>
-              <Text style={styles.actionText}>Écouter</Text>
-            </View>
-          )}
-        </Pressable>
-
-        <View style={styles.policyRow}>
-          <Text style={styles.policy}>MP3 uniquement</Text>
-          <View style={styles.policyDot} />
-          <Text style={styles.policy}>démarrage quasi instantané</Text>
-        </View>
+      <View style={styles.field}>
+        <Icon name="search" size={22} color={colors.searchFieldText} />
+        <TextInput
+          value={query}
+          onChangeText={setQuery}
+          placeholder="Artiste, titre…"
+          placeholderTextColor={colors.searchFieldPlaceholder}
+          autoCapitalize="none"
+          autoCorrect={false}
+          returnKeyType="search"
+          onSubmitEditing={submit}
+          style={styles.input}
+          accessibilityLabel="Rechercher un morceau"
+        />
+        {query.length > 0 ? (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Effacer la recherche"
+            onPress={() => setQuery('')}
+            hitSlop={10}>
+            <Icon name="x" size={20} color={colors.searchFieldPlaceholder} />
+          </Pressable>
+        ) : null}
       </View>
 
-      {!online ? (
-        <View style={styles.infoCard}>
-          <Text style={styles.infoTitle}>Hors ligne</Text>
-          <Text style={styles.infoBody}>
-            La recherche reprendra dès que la connexion Soulseek sera rétablie.
-          </Text>
-        </View>
-      ) : searching ? (
-        <View style={styles.searchingCard}>
-          <View style={styles.searchingHeader}>
-            <ActivityIndicator size="small" color={colors.accentBright} />
-            <Text style={styles.searchingTitle}>Recherche du meilleur MP3…</Text>
-          </View>
-          <Text style={styles.queryPreview} numberOfLines={1}>
-            {searchQuery || formattedQuery || query}
-          </Text>
-          <Text style={styles.searchingHint}>
-            On s’arrête dès qu’un match suffisant est trouvé.
-          </Text>
-        </View>
-      ) : searchError ? (
-        <View style={styles.errorCard}>
-          <Text style={styles.errorTitle}>
-            {matchHit ? 'Lecture impossible' : 'Recherche impossible'}
-          </Text>
-          <Text style={styles.errorBody}>{searchError}</Text>
-          {canSearch ? (
-            <Pressable onPress={() => void runSearch()} style={styles.retryButton}>
-              <Text style={styles.retryText}>Réessayer</Text>
-            </Pressable>
-          ) : null}
-        </View>
-      ) : searchEmpty ? (
-        <View style={styles.infoCard}>
-          <Text style={styles.infoTitle}>Aucun MP3 trouvé</Text>
-          <Text style={styles.infoBody}>
-            Rien de convaincant pour « {query} ». Essaie avec l’artiste et le titre,
-            ou une autre orthographe.
-          </Text>
-          {canSearch ? (
-            <Pressable onPress={() => void runSearch()} style={styles.retryButton}>
-              <Text style={styles.retryText}>Relancer</Text>
-            </Pressable>
-          ) : null}
-        </View>
-      ) : activeHit && current?.phase === 'playing' ? (
-        <Pressable
-          accessibilityRole="button"
-          onPress={() => setTab('player')}
-          style={({ pressed }) => [styles.playingRow, pressed && { opacity: 0.8 }]}>
-          <View style={styles.playingDot} />
-          <Text style={styles.playingText}>
-            En lecture · {displayTitle(activeHit.filename)}
-          </Text>
-          <Text style={styles.playingOpen}>Ouvrir</Text>
-        </Pressable>
-      ) : activeHit ? (
-        <Pressable
-          accessibilityRole="button"
-          onPress={() => setTab('player')}
-          style={({ pressed }) => [styles.nowCard, pressed && { opacity: 0.9 }]}>
-          <CoverArt
-            seed={`${activeHit.username}:${activeHit.filename}`}
-            title={displayTitle(activeHit.filename)}
-            size={64}
-          />
-          <View style={styles.nowBody}>
-            <Text
-              style={[
-                styles.nowEyebrow,
-                current?.phase === 'error' && { color: colors.danger },
-              ]}>
-              {current?.phase === 'error' ? 'LECTURE INTERROMPUE' : 'MATCH TROUVÉ'}
-            </Text>
-            <Text style={styles.nowTitle} numberOfLines={2}>
-              {displayTitle(activeHit.filename)}
-            </Text>
-            <Text style={styles.nowArtist} numberOfLines={1}>
-              {displayArtist(activeHit) ?? activeHit.username}
-            </Text>
-            <Text style={styles.nowMeta} numberOfLines={1}>
-              {!current || current.phase === 'preparing'
-                ? 'Préparation du flux…'
-                : current.phase === 'error'
-                  ? current.error ?? 'Le flux n’a pas pu démarrer'
-                  : 'Touchez pour ouvrir le lecteur'}
-            </Text>
-          </View>
-          <Text style={styles.chevron}>›</Text>
-        </Pressable>
-      ) : (
-        <View style={styles.idleCard}>
-          <Text style={styles.idleGlyph}>♫</Text>
-          <Text style={styles.idleTitle}>Tape un titre pour lancer la lecture</Text>
-          <Text style={styles.idleBody}>
-            SoulStream choisit le premier MP3 qui correspond, le précharge en
-            arrière-plan et démarre sans autre écran intermédiaire.
-          </Text>
-        </View>
-      )}
+      <View style={styles.statusRow}>
+        <Text style={styles.statusText} numberOfLines={1}>
+          {searching
+            ? `Recherche de « ${searchQuery || formatSearchQuery(query) || query} »…`
+            : 'MP3 uniquement · démarrage quasi instantané'}
+        </Text>
+        {searching ? (
+          <Pressable onPress={cancelSearch} hitSlop={8} accessibilityRole="button">
+            <Text style={styles.statusAction}>Arrêter</Text>
+          </Pressable>
+        ) : canSearch ? (
+          <Button label="Écouter" icon="play" size="sm" onPress={submit} />
+        ) : null}
+      </View>
+      <ScanBar active={searching} />
 
-      {current?.phase === 'error' ? (
-        <Pressable onPress={retryPlayback} style={styles.retryButton}>
-          <Text style={styles.retryText}>Réessayer la lecture</Text>
-        </Pressable>
-      ) : null}
+      <View style={styles.body}>{body}</View>
+
+      {/* TODO(wire): store.results — render <SourcesList hits={results}
+          currentKey={current && hitKey(current.hit)} onPick={playHit} /> under a
+          "Morceaux" SectionHeader once the store retains search batches. */}
     </ScrollView>
+  );
+}
+
+function BestSource({ hit, current }: { hit: SearchHit; current: CurrentPlayback | null }) {
+  const setTab = useAppStore(state => state.setTab);
+  const retryPlayback = useAppStore(state => state.retryPlayback);
+  const received = useAppStore(state =>
+    state.current ? state.transfers[state.current.transferId]?.received ?? 0 : 0,
+  );
+
+  const title = displayTitle(hit.filename);
+  const artist = displayArtist(hit) ?? hit.username;
+  const seed = coverSeed(hit);
+  const phase = current?.phase ?? 'preparing';
+  const failure = phase === 'error' ? describePlaybackError(current?.error) : null;
+
+  const status =
+    phase === 'playing'
+      ? `Lecture lancée · @${hit.username}`
+      : phase === 'error'
+        ? failure?.title ?? 'Lecture interrompue'
+        : `Préparation · ${Math.round(percent(received, current?.bufferTarget ?? 1) * 100)} %`;
+
+  return (
+    <>
+      <SectionHeader title="Meilleure source" style={styles.sectionFirst} />
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={`Ouvrir le lecteur : ${title}`}
+        onPress={() => setTab('player')}
+        style={({ pressed }) => [styles.best, pressed && styles.pressed]}>
+        <TrackGradient seed={seed} strength={0.55} />
+        <View style={styles.bestRow}>
+          <CoverArt seed={seed} title={title} size={88} />
+          <View style={styles.bestText}>
+            <Text style={styles.bestTitle} numberOfLines={2}>
+              {title}
+            </Text>
+            <Text style={styles.bestArtist} numberOfLines={1}>
+              {artist}
+            </Text>
+            <PeerBadges hit={hit} long style={styles.bestBadges} />
+          </View>
+        </View>
+        <View style={styles.bestFooter}>
+          <Text
+            style={[styles.bestStatus, phase === 'error' && styles.bestStatusError]}
+            numberOfLines={1}>
+            {status}
+          </Text>
+          {phase === 'error' ? (
+            <Button label="Réessayer" icon="refresh" size="sm" variant="ghost" onPress={retryPlayback} />
+          ) : null}
+          {/* TODO(wire): "Autre source" (icon swap) → playHit(next candidate of
+              the same group) once the store keeps results. */}
+        </View>
+      </Pressable>
+      {failure ? <Text style={styles.bestHint}>{failure.body}</Text> : null}
+    </>
   );
 }
 
@@ -234,273 +238,111 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   content: {
-    paddingHorizontal: spacing.lg,
-    paddingTop: spacing.md,
-    paddingBottom: spacing.xxl,
-    gap: spacing.md,
+    paddingHorizontal: gutter,
+    paddingTop: spacing.sm,
+    paddingBottom: spacing.xxxl,
   },
   header: {
-    paddingVertical: spacing.sm,
-  },
-  title: {
-    color: colors.text,
-    fontSize: 32,
-    fontWeight: '800',
-    letterSpacing: -0.8,
-  },
-  subtitle: {
-    color: colors.textMuted,
-    fontSize: 14,
-    lineHeight: 20,
-    marginTop: 4,
-    maxWidth: 330,
-  },
-  searchCard: {
-    backgroundColor: colors.card,
-    borderRadius: 20,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.border,
-    padding: spacing.lg,
-    gap: spacing.md,
-  },
-  inputRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: colors.bgSoft,
-    borderRadius: 14,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.border,
-    paddingHorizontal: 12,
-    height: 54,
+    justifyContent: 'space-between',
+    paddingTop: spacing.sm,
   },
-  searchGlyph: {
-    color: colors.textDim,
-    fontSize: 26,
-    marginRight: 8,
-    marginTop: -3,
+  title: {
+    ...type.title,
+    color: colors.text,
+  },
+  field: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    height: 46,
+    marginTop: spacing.md,
+    paddingHorizontal: spacing.md,
+    borderRadius: radius.sm,
+    backgroundColor: colors.searchField,
   },
   input: {
     flex: 1,
-    color: colors.text,
-    fontSize: 16,
+    color: colors.searchFieldText,
+    fontSize: 15,
+    fontWeight: '600',
     paddingVertical: 0,
   },
-  clearButton: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    backgroundColor: colors.cardAlt,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  clearText: {
-    color: colors.textMuted,
-    fontSize: 18,
-    lineHeight: 20,
-  },
-  action: {
-    height: 54,
-    borderRadius: 14,
-    backgroundColor: colors.accent,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  actionDisabled: {
-    opacity: 0.4,
-  },
-  actionContent: {
+  statusRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 9,
-  },
-  actionGlyph: {
-    color: '#ffffff',
-    fontSize: 15,
-  },
-  actionText: {
-    color: '#ffffff',
-    fontSize: 16,
-    fontWeight: '800',
-    letterSpacing: 0.1,
-  },
-  policyRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 7,
-    justifyContent: 'center',
-  },
-  policy: {
-    color: colors.textDim,
-    fontSize: 11,
-  },
-  policyDot: {
-    width: 3,
-    height: 3,
-    borderRadius: 2,
-    backgroundColor: colors.textDim,
-  },
-  searchingCard: {
-    backgroundColor: colors.card,
-    borderRadius: 18,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.border,
-    padding: spacing.lg,
     gap: spacing.sm,
+    minHeight: 34,
+    marginTop: 10,
+    marginBottom: spacing.sm,
   },
-  searchingHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 9,
+  statusText: {
+    ...type.caption,
+    flex: 1,
+    color: colors.textDim,
   },
-  searchingTitle: {
+  statusAction: {
     color: colors.text,
-    fontSize: 14,
-    fontWeight: '700',
-  },
-  queryPreview: {
-    color: colors.accentBright,
     fontSize: 12,
+    fontWeight: '700',
   },
-  searchingHint: {
-    color: colors.textDim,
-    fontSize: 11.5,
+  body: {
+    marginTop: spacing.lg,
   },
-  infoCard: {
-    backgroundColor: colors.card,
-    borderRadius: 18,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.border,
+  sectionFirst: {
+    marginTop: 0,
+  },
+  pressed: {
+    opacity: 0.9,
+  },
+  best: {
+    borderRadius: radius.lg,
     padding: spacing.lg,
-    gap: spacing.sm,
+    backgroundColor: colors.surface,
+    overflow: 'hidden',
   },
-  infoTitle: {
-    color: colors.text,
-    fontSize: 15,
-    fontWeight: '700',
-  },
-  infoBody: {
-    color: colors.textMuted,
-    fontSize: 13,
-    lineHeight: 19,
-  },
-  errorCard: {
-    backgroundColor: 'rgba(248, 113, 113, 0.08)',
-    borderRadius: 18,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(248, 113, 113, 0.4)',
-    padding: spacing.lg,
-    gap: spacing.sm,
-  },
-  errorTitle: {
-    color: '#fca5a5',
-    fontSize: 15,
-    fontWeight: '700',
-  },
-  errorBody: {
-    color: colors.textMuted,
-    fontSize: 13,
-    lineHeight: 19,
-  },
-  retryButton: {
-    alignSelf: 'flex-start',
-    paddingHorizontal: 14,
-    height: 38,
-    borderRadius: 10,
-    backgroundColor: colors.accentSoft,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginTop: 2,
-  },
-  retryText: {
-    color: colors.accentBright,
-    fontSize: 12.5,
-    fontWeight: '700',
-  },
-  nowCard: {
+  bestRow: {
     flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: colors.card,
-    borderRadius: 18,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.border,
-    padding: spacing.md,
+    alignItems: 'flex-start',
     gap: spacing.md,
   },
-  nowBody: {
+  bestText: {
     flex: 1,
-    gap: 2,
+    minWidth: 0,
   },
-  nowEyebrow: {
-    color: colors.success,
-    fontSize: 9.5,
-    fontWeight: '800',
-    letterSpacing: 0.8,
-  },
-  nowTitle: {
+  bestTitle: {
+    ...type.heading,
+    fontSize: 19,
     color: colors.text,
-    fontSize: 15,
-    fontWeight: '700',
   },
-  nowArtist: {
-    color: colors.accentBright,
-    fontSize: 12.5,
-  },
-  nowMeta: {
-    color: colors.textDim,
-    fontSize: 11,
+  bestArtist: {
+    ...type.bodySm,
+    color: colors.textMuted,
     marginTop: 2,
   },
-  chevron: {
-    color: colors.textDim,
-    fontSize: 28,
-    lineHeight: 30,
+  bestBadges: {
+    marginTop: spacing.sm,
   },
-  playingRow: {
+  bestFooter: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 9,
-    paddingVertical: spacing.sm,
-    paddingHorizontal: spacing.xs,
+    gap: spacing.md,
+    marginTop: 14,
+    minHeight: 34,
   },
-  playingDot: {
-    width: 7,
-    height: 7,
-    borderRadius: 4,
-    backgroundColor: colors.success,
-  },
-  playingText: {
+  bestStatus: {
     flex: 1,
     color: colors.textMuted,
-    fontSize: 13,
+    fontSize: 12.5,
     fontWeight: '600',
   },
-  playingOpen: {
-    color: colors.accentBright,
-    fontSize: 12,
-    fontWeight: '700',
+  bestStatusError: {
+    color: colors.danger,
   },
-  idleCard: {
-    alignItems: 'center',
-    paddingVertical: spacing.xl,
-    paddingHorizontal: spacing.lg,
-    gap: spacing.sm,
-  },
-  idleGlyph: {
-    color: colors.accent,
-    fontSize: 42,
-    marginBottom: 2,
-  },
-  idleTitle: {
-    color: colors.text,
-    fontSize: 16,
-    fontWeight: '700',
-    textAlign: 'center',
-  },
-  idleBody: {
-    color: colors.textMuted,
-    fontSize: 13,
-    lineHeight: 19,
-    textAlign: 'center',
-    maxWidth: 310,
+  bestHint: {
+    ...type.caption,
+    color: colors.textDim,
+    marginTop: spacing.sm,
   },
 });

@@ -2,12 +2,16 @@ import React from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import type { Tab } from '../state/store';
+import { Icon } from './Icon';
+import type { IconName } from './Icon';
 import { colors, spacing } from './theme';
 
-const TABS: Array<{ id: Tab; glyph: string; label: string }> = [
-  { id: 'search', glyph: '⌕', label: 'Recherche' },
-  { id: 'player', glyph: '♫', label: 'Lecture' },
-  { id: 'settings', glyph: '⚙', label: 'Réglages' },
+// TODO(phase-3): Accueil / Rechercher / Bibliothèque, with Réglages behind
+// the avatar (DESIGN.md §5).
+const TABS: Array<{ id: Tab; icon: IconName; label: string; fillable: boolean }> = [
+  { id: 'search', icon: 'search', label: 'Rechercher', fillable: false },
+  { id: 'player', icon: 'play', label: 'Lecture', fillable: true },
+  { id: 'settings', icon: 'gear', label: 'Réglages', fillable: false },
 ];
 
 export function TabBar({
@@ -20,20 +24,29 @@ export function TabBar({
   bottomInset: number;
 }) {
   return (
-    <View style={[styles.wrap, { paddingBottom: Math.max(bottomInset, 8) }]}>
+    <View
+      accessibilityRole="tablist"
+      style={[styles.wrap, { paddingBottom: Math.max(bottomInset, spacing.sm) }]}>
       {TABS.map(tab => {
         const selected = active === tab.id;
+        const color = selected ? colors.text : colors.textDim;
 
         return (
           <Pressable
             key={tab.id}
             accessibilityRole="tab"
+            accessibilityLabel={tab.label}
             accessibilityState={{ selected }}
             onPress={() => onChange(tab.id)}
-            style={({ pressed }) => [styles.tab, pressed && { opacity: 0.75 }]}>
-            <Text style={[styles.glyph, selected && styles.glyphActive]}>{tab.glyph}</Text>
+            style={({ pressed }) => [styles.tab, pressed && styles.pressed]}>
+            <Icon
+              name={tab.icon}
+              size={26}
+              color={color}
+              filled={selected && tab.fillable}
+              strokeWidth={selected ? 2.8 : 2}
+            />
             <Text style={[styles.label, selected && styles.labelActive]}>{tab.label}</Text>
-            <View style={[styles.indicator, selected && styles.indicatorActive]} />
           </Pressable>
         );
       })}
@@ -44,43 +57,24 @@ export function TabBar({
 const styles = StyleSheet.create({
   wrap: {
     flexDirection: 'row',
-    backgroundColor: colors.bgSoft,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: colors.border,
-    paddingTop: 6,
+    justifyContent: 'space-around',
+    paddingTop: 10,
     paddingHorizontal: spacing.sm,
   },
   tab: {
-    flex: 1,
+    width: 96,
     alignItems: 'center',
-    justifyContent: 'center',
-    paddingTop: 4,
-    gap: 3,
+    gap: spacing.xs,
   },
-  glyph: {
-    color: colors.textDim,
-    fontSize: 22,
-    lineHeight: 25,
-  },
-  glyphActive: {
-    color: colors.accentBright,
+  pressed: {
+    opacity: 0.7,
   },
   label: {
     color: colors.textDim,
-    fontSize: 10.5,
+    fontSize: 11,
     fontWeight: '600',
   },
   labelActive: {
     color: colors.text,
-  },
-  indicator: {
-    width: 16,
-    height: 2,
-    borderRadius: 1,
-    marginTop: 1,
-    backgroundColor: 'transparent',
-  },
-  indicatorActive: {
-    backgroundColor: colors.accentBright,
   },
 });
