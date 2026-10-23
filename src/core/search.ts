@@ -1,4 +1,4 @@
-import { baseName, displayArtist, displayTitle } from './types';
+import { baseName, parseTrackName } from './types';
 import type { SearchHit } from './types';
 
 /**
@@ -125,124 +125,215 @@ function sortTokens(value: string): string {
 }
 
 /**
- * Scores a hit against the normalised query. Combines raw Levenshtein,
- * token-order-insensitive Levenshtein and token coverage, then applies small
- * quality nudges (free slot, bitrate).
+ * Words that mark a different recording. They cost points unless the user
+ * typed them, so "One More Time (Live)" loses to the studio version.
  */
-export function scoreHit(query: string, hit: SearchHit): number {
+const VERSION_WORDS = new Set([
+  'live', 'remix', 'rmx', 'acoustic', 'instrumental', 'karaoke', 'cover',
+  'interview', 'demo', 'extended', 'edit', 'bootleg', 'mashup', 'nightcore',
+  'sped', 'slowed', 'reverb', 'rehearsal', 'session', 'unplugged', 'medley',
+  'tribute', 'preview', 'snippet', 'intro', 'outro', 'reprise', 'commentary',
+]);
+
+const VERSION_PENALTY = 0.15;
+const MAX_VERSION_PENALTY = 0.3;
+
+function tokensMatch(queryToken: string, candidateToken: string): boolean {
+  if (queryToken === candidateToken) {
+    return true;
+  }
+
+  // Prefix matches ("tim" -> "time") only for real words, never for single
+  // letters, which would otherwise match almost anything.
+  if (queryToken.length >= 3 && candidateToken.length >= 3) {
+    if (candidateToken.startsWith(queryToken) || queryToken.startsWith(candidateToken)) {
+      return true;
+    }
+  }
+
+  // One typo in a longer word.
+  if (queryToken.length >= 5 && Math.abs(queryToken.length - candidateToken.length) <= 1) {
+    return levenshtein(queryToken, candidateToken) <= 1;
+  }
+
+  return false;
+}
+
+function isNumeric(token: string): boolean {
+  return /^\d+$/.test(token);
+}
+
+/**
+ * Text match between the query and one candidate string, in [0, 1].
+ * Combines how much of the query is found (coverage), how much of the
+ * candidate is explained by the query (precision, so extra words cost), and an
+ * order-insensitive Levenshtein similarity for typos.
+ */
+function matchCandidate(queryTokens: string[], sortedQuery: string, candidate: string): number {
+  const queryHasNumber = queryTokens.some(isNumeric);
+  // Track numbers and years the user did not type are noise, not extra words.
+  const candidateTokens = candidate
+    .split(' ')
+    .filter(token => token.length > 0 && (queryHasNumber || !isNumeric(token)));
+
+  if (candidateTokens.length === 0) {
+    return 0;
+  }
+
+  const used = new Array<boolean>(candidateTokens.length).fill(false);
+  let matched = 0;
+
+  for (const token of queryTokens) {
+    const index = candidateTokens.findIndex(
+      (candidateToken, i) => !used[i] && tokensMatch(token, candidateToken),
+    );
+
+    if (index >= 0) {
+      used[index] = true;
+      matched++;
+    }
+  }
+
+  const coverage = matched / queryTokens.length;
+  const precision = used.filter(Boolean).length / candidateTokens.length;
+  const sortedCandidate = sortTokens(candidateTokens.join(' '));
+  const maxLength = Math.max(sortedQuery.length, sortedCandidate.length);
+  const fuzzy = maxLength > 0 ? 1 - levenshtein(sortedQuery, sortedCandidate) / maxLength : 0;
+
+  return 0.6 * coverage + 0.25 * precision + 0.15 * fuzzy;
+}
+
+/**
+ * How well a hit matches the query text, in [0, 1]. Quality and availability
+ * are handled separately by `rankHits`.
+ */
+export function matchScore(query: string, hit: SearchHit): number {
   const normalizedQuery = normalizeForMatch(query);
 
   if (!normalizedQuery) {
     return 0;
   }
 
-  const title = displayTitle(hit.filename);
-  const artist = displayArtist(hit);
-  const variants = [
-    normalizeForMatch(title),
-    normalizeForMatch(artist ? `${artist} ${title}` : title),
-    normalizeForMatch(baseName(hit.filename).replace(/\.[^.]+$/, '')),
-  ].filter(Boolean);
-
   const queryTokens = normalizedQuery.split(' ').filter(Boolean);
   const sortedQuery = sortTokens(normalizedQuery);
+  const { artist, title } = parseTrackName(hit.filename);
+  const normalizedTitle = normalizeForMatch(title);
+  const variants = new Set(
+    [
+      normalizedTitle,
+      artist ? normalizeForMatch(`${artist} ${title}`) : '',
+      normalizeForMatch(baseName(hit.filename).replace(/\.[^.]+$/, '')),
+    ].filter(Boolean),
+  );
+
   let best = 0;
 
   for (const candidate of variants) {
-    const maxLength = Math.max(normalizedQuery.length, candidate.length);
+    best = Math.max(best, matchCandidate(queryTokens, sortedQuery, candidate));
+  }
 
-    if (maxLength > 0) {
-      best = Math.max(best, 1 - levenshtein(normalizedQuery, candidate) / maxLength);
+  // Penalise version markers found in the file name but not in the query.
+  const queryWords = new Set(queryTokens);
+  const fileWords = new Set(
+    normalizeForMatch(baseName(hit.filename)).split(' ').filter(Boolean),
+  );
+  let penalty = 0;
+
+  for (const word of fileWords) {
+    if (VERSION_WORDS.has(word) && !queryWords.has(word)) {
+      penalty += VERSION_PENALTY;
     }
+  }
 
-    const sortedCandidate = sortTokens(candidate);
-    const sortedLength = Math.max(sortedQuery.length, sortedCandidate.length);
+  best -= Math.min(MAX_VERSION_PENALTY, penalty);
 
-    if (sortedLength > 0) {
-      best = Math.max(best, 1 - levenshtein(sortedQuery, sortedCandidate) / sortedLength);
-    }
+  // Very short files are previews or snippets.
+  if (hit.durationSec !== undefined && hit.durationSec > 0 && hit.durationSec < 45) {
+    best -= 0.35;
+  }
 
-    const candidateTokens = candidate.split(' ').filter(Boolean);
-    let matched = 0;
+  return Math.max(0, Math.min(1, best));
+}
 
-    for (const token of queryTokens) {
-      if (
-        candidateTokens.some(
-          candidateToken =>
-            candidateToken === token ||
-            candidateToken.startsWith(token) ||
-            token.startsWith(candidateToken),
-        )
-      ) {
-        matched++;
-      }
-    }
+/**
+ * How likely a peer is to deliver the file quickly, in [0, 1]: a free upload
+ * slot matters most, then a short queue, then speed and bitrate.
+ */
+export function availabilityScore(hit: SearchHit): number {
+  const slot = hit.slotFree ? 1 : 0;
+  const queue = 1 - Math.min(1, Math.max(0, hit.queueLength) / 20);
+  // avgSpeed is bytes/s; 1 MB/s or more counts as full speed.
+  const speed = Math.min(1, Math.log10(1 + Math.max(0, hit.avgSpeed) / 10_000) / 2);
+  const bitrate = Math.min(1, (hit.bitrate ?? 128) / 320);
+  return 0.45 * slot + 0.25 * queue + 0.2 * speed + 0.1 * bitrate;
+}
 
-    if (matched > 0) {
-      const coverage = matched / queryTokens.length;
-      best = Math.max(best, 0.55 + 0.45 * coverage);
-    }
+/** Kept for compatibility: text match plus small quality nudges. */
+export function scoreHit(query: string, hit: SearchHit): number {
+  let score = matchScore(query, hit);
+
+  if (score <= 0) {
+    return 0;
   }
 
   if (hit.slotFree) {
-    best += 0.02;
+    score += 0.02;
   }
 
   if ((hit.bitrate ?? 0) >= 320) {
-    best += 0.03;
+    score += 0.03;
   } else if ((hit.bitrate ?? 0) >= 192) {
-    best += 0.01;
+    score += 0.01;
   }
 
-  return Math.min(1, best);
+  return Math.min(1, score);
 }
 
 export interface RankedHit {
   hit: SearchHit;
+  /** Text match, see `matchScore`. */
   score: number;
-}
-
-function betterQuality(a: SearchHit, b: SearchHit): boolean {
-  if (a.slotFree !== b.slotFree) {
-    return a.slotFree;
-  }
-
-  if ((a.bitrate ?? 0) !== (b.bitrate ?? 0)) {
-    return (a.bitrate ?? 0) > (b.bitrate ?? 0);
-  }
-
-  return a.avgSpeed > b.avgSpeed;
+  /** Combined order used to choose and fall back between sources. */
+  rank: number;
 }
 
 /**
- * Returns the best matching hit above `minScore`.
- * `maxCandidates` bounds the Levenshtein work on very large search batches.
+ * Ranks the hits that match the query well enough, best source first.
+ * Text match dominates; among close matches, sources that can start right
+ * away win.
  */
-export function pickBestMatch(
+export function rankHits(
   query: string,
   hits: SearchHit[],
   minScore = AUTO_MATCH_SCORE,
-  maxCandidates = 200,
-): RankedHit | null {
-  let best: RankedHit | null = null;
+  maxCandidates = 400,
+): RankedHit[] {
+  const ranked: RankedHit[] = [];
   const limit = Math.min(hits.length, maxCandidates);
 
   for (let index = 0; index < limit; index++) {
     const hit = hits[index];
-    const score = scoreHit(query, hit);
+    const score = matchScore(query, hit);
 
     if (score < minScore) {
       continue;
     }
 
-    if (
-      !best ||
-      score > best.score + 1e-9 ||
-      (Math.abs(score - best.score) < 1e-9 && betterQuality(hit, best.hit))
-    ) {
-      best = { hit, score };
-    }
+    // Matches within ~0.05 of each other are treated as the same track, so
+    // availability decides between them.
+    ranked.push({ hit, score, rank: score + 0.12 * availabilityScore(hit) });
   }
 
-  return best;
+  ranked.sort((a, b) => b.rank - a.rank);
+  return ranked;
+}
+
+/** Returns the best source above `minScore`, or null. */
+export function pickBestMatch(
+  query: string,
+  hits: SearchHit[],
+  minScore = AUTO_MATCH_SCORE,
+  maxCandidates = 400,
+): RankedHit | null {
+  return rankHits(query, hits, minScore, maxCandidates)[0] ?? null;
 }

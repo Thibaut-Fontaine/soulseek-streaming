@@ -4,8 +4,10 @@ import {
   levenshtein,
   pickBestMatch,
   scoreHit,
+  rankHits,
   similarity,
 } from '../src/core/search';
+import { parseTrackName } from '../src/core/types';
 import type { SearchHit } from '../src/core/types';
 
 function hit(filename: string, overrides: Partial<SearchHit> = {}): SearchHit {
@@ -87,5 +89,46 @@ describe('best match selection', () => {
     expect(best).not.toBeNull();
     expect(best?.hit.bitrate).toBe(320);
     expect(best?.score).toBeGreaterThanOrEqual(AUTO_MATCH_SCORE);
+  });
+});
+
+describe('auto-match picks the right recording', () => {
+  const query = 'daft punk one more time';
+  const studio = hit('Music\\Daft Punk\\Discovery\\01 - One More Time.mp3');
+  const live = hit('Music\\Daft Punk\\Alive 2007\\07 - One More Time (Live).mp3');
+  const interview = hit('Music\\Daft Punk\\Interviews\\Daft Punk interview one time.mp3');
+  const junk = hit('Music\\a\\b\\o m t.mp3');
+  const otherSong = hit('Music\\Various\\Comp\\Daft Punk - Around The World.mp3');
+
+  test('studio version clears the threshold and beats the others', () => {
+    const ranked = rankHits(query, [interview, live, junk, otherSong, studio], 0);
+    expect(ranked[0].hit).toBe(studio);
+    expect(ranked[0].score).toBeGreaterThanOrEqual(AUTO_MATCH_SCORE);
+  });
+
+  test('wrong files never auto-play', () => {
+    for (const wrong of [interview, junk, otherSong, live]) {
+      expect(scoreHit(query, wrong)).toBeLessThan(AUTO_MATCH_SCORE);
+    }
+  });
+
+  test('a live version is accepted when the user asks for it', () => {
+    expect(scoreHit('daft punk one more time live', live)).toBeGreaterThanOrEqual(AUTO_MATCH_SCORE);
+  });
+
+  test('ignores folder track numbers when reading the artist', () => {
+    expect(parseTrackName(studio.filename)).toEqual({ artist: 'Daft Punk', title: 'One More Time' });
+    expect(parseTrackName('Prince - 1999.mp3')).toEqual({ artist: 'Prince', title: '1999' });
+    expect(parseTrackName('x\\Artist - 03 - Song Name.mp3')).toEqual({ artist: 'Artist', title: 'Song Name' });
+  });
+
+  test('short snippets are rejected', () => {
+    expect(scoreHit(query, hit('Daft Punk - One More Time.mp3', { durationSec: 30 }))).toBeLessThan(AUTO_MATCH_SCORE);
+  });
+
+  test('a free slot beats a long queue for the same track', () => {
+    const queued = hit('Daft Punk - One More Time.mp3', { username: 'q', slotFree: false, queueLength: 40, bitrate: 320 });
+    const free = hit('Daft Punk - One More Time.mp3', { username: 'f', slotFree: true, queueLength: 0, bitrate: 192 });
+    expect(rankHits(query, [queued, free])[0].hit).toBe(free);
   });
 });
