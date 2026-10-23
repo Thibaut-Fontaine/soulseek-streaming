@@ -79,6 +79,8 @@ export interface SearchResponse {
   username: string;
   token: number;
   files: FileInfo[];
+  /** Buddy-only files. They are listed but the peer refuses to send them. */
+  lockedFiles: FileInfo[];
   slotFree: boolean;
   avgSpeed: number;
   queueLength: number;
@@ -474,21 +476,24 @@ export function parseFileSearchResponse(payload: Uint8Array): SearchResponse {
   const avgSpeed = reader.u32();
   const queueLength = reader.u32();
 
-  // Some clients append an unknown uint32 and a private result list. Both are
-  // optional, so only read them when they are actually present.
+  // Some clients append an unknown uint32 and a private (buddy-only) result
+  // list. Both are optional, so only read them when they are present. Locked
+  // files are kept apart: requesting one always ends in UploadDenied.
+  let lockedFiles: FileInfo[] = [];
+
   if (reader.remaining >= 4) {
     reader.u32();
 
     if (reader.remaining >= 4) {
       try {
-        files.push(...parseFileList(reader));
+        lockedFiles = parseFileList(reader);
       } catch {
         // A malformed private list must not discard the public results.
       }
     }
   }
 
-  return { username, token, files, slotFree, avgSpeed, queueLength };
+  return { username, token, files, lockedFiles, slotFree, avgSpeed, queueLength };
 }
 
 /**

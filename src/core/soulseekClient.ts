@@ -11,6 +11,7 @@ import {
   UserStatus,
   encodeAcceptChildren,
   encodeCantConnectToPeer,
+  encodeConnectToPeer,
   encodeFileSearch,
   encodeGetPeerAddress,
   encodeHaveNoParent,
@@ -89,10 +90,37 @@ const PEER_ADDRESS_TTL_MS = 10 * 60 * 1000;
 const QUEUE_POLL_MS = 60000;
 const MAX_QUEUE_POLLS = 10;
 const MAX_INBOUND_PEERS = 64;
+const PEER_CONNECT_TIMEOUT_MS = 12000;
+const INDIRECT_CONNECT_TIMEOUT_MS = 20000;
+const RECONNECT_DELAYS_MS = [2000, 5000, 10000, 20000, 30000, 60000];
+
+/** Resolves with the first promise that fulfils; rejects when all reject. */
+function firstSuccess<T>(promises: Promise<T>[]): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    let failures = 0;
+    let lastError: unknown = null;
+
+    for (const promise of promises) {
+      promise.then(resolve, error => {
+        failures++;
+        lastError = error;
+
+        if (failures === promises.length) {
+          reject(lastError);
+        }
+      });
+    }
+  });
+}
+
+function userKey(username: string): string {
+  return username.toLowerCase();
+}
 
 class PeerSession {
   readonly framer = new Framer(4);
   private closed = false;
+  private pinned = false;
   private idleTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(
@@ -122,6 +150,12 @@ class PeerSession {
     if (!this.closed) {
       this.socket.write(data);
     }
+  }
+
+  /** Keep an inbound session open while we use it for a transfer request. */
+  pin(): void {
+    this.pinned = true;
+    this.clearIdle();
   }
 
   /** Feed bytes that were already read by another listener (connection setup). */
@@ -166,7 +200,7 @@ class PeerSession {
   private touch(): void {
     // P connections opened by strangers are only used to deliver search
     // results. Do not let them pile up.
-    if (this.direction !== 'in') {
+    if (this.direction !== 'in' || this.pinned) {
       return;
     }
 
@@ -247,6 +281,16 @@ export class SoulseekClient extends Emitter<SoulseekClientEvents> {
   private readonly outboundPeers = new Map<string, PeerSession>();
   private readonly inboundPeers = new Set<PeerSession>();
   private readonly peerConnecting = new Map<string, Promise<PeerSession>>();
+  /** Our own ConnectToPeer requests, waiting for the peer's PierceFirewall. */
+  private readonly pendingPierces = new Map<
+    number,
+    {
+      username: string;
+      resolve: (session: PeerSession) => void;
+      reject: (error: Error) => void;
+      timer: ReturnType<typeof setTimeout>;
+    }
+  >();
   private readonly pendingPeerTimers = new Set<ReturnType<typeof setTimeout>>();
 
   private readonly transfers = new Map<string, StreamTransfer>();
@@ -479,7 +523,7 @@ export class SoulseekClient extends Emitter<SoulseekClientEvents> {
     this.serverFramer = null;
     this.loginResult = null;
     this.finishSearch();
-    this.failAllTransfers('Connexion au serveur perdue');
+    this.failAllTransfers('Connexion au serveur perdue', false);
     this.closePeerSessions();
     this.rejectPeerAddressRequests('Connexion au serveur perdue');
 
@@ -516,13 +560,9 @@ export class SoulseekClient extends Emitter<SoulseekClientEvents> {
       return;
     }
 
-    if (this.reconnectAttempt >= 4) {
-      this.setState('disconnected', 'Impossible de se reconnecter');
-      return;
-    }
-
-    const delays = [2000, 5000, 10000, 20000];
-    const delay = delays[Math.min(this.reconnectAttempt, delays.length - 1)];
+    // Keep trying: on a phone the network often comes back minutes later.
+    const delay =
+      RECONNECT_DELAYS_MS[Math.min(this.reconnectAttempt, RECONNECT_DELAYS_MS.length - 1)];
     this.reconnectAttempt++;
     this.setState('reconnecting');
 
@@ -532,6 +572,24 @@ export class SoulseekClient extends Emitter<SoulseekClientEvents> {
         // `doConnect` schedules the next attempt.
       });
     }, delay);
+  }
+
+  /**
+   * Skips the backoff and reconnects right away, e.g. when the network
+   * comes back or the app returns to the foreground.
+   */
+  reconnectNow(): void {
+    if (this.manualDisconnect || this.stateValue === 'online' || this.connectPromise) {
+      return;
+    }
+
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+
+    this.reconnectAttempt = Math.max(1, this.reconnectAttempt);
+    this.connect().catch(() => {});
   }
 
   private setState(state: ConnectionState, error?: string): void {
@@ -662,6 +720,14 @@ export class SoulseekClient extends Emitter<SoulseekClientEvents> {
 
       case ServerCode.CANT_CONNECT_TO_PEER: {
         const { token } = parseCantConnectToPeer(payload);
+        const pierce = this.pendingPierces.get(token);
+
+        if (pierce) {
+          clearTimeout(pierce.timer);
+          this.pendingPierces.delete(token);
+          pierce.reject(new Error(`${pierce.username} ne peut pas se connecter à nous`));
+        }
+
         this.log(`Connexion indirecte refusée (token ${token})`);
         break;
       }
@@ -901,52 +967,143 @@ export class SoulseekClient extends Emitter<SoulseekClientEvents> {
   }
 
   private async getPeerConnection(username: string): Promise<PeerSession> {
-    const existing = this.outboundPeers.get(username);
+    const key = userKey(username);
+    const existing = this.outboundPeers.get(key);
 
     if (existing?.isOpen) {
       return existing;
     }
 
-    const pending = this.peerConnecting.get(username);
+    // The peer may already be connected to us (it delivered search results
+    // over that connection). Reusing it saves a round trip and works even
+    // when the peer is behind a firewall.
+    for (const session of this.inboundPeers) {
+      if (session.isOpen && userKey(session.username) === key) {
+        session.pin();
+        return session;
+      }
+    }
+
+    const pending = this.peerConnecting.get(key);
 
     if (pending) {
       return pending;
     }
 
+    const promise = this.openPeerConnection(username).finally(() => {
+      this.peerConnecting.delete(key);
+    });
+
+    this.peerConnecting.set(key, promise);
+    return promise;
+  }
+
+  /**
+   * Opens a P connection the way regular clients do: a direct connection to
+   * the peer and, at the same time, a ConnectToPeer request through the
+   * server so a firewalled peer can connect to us instead. The first one to
+   * succeed wins; the other is discarded.
+   */
+  private async openPeerConnection(username: string): Promise<PeerSession> {
+    let settled = false;
+    const direct = this.connectDirect(username);
+    const indirect = this.connectIndirect(username, ConnectionType.PEER);
+
+    // Whatever loses the race must not leak a socket.
+    const discard = (socket: SocketLike) => {
+      if (settled) {
+        socket.destroy();
+      }
+    };
+
+    let winner: { socket: SocketLike } | { session: PeerSession };
+
+    try {
+      winner = await firstSuccess<{ socket: SocketLike } | { session: PeerSession }>([
+        direct.promise.then(socket => ({ socket })),
+        indirect.promise.then(session => ({ session })),
+      ]);
+    } catch (error) {
+      settled = true;
+      indirect.cancel();
+      throw error instanceof Error ? error : new Error(`Impossible de joindre ${username}`);
+    }
+
+    settled = true;
+
+    if ('session' in winner) {
+      // The peer connected to us after our ConnectToPeer; that session is
+      // already attached and needs no PeerInit.
+      direct.promise.then(discard, () => {});
+      return winner.session;
+    }
+
+    indirect.cancel();
+    return this.attachPeerSession(username, winner.socket, 'out', true);
+  }
+
+  private connectDirect(username: string): { promise: Promise<SocketLike> } {
+    const connect = async () => {
+      const address = await this.getPeerAddress(username);
+      return this.transport.connect({
+        host: address.ipAddress,
+        port: address.port,
+        timeoutMs: PEER_CONNECT_TIMEOUT_MS,
+      });
+    };
+
     const promise = (async () => {
-      const connect = async () => {
-        const address = await this.getPeerAddress(username);
-        return this.transport.connect({
-          host: address.ipAddress,
-          port: address.port,
-          timeoutMs: 15000,
-        });
-      };
-
-      let socket: SocketLike;
-
       try {
-        socket = await connect();
+        return await connect();
       } catch {
         // The cached port may be stale (peers change ports without changing
         // their username). Refresh the address once before giving up.
         this.peerAddressCache.delete(username);
-
-        try {
-          socket = await connect();
-        } catch (error) {
-          throw error;
-        }
+        return connect();
       }
+    })();
 
-      const session = this.attachPeerSession(username, socket, 'out', true);
-      return session;
-    })().finally(() => {
-      this.peerConnecting.delete(username);
+    // Avoid an unhandled rejection when the indirect path wins.
+    promise.catch(() => {});
+    return { promise };
+  }
+
+  private connectIndirect(
+    username: string,
+    type: string,
+  ): { promise: Promise<PeerSession>; cancel: () => void } {
+    const token = this.nextToken();
+
+    const promise = new Promise<PeerSession>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.pendingPierces.delete(token);
+        reject(new Error(`${username} ne répond pas`));
+      }, INDIRECT_CONNECT_TIMEOUT_MS);
+
+      this.pendingPierces.set(token, { username, resolve, reject, timer });
+
+      try {
+        this.sendServer(encodeConnectToPeer(token, username, type));
+      } catch (error) {
+        clearTimeout(timer);
+        this.pendingPierces.delete(token);
+        reject(error as Error);
+      }
     });
 
-    this.peerConnecting.set(username, promise);
-    return promise;
+    promise.catch(() => {});
+
+    return {
+      promise,
+      cancel: () => {
+        const pierce = this.pendingPierces.get(token);
+
+        if (pierce) {
+          clearTimeout(pierce.timer);
+          this.pendingPierces.delete(token);
+        }
+      },
+    };
   }
 
   private attachPeerSession(
@@ -964,7 +1121,7 @@ export class SoulseekClient extends Emitter<SoulseekClientEvents> {
     );
 
     if (direction === 'out') {
-      this.outboundPeers.set(username, session);
+      this.outboundPeers.set(userKey(username), session);
     } else {
       this.inboundPeers.add(session);
     }
@@ -977,8 +1134,8 @@ export class SoulseekClient extends Emitter<SoulseekClientEvents> {
   }
 
   private handlePeerSessionClosed(session: PeerSession): void {
-    if (this.outboundPeers.get(session.username) === session) {
-      this.outboundPeers.delete(session.username);
+    if (this.outboundPeers.get(userKey(session.username)) === session) {
+      this.outboundPeers.delete(userKey(session.username));
     }
 
     this.inboundPeers.delete(session);
@@ -1007,12 +1164,12 @@ export class SoulseekClient extends Emitter<SoulseekClientEvents> {
   }
 
   private hasPeerSessionFor(username: string): boolean {
-    if (this.outboundPeers.has(username)) {
+    if (this.outboundPeers.get(userKey(username))?.isOpen) {
       return true;
     }
 
     for (const session of this.inboundPeers) {
-      if (session.username.toLowerCase() === username.toLowerCase()) {
+      if (session.isOpen && userKey(session.username) === userKey(username)) {
         return true;
       }
     }
@@ -1038,6 +1195,13 @@ export class SoulseekClient extends Emitter<SoulseekClientEvents> {
     this.outboundPeers.clear();
     this.inboundPeers.clear();
     this.peerConnecting.clear();
+
+    for (const pierce of this.pendingPierces.values()) {
+      clearTimeout(pierce.timer);
+      pierce.reject(new Error('Connexion fermée'));
+    }
+
+    this.pendingPierces.clear();
   }
 
   private handlePeerFrame(session: PeerSession, code: number, payload: Uint8Array): void {
@@ -1264,7 +1428,7 @@ export class SoulseekClient extends Emitter<SoulseekClientEvents> {
       this.transfersByToken.delete(transfer.token);
     }
 
-    const session = this.outboundPeers.get(transfer.hit.username);
+    const session = this.outboundPeers.get(userKey(transfer.hit.username));
 
     if (session && !this.hasActiveTransferWith(transfer.hit.username, transfer.id)) {
       // Closing the P connection is the protocol's way of cancelling a queued
@@ -1278,7 +1442,7 @@ export class SoulseekClient extends Emitter<SoulseekClientEvents> {
       if (
         transfer.id !== exceptId &&
         transfer.isActive &&
-        transfer.hit.username === username
+        userKey(transfer.hit.username) === userKey(username)
       ) {
         return true;
       }
@@ -1287,16 +1451,36 @@ export class SoulseekClient extends Emitter<SoulseekClientEvents> {
     return false;
   }
 
-  private failAllTransfers(reason: string): void {
+  /**
+   * Fails transfers after the server connection is gone. A transfer that is
+   * already streaming has its own F connection to the peer and does not need
+   * the server, so it keeps going unless `includeStreaming` is set.
+   */
+  private failAllTransfers(reason: string, includeStreaming = true): void {
     for (const transfer of Array.from(this.transfers.values())) {
-      if (transfer.isActive) {
-        transfer.fail(reason);
+      if (!transfer.isActive) {
+        continue;
+      }
+
+      if (!includeStreaming && transfer.state === 'streaming') {
+        continue;
+      }
+
+      transfer.fail(reason);
+    }
+
+    for (const [id, transfer] of Array.from(this.transfers.entries())) {
+      if (!transfer.isActive && transfer.state !== 'complete') {
+        this.transfers.delete(id);
       }
     }
 
-    this.transfers.clear();
+    if (includeStreaming) {
+      this.transfers.clear();
+      this.transfersByKey.clear();
+    }
+
     this.transfersByToken.clear();
-    this.transfersByKey.clear();
 
     for (const poller of this.queuePollers.values()) {
       if (poller.initial) {
@@ -1390,8 +1574,32 @@ export class SoulseekClient extends Emitter<SoulseekClientEvents> {
           return;
         }
 
-        // We never initiate indirect connections ourselves, so an unsolicited
-        // PierceFirewall is not useful.
+        if (code === PeerInitCode.PIERCE_FIREWALL && frame.length >= 5) {
+          // Answer to one of our ConnectToPeer requests.
+          const token = readU32(frame, 1);
+          const pierce = this.pendingPierces.get(token);
+          clearTimeout(initTimer);
+
+          if (!pierce) {
+            socket.destroy();
+            cleanup();
+            return;
+          }
+
+          this.pendingPierces.delete(token);
+          clearTimeout(pierce.timer);
+          // Attach the session now, in the same tick, so no peer data is lost.
+          session = this.attachPeerSession(pierce.username, socket, 'out', false);
+          phase = 'peer';
+
+          if (queue.length > 0) {
+            session.receive(queue.take(queue.length));
+          }
+
+          pierce.resolve(session);
+          return;
+        }
+
         socket.destroy();
         cleanup();
         return;
