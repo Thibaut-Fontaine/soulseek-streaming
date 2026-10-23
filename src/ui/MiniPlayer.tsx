@@ -1,5 +1,5 @@
 import React from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 import TrackPlayer, { State, usePlaybackState, useProgress } from 'react-native-track-player';
 
 import { displayTitle } from '../core/types';
@@ -11,6 +11,7 @@ export function MiniPlayer() {
   const current = useAppStore(state => state.current);
   const transfers = useAppStore(state => state.transfers);
   const setTab = useAppStore(state => state.setTab);
+  const stopPlayback = useAppStore(state => state.stopPlayback);
   const playerReady = useAppStore(state => state.playerReady);
 
   const playbackState = usePlaybackState();
@@ -32,6 +33,7 @@ export function MiniPlayer() {
 
   const toggle = async () => {
     if (preparing) {
+      await stopPlayback();
       return;
     }
 
@@ -82,12 +84,11 @@ export function MiniPlayer() {
 
       <Pressable
         accessibilityRole="button"
-        accessibilityLabel={playing ? 'Pause' : 'Lecture'}
+        accessibilityLabel={preparing ? 'Annuler la préparation' : playing ? 'Pause' : 'Lecture'}
         onPress={toggle}
-        disabled={preparing}
         style={styles.action}>
         {preparing ? (
-          <ActivityIndicator size="small" color={colors.accentBright} />
+          <Text style={styles.cancelGlyph}>×</Text>
         ) : (
           <Text style={styles.actionGlyph}>{playing ? '❚❚' : '▶'}</Text>
         )}
@@ -147,6 +148,11 @@ const styles = StyleSheet.create({
   actionGlyph: {
     color: colors.accentBright,
     fontSize: 15,
+  },
+  cancelGlyph: {
+    color: colors.accentBright,
+    fontSize: 22,
+    lineHeight: 24,
   },
   progressTrack: {
     position: 'absolute',

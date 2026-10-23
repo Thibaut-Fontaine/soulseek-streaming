@@ -4,7 +4,8 @@ import { create } from 'zustand';
 
 import type { ConnectionState } from '../core/soulseekClient';
 import type { TransferSnapshot } from '../core/transfer';
-import { displayArtist, displayTitle, hitKey, isStreamableFile } from '../core/types';
+import { AUTO_MATCH_SCORE, formatSearchQuery, pickBestMatch } from '../core/search';
+import { displayArtist, displayTitle, isStreamableFile } from '../core/types';
 import type { SearchHit } from '../core/types';
 import { ensurePlayer, resetPlayer } from '../player/player';
 import { clearCredentials, loadCredentials, loadSettings, saveCredentials, saveSettings } from '../services/settings';
@@ -38,8 +39,10 @@ interface AppState {
   tab: Tab;
   query: string;
   searching: boolean;
-  hits: SearchHit[];
+  searchQuery: string;
+  searchEmpty: boolean;
   searchError: string | null;
+  matchHit: SearchHit | null;
 
   transfers: Record<string, TransferSnapshot>;
   current: CurrentPlayback | null;
@@ -73,26 +76,6 @@ function errorMessage(error: unknown): string {
 
 function sleep(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
-}
-
-function mergeHits(existing: SearchHit[], incoming: SearchHit[]): SearchHit[] {
-  if (incoming.length === 0) {
-    return existing;
-  }
-
-  const known = new Set(existing.map(hitKey));
-  const merged = existing.slice();
-
-  for (const hit of incoming) {
-    const key = hitKey(hit);
-
-    if (!known.has(key)) {
-      known.add(key);
-      merged.push(hit);
-    }
-  }
-
-  return merged;
 }
 
 function bufferTargetFor(size: number, bufferMb: number): number {
@@ -238,8 +221,10 @@ export const useAppStore = create<AppState>((set, get) => {
     tab: 'search',
     query: '',
     searching: false,
-    hits: [],
+    searchQuery: '',
+    searchEmpty: false,
     searchError: null,
+    matchHit: null,
 
     transfers: {},
     current: null,
@@ -298,9 +283,11 @@ export const useAppStore = create<AppState>((set, get) => {
         prefillUsername: username,
         connection: 'connecting',
         connectionError: null,
-        hits: [],
         searching: false,
+        searchQuery: '',
+        searchEmpty: false,
         searchError: null,
+        matchHit: null,
         transfers: {},
         current: null,
         listenPort: 0,
@@ -357,8 +344,10 @@ export const useAppStore = create<AppState>((set, get) => {
         tab: 'search',
         query: '',
         searching: false,
-        hits: [],
+        searchQuery: '',
+        searchEmpty: false,
         searchError: null,
+        matchHit: null,
         transfers: {},
         current: null,
         notice: null,
@@ -404,12 +393,12 @@ export const useAppStore = create<AppState>((set, get) => {
 
     setTab: tab => set({ tab }),
 
-    setQuery: query => set({ query }),
+    setQuery: query => set({ query, searchEmpty: false, searchError: null }),
 
     runSearch: async (input?: string) => {
-      const query = (input ?? get().query).trim();
+      const rawQuery = (input ?? get().query).trim();
 
-      if (!query) {
+      if (!rawQuery) {
         return;
       }
 
@@ -420,63 +409,65 @@ export const useAppStore = create<AppState>((set, get) => {
         return;
       }
 
-      // Pressing Enter twice (or submitting while the same search is running)
-      // must not send another FileSearch to the network.
-      if (get().searching && get().query === query) {
+      if (get().searching && get().query === rawQuery) {
         return;
       }
 
+      const networkQuery = formatSearchQuery(rawQuery);
       const sequence = ++searchSequence;
-      let firstBatch = true;
+      let matched = false;
 
-      // Keep the previous results visible while the new search runs. They are
-      // replaced by the first batch of the new search, or cleared when the
-      // search ends without a single match.
       set({
-        query,
+        query: rawQuery,
         searching: true,
+        searchQuery: networkQuery,
+        searchEmpty: false,
         searchError: null,
+        matchHit: null,
       });
 
       const watchdog = setTimeout(() => {
-        if (sequence !== searchSequence) {
+        if (sequence !== searchSequence || matched) {
           return;
         }
 
         searchService.cancelSearch();
-        set({ searching: false });
-      }, 25000);
+        set({ searching: false, searchEmpty: true });
+      }, 15000);
 
       try {
-        const results = await searchService.search(
-          query,
-          hits => {
-            if (sequence !== searchSequence) {
+        await searchService.search(
+          networkQuery,
+          batch => {
+            if (sequence !== searchSequence || matched) {
               return;
             }
 
-            if (firstBatch) {
-              firstBatch = false;
-              set({ hits: mergeHits([], hits) });
-            } else {
-              set(state => ({ hits: mergeHits(state.hits, hits) }));
+            const best = pickBestMatch(networkQuery, batch, AUTO_MATCH_SCORE, 200);
+
+            if (!best) {
+              return;
             }
+
+            matched = true;
+            set({ searching: false, searchEmpty: false, matchHit: best.hit });
+
+            // The first good match is enough: do not keep the Soulseek search
+            // open for the full duration.
+            searchService.cancelSearch();
+
+            // Play in the background; the UI stays responsive and the mini
+            // player shows the preparation progress.
+            void get().playHit(best.hit);
           },
-          20000,
+          10000,
         );
 
-        if (sequence !== searchSequence) {
+        if (sequence !== searchSequence || matched) {
           return;
         }
 
-        if (firstBatch) {
-          set({ hits: [], searching: false });
-        } else {
-          set(state => ({
-            hits: mergeHits(state.hits, results),
-            searching: false,
-          }));
-        }
+        set({ searching: false, searchEmpty: true });
       } catch (error) {
         if (sequence === searchSequence) {
           set({ searching: false, searchError: errorMessage(error) });
@@ -489,7 +480,7 @@ export const useAppStore = create<AppState>((set, get) => {
     cancelSearch: () => {
       searchSequence++;
       service?.cancelSearch();
-      set({ searching: false });
+      set({ searching: false, searchEmpty: false });
     },
 
     playHit: async hit => {
@@ -509,18 +500,19 @@ export const useAppStore = create<AppState>((set, get) => {
       try {
         await ensurePlayer();
         set({ playerReady: true });
-        await requestNotificationPermission();
+
+        // Ask for the notification permission without delaying playback.
+        void requestNotificationPermission();
+
+        // Stop the previous track before releasing its local HTTP source.
         await resetPlayer();
 
         if (sequence !== playSequence) {
           return;
         }
 
-        service.cancelActive();
         const prepared = service.prepareStream(hit);
-
         set({
-          tab: 'player',
           current: {
             hit,
             transferId: prepared.transferId,
@@ -565,6 +557,7 @@ export const useAppStore = create<AppState>((set, get) => {
           current: state.current
             ? { ...state.current, phase: 'error', error: errorMessage(error) }
             : null,
+          searchError: state.current ? state.searchError : errorMessage(error),
         }));
       }
     },
@@ -581,7 +574,7 @@ export const useAppStore = create<AppState>((set, get) => {
       playSequence++;
       await resetPlayer();
       service?.cancelActive();
-      set({ current: null });
+      set({ current: null, matchHit: null });
     },
 
     dismissNotice: () => set({ notice: null }),

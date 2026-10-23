@@ -32,6 +32,10 @@ manuellement et n'est pas destiné à une publication sur le Play Store.
 - **MP3 uniquement** : les résultats d'autres formats sont ignorés, ce qui
   réduit fortement la taille des transferts et permet un démarrage quasi
   instantané, sur iOS comme sur Android.
+- **Recherche en un geste** : la requête est nettoyée localement, comparée aux
+  résultats par distance de Levenshtein, et le premier match suffisant est
+  lancé automatiquement. La recherche Soulseek est arrêtée dès que ce match
+  est trouvé ; la lecture se prépare en arrière-plan.
 - Streaming progressif : un serveur HTTP local avec support des requêtes
   `Range` alimente le lecteur natif (ExoPlayer / AVPlayer) au fur et à mesure
   que le transfert Soulseek avance.
@@ -81,6 +85,11 @@ Le cœur Soulseek (`src/core`) est indépendant de React Native : il reçoit une
 abstraction de transport (`src/transport/types.ts`). L'application utilise
 `react-native-tcp-socket`, tandis que les tests et un éventuel relais Node
 utilisent `node:net`.
+
+Le « layer » de pré-recherche est entièrement local (`src/core/search.ts`) :
+normalisation de la requête, suppression du bruit (« official video », bitrate,
+etc.), puis scoring Levenshtein (ordre des mots, accents, petites fautes). Aucun
+service LLM externe n'est appelé avant l'envoi à Soulseek.
 
 ### Flux d'un morceau
 
