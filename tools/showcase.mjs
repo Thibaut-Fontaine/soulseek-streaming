@@ -1,26 +1,30 @@
 #!/usr/bin/env node
-// Refresh showcase/index.html for a freshly built APK: QR code, download
-// links and build info (branch, commit, date, size, SHA-256).
+// Publish a freshly built APK on the current branch: copy it to
+// releases/SoulStream.apk and refresh showcase/index.html (QR code, download
+// links, build info: branch, commit, date, size, SHA-256).
 //
-//   node tools/showcase.mjs android/app/build/outputs/apk/release/app-release.apk \
-//     [--url https://thibautfontaine.space/streaming/dev/SoulStream.apk]
+//   node tools/showcase.mjs android/app/build/outputs/apk/release/app-release.apk [--url <url>]
 //
-// Run it from the commit the APK was built from, then upload the APK to --url.
+// Run it from the commit the APK was built from, then commit and push
+// releases/ and showcase/. By default the QR code points to the APK on GitHub
+// for this branch; the repo is private, so it needs a logged-in account with
+// access. Pass --url to point it somewhere else.
 
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
-import { readFileSync, writeFileSync } from 'node:fs';
+import { copyFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import QRCode from 'qrcode';
 
-const DEFAULT_URL = 'https://thibautfontaine.space/streaming/dev/SoulStream.apk';
+const REPO = 'https://github.com/Thibaut-Fontaine/soulseek-streaming';
 const PAGE = fileURLToPath(new URL('../showcase/index.html', import.meta.url));
+const RELEASES = fileURLToPath(new URL('../releases/', import.meta.url));
 
 const args = process.argv.slice(2);
 const urlFlag = args.indexOf('--url');
-const url = urlFlag >= 0 ? args.splice(urlFlag, 2)[1] : DEFAULT_URL;
+const customUrl = urlFlag >= 0 ? args.splice(urlFlag, 2)[1] : undefined;
 const apkPath = args[0];
-if (!apkPath || !url) {
+if (!apkPath || (urlFlag >= 0 && !customUrl)) {
   console.error('usage: node tools/showcase.mjs <apk> [--url <download url>]');
   process.exit(1);
 }
@@ -31,7 +35,7 @@ const escape = s =>
 
 // Changes to app code that the commit doesn't contain would not be in the
 // build info, so refuse rather than publish a misleading commit.
-const dirty = git('status', '--porcelain', '--', '.', ':!showcase', ':!tools/showcase.mjs');
+const dirty = git('status', '--porcelain', '--', '.', ':!showcase', ':!releases', ':!tools/showcase.mjs');
 if (dirty) {
   console.error('Uncommitted changes outside showcase/; commit them and rebuild first:\n' + dirty);
   process.exit(1);
@@ -47,6 +51,10 @@ const date = new Date(git('log', '-1', '--format=%cI')).toLocaleDateString('fr-F
   month: 'short',
   year: 'numeric',
 });
+const url = customUrl ?? `${REPO}/raw/${encodeURIComponent(branch)}/releases/SoulStream.apk`;
+
+mkdirSync(RELEASES, { recursive: true });
+copyFileSync(apkPath, RELEASES + 'SoulStream.apk');
 
 const svg = await QRCode.toString(url, {
   type: 'svg',
@@ -83,4 +91,4 @@ replace(/href="[^"]*"( data-build="apk-link")/g, `href="${escape(url)}"$1`);
 writeFileSync(PAGE, html);
 
 console.log(`showcase updated: ${branch}@${commit}, ${sizeMb} Mo, sha256 ${sha256}`);
-console.log(`QR -> ${url}`);
+console.log(`APK copied to releases/SoulStream.apk; QR -> ${url}`);
