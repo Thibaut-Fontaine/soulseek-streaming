@@ -236,6 +236,8 @@ export class RangeHttpServer {
     });
 
     try {
+      let chunksWritten = 0;
+
       while (offset <= end && !aborted) {
         if (offset >= source.buffer.total) {
           if (source.buffer.state !== 'open') {
@@ -253,6 +255,13 @@ export class RangeHttpServer {
 
         await writeAsync(socket, bytes);
         offset += bytes.length;
+
+        // The HTTP proxy runs on the JS thread. Yield regularly so touches,
+        // tab changes and the player UI remain responsive while a large range
+        // is copied to the native player.
+        if (++chunksWritten % 2 === 0) {
+          await yieldToUi();
+        }
       }
     } catch {
       // Transfer failed, timed out, or the player went away.
@@ -395,6 +404,10 @@ function writeResponse(
   }
 
   socket.end();
+}
+
+function yieldToUi(): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, 0));
 }
 
 function writeAsync(socket: SocketLike, data: Uint8Array): Promise<void> {

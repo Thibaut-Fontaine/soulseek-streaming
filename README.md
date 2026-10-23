@@ -47,6 +47,9 @@ manuellement et n'est pas destiné à une publication sur le Play Store.
 - Requêtes réseau réduites : pas de recherche concurrente en double, cache
   d'adresses de pairs, rafraîchissement uniquement en cas d'échec, et suivi de
   file d'attente limité à un appel par minute.
+- **Interface non bloquante** : les réponses de recherche tardives sont
+  ignorées sans être décompressées, les gros lots sont plafonnés, et le proxy
+  HTTP rend la main régulièrement pendant l'envoi au lecteur natif.
 - Réglages : serveur, port d'écoute, port du proxy HTTP local, taille du tampon.
 - Identifiants stockés dans le trousseau sécurisé (Keychain / Keystore).
 

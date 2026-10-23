@@ -83,7 +83,8 @@ export interface SearchOptions {
 
 const DEFAULT_SERVER_HOST = 'server.slsknet.org';
 const DEFAULT_SERVER_PORT = 2242;
-const MAX_SEARCH_HITS = 2000;
+const MAX_SEARCH_HITS = 200;
+const MAX_SEARCH_RESPONSE_BYTES = 512 * 1024;
 const PEER_ADDRESS_TTL_MS = 10 * 60 * 1000;
 const QUEUE_POLL_MS = 60000;
 const MAX_QUEUE_POLLS = 10;
@@ -1042,6 +1043,19 @@ export class SoulseekClient extends Emitter<SoulseekClientEvents> {
   private handlePeerFrame(session: PeerSession, code: number, payload: Uint8Array): void {
     switch (code) {
       case PeerCode.FILE_SEARCH_RESPONSE: {
+        // After a search is stopped (e.g. a good match was found), peers keep
+        // sending late compressed responses. Do not inflate/parse them: this
+        // used to block the JS thread while a track was loading.
+        if (!this.activeSearch) {
+          break;
+        }
+
+        // A huge response cannot help the "first good match" flow and would
+        // freeze the UI while pako inflates it on the JS thread.
+        if (payload.length > MAX_SEARCH_RESPONSE_BYTES) {
+          break;
+        }
+
         const response = parseFileSearchResponse(payload);
         this.handleSearchResponse(response);
         break;

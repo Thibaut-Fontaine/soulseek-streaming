@@ -375,7 +375,7 @@ export function parseUploadFailed(payload: Uint8Array): { filename: string } {
 }
 
 /** Searches can contain a large number of results; keep the UI bounded. */
-export const MAX_SEARCH_FILES = 5000;
+export const MAX_SEARCH_FILES = 500;
 
 function parseFileAttributes(reader: ByteReader, info: FileInfo): void {
   const attributeCount = reader.u32();
@@ -432,7 +432,7 @@ function parseFileList(reader: ByteReader): FileInfo[] {
   return files;
 }
 
-const MAX_DECOMPRESSED_SEARCH_BYTES = 32 * 1024 * 1024;
+const MAX_DECOMPRESSED_SEARCH_BYTES = 4 * 1024 * 1024;
 
 /**
  * Search responses are zlib-compressed as a whole. Bound the decompressed size
