@@ -1,0 +1,562 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SoulStream</title>
+<meta name="description" content="SoulStream : streaming musical pair-à-pair sur le réseau Soulseek. Scannez le QR code pour installer l'APK Android.">
+<meta name="theme-color" content="#0B0A0F">
+<link rel="icon" href="img/icon.png" type="image/png">
+<style>
+  :root {
+    color-scheme: dark;
+    --bg: #0B0A0F;
+    --surface: #141219;
+    --surface-alt: #1D1A24;
+    --surface-high: #28242F;
+    --border: rgba(255, 255, 255, 0.08);
+    --text: #FFFFFF;
+    --muted: #B9B4C4;
+    --dim: #7D778A;
+    --accent: #A970FF;
+    --accent-press: #9255F7;
+    --accent-soft: rgba(169, 112, 255, 0.16);
+    --green: #3DDC84;
+    --sky: #5CC8FF;
+    --amber: #FFB547;
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body { margin: 0; padding: 0; }
+
+  body {
+    background:
+      radial-gradient(900px 620px at 85% -10%, rgba(169, 112, 255, 0.22), transparent 65%),
+      radial-gradient(700px 520px at -5% 30%, rgba(92, 200, 255, 0.08), transparent 60%),
+      var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    line-height: 1.55;
+    min-height: 100vh;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+
+  .wrap {
+    width: min(1120px, calc(100% - 32px));
+    margin: 0 auto;
+    padding: 24px 0 64px;
+  }
+
+  /* Top bar */
+  .topbar {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding-bottom: 40px;
+  }
+  .topbar img { width: 36px; height: 36px; border-radius: 10px; }
+  .topbar strong { font-size: 17px; letter-spacing: -0.01em; }
+  .topbar .spacer { flex: 1; }
+  .pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    border: 1px solid var(--border);
+    background: rgba(255, 255, 255, 0.03);
+    border-radius: 999px;
+    padding: 4px 12px;
+    color: var(--muted);
+    font-size: 12.5px;
+    white-space: nowrap;
+  }
+  .pill .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--green); }
+
+  /* Hero */
+  .hero {
+    display: grid;
+    grid-template-columns: 1.25fr 1fr;
+    gap: 48px;
+    align-items: center;
+    padding-bottom: 72px;
+  }
+  .eyebrow {
+    color: var(--accent);
+    font-weight: 600;
+    font-size: 13px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    margin: 0 0 14px;
+  }
+  h1 {
+    font-size: clamp(36px, 6vw, 62px);
+    line-height: 1.04;
+    letter-spacing: -0.035em;
+    margin: 0 0 20px;
+    text-wrap: balance;
+  }
+  h1 em {
+    font-style: normal;
+    background: linear-gradient(90deg, #C9A6FF, var(--accent) 45%, var(--sky));
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+  .lede {
+    color: var(--muted);
+    font-size: clamp(16px, 1.8vw, 19px);
+    max-width: 34em;
+    margin: 0 0 28px;
+  }
+  .actions { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 24px; }
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 13px 22px;
+    border-radius: 14px;
+    font-weight: 600;
+    font-size: 15.5px;
+    border: 1px solid var(--border);
+    color: var(--text);
+    background: var(--surface-alt);
+    transition: background 0.15s, transform 0.15s;
+  }
+  .btn:hover { text-decoration: none; background: var(--surface-high); transform: translateY(-1px); }
+  .btn.primary { background: var(--accent); color: var(--bg); border-color: transparent; }
+  .btn.primary:hover { background: var(--accent-press); }
+  .btn svg { width: 18px; height: 18px; }
+  .tags { display: flex; flex-wrap: wrap; gap: 8px; }
+
+  /* QR card */
+  .qr-card {
+    position: relative;
+    justify-self: end;
+    width: min(100%, 380px);
+    padding: 28px;
+    border-radius: 28px;
+    background: linear-gradient(180deg, rgba(29, 26, 36, 0.96), rgba(20, 18, 25, 0.96));
+    border: 1px solid var(--border);
+    box-shadow: 0 40px 100px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(169, 112, 255, 0.08) inset;
+    text-align: center;
+  }
+  .qr-card::before {
+    content: "";
+    position: absolute;
+    inset: -1px;
+    border-radius: 28px;
+    padding: 1px;
+    background: linear-gradient(160deg, rgba(169, 112, 255, 0.7), transparent 40%, transparent 60%, rgba(92, 200, 255, 0.45));
+    -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor;
+    mask-composite: exclude;
+    pointer-events: none;
+  }
+  .qr-frame {
+    position: relative;
+    background: #FFFFFF;
+    border-radius: 20px;
+    padding: 18px;
+    margin: 0 auto 20px;
+    aspect-ratio: 1;
+  }
+  .qr-frame svg { display: block; width: 100%; height: 100%; }
+  .qr-logo {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: 19%;
+    aspect-ratio: 1;
+    transform: translate(-50%, -50%);
+    background: #FFFFFF;
+    border-radius: 22%;
+    padding: 4px;
+  }
+  .qr-logo img { width: 100%; height: 100%; border-radius: 20%; display: block; }
+  .qr-card h2 { font-size: 20px; margin: 0 0 6px; letter-spacing: -0.01em; }
+  .qr-card p { margin: 0; color: var(--muted); font-size: 14.5px; }
+  .qr-card .url {
+    display: inline-block;
+    margin-top: 14px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 13px;
+    color: var(--accent);
+    background: var(--accent-soft);
+    border-radius: 8px;
+    padding: 5px 10px;
+    word-break: break-all;
+  }
+
+  /* Build info under the QR code */
+  .build {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+    margin: 18px 0 0;
+    text-align: left;
+  }
+  .build div {
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 8px 12px;
+    min-width: 0;
+  }
+  .build dt { color: var(--dim); font-size: 11.5px; text-transform: uppercase; letter-spacing: 0.06em; }
+  .build dd { margin: 0; font-size: 14px; font-weight: 600; overflow-wrap: anywhere; }
+  .build code, .sha code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    color: var(--accent);
+  }
+  .build .wide { grid-column: 1 / -1; }
+  .sha {
+    margin: 10px 0 0 !important;
+    font-size: 11.5px !important;
+    color: var(--dim) !important;
+    text-align: left;
+    overflow-wrap: anywhere;
+  }
+  .sha code { font-size: 11px; }
+
+  /* Screens */
+  .section-head { text-align: center; margin: 0 auto 36px; max-width: 640px; }
+  .section-head h2 {
+    font-size: clamp(26px, 3.6vw, 38px);
+    letter-spacing: -0.025em;
+    line-height: 1.12;
+    margin: 0 0 10px;
+  }
+  .section-head p { color: var(--muted); margin: 0; font-size: 16.5px; }
+
+  .screens {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 28px;
+    align-items: end;
+    padding-bottom: 88px;
+  }
+  .phone { margin: 0; text-align: center; }
+  .phone .frame {
+    border-radius: 36px;
+    padding: 9px;
+    background: linear-gradient(160deg, #2E2938, #17151C);
+    border: 1px solid rgba(255, 255, 255, 0.10);
+    box-shadow: 0 30px 70px rgba(0, 0, 0, 0.55);
+  }
+  .phone img {
+    display: block;
+    width: 100%;
+    height: auto;
+    aspect-ratio: 9 / 16;
+    object-fit: cover;
+    border-radius: 28px;
+    background: var(--surface);
+  }
+  .phone:nth-child(2) { transform: translateY(-28px); }
+  .phone figcaption { margin-top: 18px; }
+  .phone figcaption strong { display: block; font-size: 16px; }
+  .phone figcaption span { color: var(--dim); font-size: 14px; }
+
+  /* Features */
+  .features {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 16px;
+    padding-bottom: 88px;
+  }
+  .feature {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    padding: 22px;
+  }
+  .feature .ico {
+    width: 40px;
+    height: 40px;
+    border-radius: 12px;
+    display: grid;
+    place-items: center;
+    margin-bottom: 14px;
+    background: var(--accent-soft);
+    color: var(--accent);
+  }
+  .feature .ico svg { width: 21px; height: 21px; }
+  .feature.sky .ico { background: rgba(92, 200, 255, 0.14); color: var(--sky); }
+  .feature.green .ico { background: rgba(61, 220, 132, 0.14); color: var(--green); }
+  .feature.amber .ico { background: rgba(255, 181, 71, 0.14); color: var(--amber); }
+  .feature h3 { margin: 0 0 6px; font-size: 16.5px; letter-spacing: -0.01em; }
+  .feature p { margin: 0; color: var(--muted); font-size: 14.5px; }
+
+  /* Flow */
+  .flow {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 0;
+    counter-reset: step;
+    padding-bottom: 88px;
+  }
+  .step { position: relative; padding: 0 18px; text-align: center; }
+  .step::before {
+    counter-increment: step;
+    content: counter(step);
+    display: grid;
+    place-items: center;
+    width: 46px;
+    height: 46px;
+    margin: 0 auto 14px;
+    border-radius: 50%;
+    background: var(--surface-alt);
+    border: 1px solid rgba(169, 112, 255, 0.45);
+    color: var(--accent);
+    font-weight: 700;
+    position: relative;
+    z-index: 1;
+  }
+  .step:not(:last-child)::after {
+    content: "";
+    position: absolute;
+    top: 23px;
+    left: calc(50% + 30px);
+    right: calc(-50% + 30px);
+    height: 1px;
+    background: linear-gradient(90deg, rgba(169, 112, 255, 0.5), rgba(169, 112, 255, 0.1));
+  }
+  .step h3 { margin: 0 0 6px; font-size: 16px; }
+  .step p { margin: 0; color: var(--muted); font-size: 14px; }
+
+  /* Closing CTA */
+  .closing {
+    display: grid;
+    grid-template-columns: auto 1fr auto;
+    gap: 28px;
+    align-items: center;
+    padding: 28px;
+    border-radius: 26px;
+    background: linear-gradient(120deg, rgba(169, 112, 255, 0.16), rgba(20, 18, 25, 0.9) 55%);
+    border: 1px solid var(--border);
+    margin-bottom: 40px;
+  }
+  .closing .mini-qr {
+    width: 120px;
+    background: #FFFFFF;
+    padding: 10px;
+    border-radius: 14px;
+  }
+  .closing .mini-qr svg { display: block; width: 100%; height: auto; }
+  .closing h2 { margin: 0 0 4px; font-size: 22px; letter-spacing: -0.015em; }
+  .closing p { margin: 0; color: var(--muted); font-size: 15px; }
+
+  .note {
+    color: var(--dim);
+    font-size: 13.5px;
+    border-top: 1px solid var(--border);
+    padding-top: 22px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 24px;
+    justify-content: space-between;
+  }
+  .note p { margin: 0; max-width: 60em; }
+
+  /* Responsive */
+  @media (max-width: 900px) {
+    .hero { grid-template-columns: 1fr; gap: 36px; padding-bottom: 56px; }
+    .qr-card { justify-self: center; }
+    .features { grid-template-columns: repeat(2, 1fr); }
+    .flow { grid-template-columns: repeat(2, 1fr); row-gap: 32px; }
+    .step::after { display: none; }
+    .closing { grid-template-columns: 1fr; text-align: center; justify-items: center; }
+  }
+  @media (max-width: 640px) {
+    .wrap { width: calc(100% - 32px); padding-top: 16px; }
+    .topbar { padding-bottom: 28px; }
+    .topbar .pill.hide-sm { display: none; }
+    .screens {
+      grid-template-columns: repeat(3, 72%);
+      overflow-x: auto;
+      scroll-snap-type: x mandatory;
+      gap: 16px;
+      margin: 0 -16px;
+      padding: 30px 16px 64px;
+      scrollbar-width: none;
+    }
+    .screens::-webkit-scrollbar { display: none; }
+    .phone { scroll-snap-align: center; }
+    .phone:nth-child(2) { transform: none; }
+    .features { grid-template-columns: 1fr; padding-bottom: 64px; }
+    .flow { grid-template-columns: 1fr; padding-bottom: 64px; }
+    .closing .actions { justify-content: center; }
+  }
+
+  /* Print: a poster with the QR code front and centre */
+  @media print {
+    body { background: #FFFFFF; color: #000000; }
+    .topbar .pill, .actions, .screens, .features, .flow, .closing, .note { display: none !important; }
+    .hero { grid-template-columns: 1fr; text-align: center; padding: 0; }
+    .lede, .eyebrow { color: #333333; margin-left: auto; margin-right: auto; }
+    h1 em { color: #6A2FD0; background: none; }
+    .tags { justify-content: center; }
+    .pill { color: #333333; border-color: #CCCCCC; }
+    .qr-card { justify-self: center; box-shadow: none; background: #FFFFFF; border: 2px solid #000000; width: 420px; }
+    .qr-card::before { display: none; }
+    .qr-card p { color: #333333; }
+  }
+</style>
+</head>
+<body>
+<!-- One QR symbol, reused below. Points to the APK built from this branch.
+     Regenerated by tools/showcase.mjs; do not edit by hand. -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <symbol id="qr" data-build="viewbox" viewBox="0 0 57 57" shape-rendering="crispEdges"><!-- build:qr --><path stroke="#0B0A0F" d="M0 0.5h7m2 0h4m2 0h8m1 0h1m3 0h1m1 0h2m6 0h1m1 0h1m1 0h2m1 0h3m2 0h7M0 1.5h1m5 0h1m2 0h3m3 0h4m2 0h1m2 0h1m1 0h1m1 0h1m3 0h3m4 0h1m3 0h2m2 0h1m2 0h1m5 0h1M0 2.5h1m1 0h3m1 0h1m1 0h3m2 0h2m1 0h2m1 0h4m4 0h2m2 0h1m1 0h3m1 0h1m1 0h1m1 0h1m1 0h5m2 0h1m1 0h3m1 0h1M0 3.5h1m1 0h3m1 0h1m1 0h4m1 0h3m1 0h1m1 0h5m1 0h1m1 0h1m4 0h1m2 0h1m2 0h1m1 0h2m1 0h3m1 0h1m2 0h1m1 0h3m1 0h1M0 4.5h1m1 0h3m1 0h1m2 0h1m12 0h1m1 0h1m1 0h5m1 0h1m4 0h3m2 0h2m3 0h1m2 0h1m1 0h3m1 0h1M0 5.5h1m5 0h1m2 0h1m1 0h2m2 0h1m1 0h5m1 0h1m1 0h2m3 0h1m2 0h1m1 0h2m1 0h1m1 0h1m2 0h4m3 0h1m5 0h1M0 6.5h7m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h7M9 7.5h1m1 0h1m1 0h1m3 0h4m3 0h1m1 0h1m3 0h1m1 0h2m6 0h2m1 0h2m2 0h2M3 8.5h2m1 0h2m2 0h1m1 0h3m2 0h1m4 0h1m2 0h6m1 0h2m1 0h1m1 0h2m1 0h1m3 0h1m1 0h2m5 0h2M0 9.5h1m2 0h2m3 0h1m1 0h4m1 0h4m3 0h1m4 0h1m3 0h2m2 0h1m1 0h1m3 0h2m3 0h6m1 0h1M1 10.5h4m1 0h1m1 0h1m1 0h1m1 0h2m5 0h2m4 0h5m1 0h4m3 0h2m1 0h1m1 0h1m8 0h1m3 0h1M3 11.5h1m1 0h1m1 0h3m4 0h8m1 0h2m1 0h1m4 0h1m2 0h2m2 0h1m3 0h1m1 0h1m1 0h1m4 0h1m2 0h3M4 12.5h3m1 0h2m2 0h2m1 0h1m2 0h1m2 0h1m2 0h1m1 0h2m1 0h5m3 0h2m1 0h2m2 0h1m5 0h1m1 0h2m1 0h1M2 13.5h3m3 0h1m1 0h3m1 0h1m1 0h1m1 0h1m3 0h2m1 0h3m2 0h5m1 0h1m1 0h3m1 0h1m1 0h1m3 0h1m1 0h1m2 0h1m1 0h1M0 14.5h1m1 0h1m2 0h2m3 0h2m1 0h3m1 0h1m1 0h5m5 0h1m2 0h4m2 0h4m1 0h1m5 0h2m1 0h2M2 15.5h2m5 0h1m4 0h1m1 0h2m1 0h2m1 0h1m3 0h1m5 0h1m1 0h1m2 0h1m3 0h2m2 0h2m1 0h3m1 0h1m1 0h2M1 16.5h1m1 0h4m2 0h2m1 0h1m1 0h5m2 0h2m1 0h3m4 0h1m2 0h1m2 0h3m2 0h4m1 0h1m2 0h1m1 0h1m2 0h1M1 17.5h1m1 0h3m1 0h2m2 0h3m2 0h1m2 0h2m2 0h1m1 0h2m1 0h1m1 0h5m2 0h1m2 0h1m1 0h1m2 0h2m1 0h2m3 0h2m1 0h1M0 18.5h3m1 0h1m1 0h2m2 0h7m1 0h1m2 0h1m3 0h1m3 0h2m5 0h3m1 0h2m3 0h1m2 0h1m6 0h2M3 19.5h3m2 0h2m1 0h3m1 0h4m1 0h1m2 0h2m1 0h1m1 0h3m1 0h1m2 0h2m1 0h1m1 0h2m3 0h1m1 0h4m1 0h4M0 20.5h1m2 0h1m2 0h2m1 0h6m1 0h1m1 0h3m4 0h1m2 0h1m4 0h3m4 0h4m2 0h1m2 0h2m1 0h1m2 0h1M1 21.5h2m4 0h3m1 0h4m1 0h1m1 0h2m6 0h2m2 0h3m2 0h1m1 0h2m1 0h1m1 0h3m1 0h3m1 0h4M0 22.5h1m3 0h1m1 0h3m3 0h1m4 0h1m4 0h3m1 0h1m5 0h4m5 0h1m1 0h5m5 0h1m1 0h2M0 23.5h2m3 0h1m2 0h1m1 0h1m1 0h2m7 0h1m3 0h2m1 0h1m3 0h2m1 0h1m3 0h4m1 0h1m1 0h1m3 0h2M1 24.5h6m2 0h1m3 0h1m1 0h2m1 0h2m1 0h1m1 0h3m2 0h1m1 0h7m1 0h3m1 0h1m1 0h1m1 0h1m1 0h3m1 0h5M0 25.5h1m1 0h4m1 0h2m1 0h1m1 0h2m1 0h1m2 0h3m1 0h1m5 0h1m1 0h2m4 0h1m1 0h2m2 0h1m1 0h2m1 0h2m1 0h1m2 0h2m1 0h1M0 26.5h1m2 0h6m1 0h1m2 0h1m1 0h3m3 0h1m1 0h2m1 0h6m4 0h1m1 0h8m1 0h6m2 0h1M1 27.5h1m1 0h2m3 0h1m1 0h4m5 0h1m1 0h1m1 0h4m3 0h1m1 0h3m1 0h2m1 0h1m1 0h2m2 0h4m3 0h5M2 28.5h1m1 0h1m1 0h1m1 0h2m2 0h1m2 0h3m6 0h3m1 0h1m1 0h1m3 0h5m4 0h2m3 0h1m1 0h1m1 0h2m2 0h1M0 29.5h1m1 0h3m3 0h5m2 0h2m2 0h1m3 0h1m2 0h1m3 0h1m1 0h3m2 0h1m1 0h2m1 0h3m1 0h1m1 0h1m3 0h1m2 0h1M0 30.5h2m1 0h6m1 0h1m2 0h1m2 0h2m1 0h1m1 0h2m1 0h10m2 0h2m1 0h3m1 0h2m3 0h6m2 0h1M0 31.5h1m2 0h1m1 0h1m1 0h1m2 0h2m1 0h6m1 0h1m3 0h5m2 0h1m1 0h2m1 0h3m1 0h1m1 0h2m3 0h1m1 0h1m2 0h3M2 32.5h1m1 0h1m1 0h1m2 0h6m1 0h3m3 0h1m2 0h2m3 0h1m1 0h3m1 0h1m1 0h1m1 0h3m2 0h1m2 0h1m1 0h1m5 0h1M0 33.5h1m1 0h1m2 0h1m1 0h1m1 0h2m2 0h1m6 0h2m1 0h1m1 0h1m1 0h2m1 0h3m1 0h1m1 0h1m1 0h2m1 0h6m1 0h1m1 0h4M2 34.5h5m2 0h1m1 0h1m1 0h3m1 0h1m1 0h1m2 0h2m1 0h2m1 0h2m3 0h2m4 0h1m5 0h6m1 0h2m1 0h2M1 35.5h1m3 0h1m1 0h2m3 0h1m4 0h1m1 0h2m5 0h5m2 0h2m1 0h1m1 0h2m2 0h1m1 0h1m1 0h2m1 0h1m2 0h1m1 0h3M1 36.5h1m1 0h2m1 0h1m2 0h3m1 0h1m1 0h2m2 0h2m5 0h2m2 0h1m8 0h2m1 0h4m2 0h3m4 0h1M2 37.5h1m1 0h2m1 0h1m11 0h1m2 0h1m5 0h1m2 0h1m2 0h1m1 0h3m2 0h2m2 0h1m1 0h1m2 0h2m1 0h1m1 0h1M2 38.5h1m1 0h3m2 0h2m1 0h2m1 0h5m6 0h1m1 0h2m1 0h4m1 0h2m1 0h1m4 0h2m1 0h1m1 0h1m3 0h3M0 39.5h1m1 0h4m1 0h1m4 0h6m1 0h1m3 0h2m1 0h2m1 0h5m1 0h2m1 0h2m1 0h5m1 0h1m1 0h2m1 0h4M1 40.5h1m1 0h1m2 0h1m1 0h2m3 0h2m1 0h2m4 0h1m7 0h1m1 0h7m5 0h4m1 0h4m2 0h2M0 41.5h1m1 0h1m2 0h1m5 0h3m1 0h5m4 0h1m2 0h2m1 0h2m3 0h2m2 0h1m1 0h3m1 0h1m2 0h1m2 0h4m1 0h1M0 42.5h1m4 0h3m3 0h2m2 0h2m1 0h4m1 0h2m1 0h3m2 0h2m2 0h2m1 0h1m2 0h1m1 0h6m1 0h3m3 0h1M1 43.5h2m1 0h2m1 0h3m6 0h2m1 0h3m1 0h2m3 0h2m4 0h1m1 0h1m2 0h5m2 0h3m2 0h1m1 0h2m1 0h1M1 44.5h6m1 0h8m2 0h3m3 0h2m4 0h3m2 0h4m1 0h2m3 0h1m4 0h2M2 45.5h1m1 0h1m3 0h1m3 0h2m2 0h1m2 0h1m2 0h3m3 0h4m1 0h1m3 0h1m2 0h1m1 0h3m1 0h1m1 0h7M0 46.5h1m1 0h1m2 0h2m2 0h2m1 0h3m3 0h2m4 0h1m2 0h3m1 0h1m1 0h3m2 0h1m1 0h1m2 0h6m1 0h1m1 0h5M0 47.5h5m3 0h2m1 0h1m2 0h2m3 0h4m1 0h2m1 0h2m2 0h2m4 0h3m1 0h2m1 0h1m5 0h1m1 0h1m1 0h1m1 0h1M6 48.5h1m1 0h2m3 0h1m1 0h1m1 0h1m1 0h5m2 0h6m4 0h2m2 0h1m1 0h1m1 0h9m3 0h1M8 49.5h6m1 0h1m1 0h1m2 0h1m1 0h2m2 0h1m3 0h1m2 0h1m1 0h1m3 0h1m1 0h2m1 0h2m1 0h2m3 0h2m1 0h1M0 50.5h7m1 0h1m2 0h1m1 0h1m2 0h3m1 0h3m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h2m2 0h2m3 0h1m2 0h1m1 0h1m1 0h2M0 51.5h1m5 0h1m2 0h2m2 0h3m1 0h1m1 0h2m5 0h1m3 0h1m2 0h7m1 0h1m3 0h1m1 0h2m3 0h5M0 52.5h1m1 0h3m1 0h1m1 0h3m2 0h1m6 0h1m5 0h6m2 0h1m1 0h1m4 0h1m1 0h2m1 0h1m1 0h5m2 0h2M0 53.5h1m1 0h3m1 0h1m1 0h2m3 0h1m1 0h3m2 0h1m2 0h1m2 0h1m1 0h1m5 0h1m2 0h4m1 0h1m1 0h4m2 0h2m1 0h2M0 54.5h1m1 0h3m1 0h1m7 0h1m2 0h3m1 0h1m3 0h2m4 0h1m1 0h1m2 0h1m1 0h2m1 0h1m2 0h1m3 0h1m1 0h1m1 0h1m1 0h3M0 55.5h1m5 0h1m3 0h1m2 0h1m2 0h1m4 0h2m1 0h1m1 0h1m1 0h3m2 0h4m4 0h1m1 0h1m1 0h2m3 0h1m3 0h3M0 56.5h7m2 0h1m1 0h1m1 0h1m2 0h3m1 0h5m1 0h2m3 0h1m14 0h1m1 0h4m1 0h2"/><!-- /build:qr --></symbol>
+  </defs>
+</svg>
+
+<div class="wrap">
+  <header class="topbar">
+    <img src="img/icon.png" alt="">
+    <strong>SoulStream</strong>
+    <span class="spacer"></span>
+    <span class="pill hide-sm">React Native · iOS / Android</span>
+    <span class="pill"><span class="dot"></span>Build de développement</span>
+  </header>
+
+  <section class="hero">
+    <div>
+      <p class="eyebrow">Streaming pair-à-pair</p>
+      <h1>Toute la musique de Soulseek, <em>lue à la volée.</em></h1>
+      <p class="lede">
+        Tapez un titre, SoulStream trouve la meilleure source sur le réseau
+        Soulseek et lance la lecture pendant que le fichier arrive du pair.
+        Pas de catalogue central, pas de serveur de streaming.
+      </p>
+      <div class="actions">
+        <a class="btn primary" href="https://github.com/Thibaut-Fontaine/soulseek-streaming/raw/ccr-b56e6780-ko4xxa/releases/SoulStream.apk" data-build="apk-link">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v11m0 0l-4.5-4.5M12 15l4.5-4.5M5 20h14"/></svg>
+          Télécharger l'APK
+        </a>
+        <a class="btn" href="https://github.com/Thibaut-Fontaine/soulseek-streaming">
+          <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.58 2 12.23c0 4.52 2.87 8.35 6.84 9.7.5.1.68-.22.68-.49v-1.7c-2.78.62-3.37-1.36-3.37-1.36-.46-1.19-1.11-1.5-1.11-1.5-.91-.64.07-.62.07-.62 1 .07 1.53 1.06 1.53 1.06.9 1.57 2.35 1.12 2.92.85.09-.66.35-1.12.63-1.37-2.22-.26-4.56-1.14-4.56-5.07 0-1.12.39-2.04 1.03-2.76-.1-.26-.45-1.3.1-2.71 0 0 .84-.28 2.75 1.05A9.36 9.36 0 0112 6.84c.85 0 1.71.12 2.51.34 1.91-1.33 2.75-1.05 2.75-1.05.55 1.41.2 2.45.1 2.71.64.72 1.03 1.64 1.03 2.76 0 3.94-2.34 4.8-4.57 5.06.36.32.68.94.68 1.9v2.81c0 .27.18.6.69.49A10.1 10.1 0 0022 12.23C22 6.58 17.52 2 12 2z"/></svg>
+          Code source
+        </a>
+      </div>
+      <div class="tags">
+        <span class="pill">Android 7.0+</span>
+                <span class="pill">MP3 uniquement</span>
+        <span class="pill">Recherche en un geste</span>
+        <span class="pill">Sans télémétrie</span>
+      </div>
+    </div>
+
+    <aside class="qr-card" aria-label="QR code de téléchargement">
+      <div class="qr-frame">
+        <svg role="img" aria-label="QR code vers l'APK de développement"><use href="#qr"/></svg>
+        <div class="qr-logo"><img src="img/icon.png" alt=""></div>
+      </div>
+      <h2>Scannez pour installer</h2>
+      <p>Visez le code avec l'appareil photo d'un téléphone Android. L'APK se télécharge depuis GitHub : connectez-vous avec un compte qui a accès au dépôt.</p>
+      <!-- build:info -->
+      <dl class="build">
+        <div class="wide"><dt>Branche</dt><dd><code>ccr-b56e6780-ko4xxa</code></dd></div>
+        <div><dt>Commit</dt><dd><code>d6c5a5b</code></dd></div>
+        <div><dt>Date</dt><dd>23 oct. 2026</dd></div>
+        <div><dt>Taille</dt><dd>34,5 Mo</dd></div>
+        <div><dt>Android</dt><dd>7.0+</dd></div>
+      </dl>
+      <p class="sha">SHA-256 <code>ac8d591dad231c540b9ee1db73f9cf042b430fbb688f8b0fc250a3fb97128a5b</code></p>
+      <!-- /build:info -->
+    </aside>
+  </section>
+
+  <div class="section-head">
+    <h2>Trois écrans, zéro friction</h2>
+    <p>Connexion avec votre compte Soulseek, une recherche, et la musique démarre.</p>
+  </div>
+  <section class="screens">
+    <figure class="phone">
+      <div class="frame"><img src="img/login.png" alt="Écran de connexion de SoulStream" loading="lazy"></div>
+      <figcaption><strong>Connexion</strong><span>Votre compte Soulseek, stocké dans le trousseau</span></figcaption>
+    </figure>
+    <figure class="phone">
+      <div class="frame"><img src="img/search.png" alt="Écran de recherche de SoulStream" loading="lazy"></div>
+      <figcaption><strong>Recherche</strong><span>Le meilleur résultat se lance tout seul</span></figcaption>
+    </figure>
+    <figure class="phone">
+      <div class="frame"><img src="img/player.png" alt="Écran de lecture de SoulStream" loading="lazy"></div>
+      <figcaption><strong>Lecture</strong><span>Tampon en direct, écran verrouillé, arrière-plan</span></figcaption>
+    </figure>
+  </section>
+
+  <div class="section-head">
+    <h2>Pensé pour le mobile</h2>
+    <p>Un client Soulseek complet, réécrit en TypeScript, avec un lecteur natif.</p>
+  </div>
+  <section class="features">
+    <div class="feature">
+      <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2L4 14h7l-1 8 9-12h-7l1-8z"/></svg></div>
+      <h3>Démarrage quasi instantané</h3>
+      <p>Lecture dès que 15 % du MP3 est reçu, via un proxy HTTP local avec requêtes Range.</p>
+    </div>
+    <div class="feature sky">
+      <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg></div>
+      <h3>Recherche en un geste</h3>
+      <p>Requête nettoyée localement, scoring Levenshtein, premier bon résultat joué automatiquement.</p>
+    </div>
+    <div class="feature green">
+      <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12a8 8 0 0114-5.3M20 12a8 8 0 01-14 5.3"/><path d="M18 3v4h-4M6 21v-4h4"/></svg></div>
+      <h3>Bascule automatique</h3>
+      <p>Les sources sont classées ; si un pair refuse ou ne répond pas, la suivante prend le relais.</p>
+    </div>
+    <div class="feature">
+      <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="12" r="2.5"/><circle cx="18" cy="6" r="2.5"/><circle cx="18" cy="18" r="2.5"/><path d="M8.2 10.8l7.6-3.6M8.2 13.2l7.6 3.6"/></svg></div>
+      <h3>Bon citoyen du réseau</h3>
+      <p>Les morceaux écoutés sont partagés en retour, en Wi-Fi uniquement par défaut.</p>
+    </div>
+    <div class="feature amber">
+      <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l7 3v5c0 4.5-3 8.3-7 10-4-1.7-7-5.5-7-10V6l7-3z"/></svg></div>
+      <h3>Fonctionne derrière un NAT</h3>
+      <p>Connexions indirectes ConnectToPeer / PierceFirewall pour joindre les pairs sans redirection de port.</p>
+    </div>
+    <div class="feature sky">
+      <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="2.5" width="12" height="19" rx="3"/><path d="M10 6.5l4 2.5-4 2.5z"/></svg></div>
+      <h3>Lecture en arrière-plan</h3>
+      <p>Contrôles sur l'écran verrouillé et notification média, sur iOS comme sur Android.</p>
+    </div>
+  </section>
+
+  <div class="section-head">
+    <h2>D'un titre au son, en quatre étapes</h2>
+    <p>Tout se passe entre votre téléphone et le pair, sans intermédiaire.</p>
+  </div>
+  <section class="flow">
+    <div class="step"><h3>Recherche</h3><p>La requête part sur le réseau Soulseek ; les pairs répondent avec leurs MP3.</p></div>
+    <div class="step"><h3>Choix</h3><p>Bitrate, file d'attente et vitesse du pair départagent les sources.</p></div>
+    <div class="step"><h3>Transfert</h3><p>Le pair envoie le fichier, directement ou via une connexion indirecte.</p></div>
+    <div class="step"><h3>Lecture</h3><p>ExoPlayer ou AVPlayer lit les octets au fur et à mesure qu'ils arrivent.</p></div>
+  </section>
+
+  <section class="closing">
+    <div class="mini-qr"><svg role="img" aria-label="QR code de téléchargement"><use href="#qr"/></svg></div>
+    <div>
+      <h2>Prêt à écouter ?</h2>
+      <p>Build de la branche en cours, signée avec une clé de développement, à installer manuellement. Un compte Soulseek est nécessaire. La version stable reste sur <a href="https://thibautfontaine.space/streaming/">thibautfontaine.space/streaming</a>.</p>
+    </div>
+    <div class="actions" style="margin:0">
+      <a class="btn primary" href="https://github.com/Thibaut-Fontaine/soulseek-streaming/raw/ccr-b56e6780-ko4xxa/releases/SoulStream.apk" data-build="apk-link">Télécharger l'APK</a>
+    </div>
+  </section>
+
+  <footer class="note">
+    <p>
+      <strong>Usage responsable.</strong> SoulStream ne fournit aucun catalogue ni
+      aucun fichier : le réseau Soulseek est alimenté par ses utilisateurs.
+      N'écoutez et ne partagez que des œuvres que vous avez le droit d'utiliser.
+    </p>
+    <a href="https://github.com/Thibaut-Fontaine/soulseek-streaming">github.com/Thibaut-Fontaine/soulseek-streaming</a>
+  </footer>
+</div>
+</body>
+</html>

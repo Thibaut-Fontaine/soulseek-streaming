@@ -1,5 +1,5 @@
 import { md5 } from 'js-md5';
-import { Inflate } from 'pako';
+import { Inflate, deflate } from 'pako';
 
 import { ByteReader, ByteWriter, concatBytes, readU32 } from './bytes';
 
@@ -16,6 +16,7 @@ export const ServerCode = {
   FILE_SEARCH: 26,
   SET_STATUS: 28,
   SERVER_PING: 32,
+  SHARED_FOLDERS_FILES: 35,
   GET_USER_STATS: 36,
   RELOGGED: 41,
   HAVE_NO_PARENT: 71,
@@ -24,7 +25,13 @@ export const ServerCode = {
 } as const;
 
 export const PeerCode = {
+  GET_SHARE_FILE_LIST: 4,
+  SHARED_FILE_LIST_RESPONSE: 5,
   FILE_SEARCH_RESPONSE: 9,
+  USER_INFO_REQUEST: 15,
+  USER_INFO_RESPONSE: 16,
+  FOLDER_CONTENTS_REQUEST: 36,
+  FOLDER_CONTENTS_RESPONSE: 37,
   TRANSFER_REQUEST: 40,
   TRANSFER_RESPONSE: 41,
   QUEUE_UPLOAD: 43,
@@ -79,6 +86,8 @@ export interface SearchResponse {
   username: string;
   token: number;
   files: FileInfo[];
+  /** Buddy-only files. They are listed but the peer refuses to send them. */
+  lockedFiles: FileInfo[];
   slotFree: boolean;
   avgSpeed: number;
   queueLength: number;
@@ -474,21 +483,24 @@ export function parseFileSearchResponse(payload: Uint8Array): SearchResponse {
   const avgSpeed = reader.u32();
   const queueLength = reader.u32();
 
-  // Some clients append an unknown uint32 and a private result list. Both are
-  // optional, so only read them when they are actually present.
+  // Some clients append an unknown uint32 and a private (buddy-only) result
+  // list. Both are optional, so only read them when they are present. Locked
+  // files are kept apart: requesting one always ends in UploadDenied.
+  let lockedFiles: FileInfo[] = [];
+
   if (reader.remaining >= 4) {
     reader.u32();
 
     if (reader.remaining >= 4) {
       try {
-        files.push(...parseFileList(reader));
+        lockedFiles = parseFileList(reader);
       } catch {
         // A malformed private list must not discard the public results.
       }
     }
   }
 
-  return { username, token, files, slotFree, avgSpeed, queueLength };
+  return { username, token, files, lockedFiles, slotFree, avgSpeed, queueLength };
 }
 
 /**
@@ -507,4 +519,173 @@ export function parseFileTransferInit(data: Uint8Array): number {
   }
 
   return readU32(data, 0);
+}
+
+/* -------------------------------------------------------------------------- */
+/* Sharing and uploads                                                        */
+/* -------------------------------------------------------------------------- */
+
+/** A file we share, as other users see it. */
+export interface SharedFileInfo {
+  /** Full virtual path, e.g. `SoulStream\\Artist - Title.mp3`. */
+  path: string;
+  size: number;
+  bitrate?: number;
+  durationSec?: number;
+}
+
+/** Tells the server how many folders and files we share. */
+export function encodeSharedFoldersFiles(folders: number, files: number): Uint8Array {
+  const writer = new ByteWriter();
+  writer.u32(folders).u32(files);
+  return encodeServerMessage(ServerCode.SHARED_FOLDERS_FILES, writer.toBytes());
+}
+
+function splitPath(path: string): { folder: string; name: string } {
+  const index = path.lastIndexOf('\\');
+  return index < 0
+    ? { folder: '', name: path }
+    : { folder: path.slice(0, index), name: path.slice(index + 1) };
+}
+
+function writeFileEntry(writer: ByteWriter, file: SharedFileInfo, name: string): void {
+  const dot = name.lastIndexOf('.');
+  const extension = dot >= 0 ? name.slice(dot + 1).toLowerCase() : '';
+  const attributes: Array<[number, number]> = [];
+
+  if (file.bitrate) {
+    attributes.push([0, file.bitrate]);
+  }
+
+  if (file.durationSec) {
+    attributes.push([1, Math.round(file.durationSec)]);
+  }
+
+  writer.u8(1).string(name).u64(file.size).string(extension).u32(attributes.length);
+
+  for (const [code, value] of attributes) {
+    writer.u32(code).u32(value);
+  }
+}
+
+/** Groups files by folder, keeping the folder order stable. */
+function groupByFolder(files: SharedFileInfo[]): Map<string, Array<{ file: SharedFileInfo; name: string }>> {
+  const folders = new Map<string, Array<{ file: SharedFileInfo; name: string }>>();
+
+  for (const file of files) {
+    const { folder, name } = splitPath(file.path);
+    const list = folders.get(folder) ?? [];
+    list.push({ file, name });
+    folders.set(folder, list);
+  }
+
+  return folders;
+}
+
+function writeFolders(
+  writer: ByteWriter,
+  folders: Map<string, Array<{ file: SharedFileInfo; name: string }>>,
+): void {
+  writer.u32(folders.size);
+
+  for (const [folder, entries] of folders) {
+    writer.string(folder).u32(entries.length);
+
+    for (const { file, name } of entries) {
+      writeFileEntry(writer, file, name);
+    }
+  }
+}
+
+/** Answer to GetShareFileList: our whole share, zlib-compressed. */
+export function encodeSharedFileListResponse(files: SharedFileInfo[]): Uint8Array {
+  const writer = new ByteWriter();
+  writeFolders(writer, groupByFolder(files));
+  writer.u32(0); // unknown, always 0
+  writer.u32(0); // no private (buddy-only) folders
+  return encodePeerMessage(PeerCode.SHARED_FILE_LIST_RESPONSE, deflate(writer.toBytes()));
+}
+
+export function parseFolderContentsRequest(payload: Uint8Array): { token: number; folder: string } {
+  const reader = new ByteReader(payload);
+  return { token: reader.u32(), folder: reader.string() };
+}
+
+export function encodeFolderContentsResponse(
+  token: number,
+  folder: string,
+  files: SharedFileInfo[],
+): Uint8Array {
+  const folders = groupByFolder(files.filter(file => splitPath(file.path).folder === folder));
+  const writer = new ByteWriter();
+  writer.u32(token).string(folder);
+  writeFolders(writer, folders);
+  return encodePeerMessage(PeerCode.FOLDER_CONTENTS_RESPONSE, deflate(writer.toBytes()));
+}
+
+export function encodeUserInfoResponse(info: {
+  description: string;
+  uploadSlots: number;
+  queueSize: number;
+  slotsFree: boolean;
+}): Uint8Array {
+  const writer = new ByteWriter();
+  writer.string(info.description).bool(false); // no picture
+  writer.u32(info.uploadSlots).u32(info.queueSize).bool(info.slotsFree);
+  writer.u32(1); // uploads permitted to everyone
+  return encodePeerMessage(PeerCode.USER_INFO_RESPONSE, writer.toBytes());
+}
+
+export function parseQueueUpload(payload: Uint8Array): { filename: string } {
+  const reader = new ByteReader(payload);
+  return { filename: reader.string() };
+}
+
+export function parsePlaceInQueueRequest(payload: Uint8Array): { filename: string } {
+  const reader = new ByteReader(payload);
+  return { filename: reader.string() };
+}
+
+export function encodePlaceInQueueResponse(filename: string, place: number): Uint8Array {
+  const writer = new ByteWriter();
+  writer.string(filename).u32(place);
+  return encodePeerMessage(PeerCode.PLACE_IN_QUEUE_RESPONSE, writer.toBytes());
+}
+
+/** We offer to send a file: TransferRequest with the upload direction. */
+export function encodeUploadTransferRequest(token: number, filename: string, size: number): Uint8Array {
+  const writer = new ByteWriter();
+  writer.u32(TransferDirection.UPLOAD).u32(token).string(filename).u64(size);
+  return encodePeerMessage(PeerCode.TRANSFER_REQUEST, writer.toBytes());
+}
+
+export function parseTransferResponse(payload: Uint8Array): {
+  token: number;
+  allowed: boolean;
+  reason?: string;
+} {
+  const reader = new ByteReader(payload);
+  const token = reader.u32();
+  const allowed = reader.bool();
+  const reason = !allowed && reader.hasRemaining() ? reader.string() : undefined;
+  return { token, allowed, reason };
+}
+
+export function encodeUploadDenied(filename: string, reason: string): Uint8Array {
+  const writer = new ByteWriter();
+  writer.string(filename).string(reason);
+  return encodePeerMessage(PeerCode.UPLOAD_DENIED, writer.toBytes());
+}
+
+export function encodeUploadFailed(filename: string): Uint8Array {
+  const writer = new ByteWriter();
+  writer.string(filename);
+  return encodePeerMessage(PeerCode.UPLOAD_FAILED, writer.toBytes());
+}
+
+/** Raw first message of an F connection opened by the uploader. */
+export function encodeFileTransferInit(token: number): Uint8Array {
+  const writer = new ByteWriter();
+  writer.u32(token);
+  return writer.toBytes();
 }

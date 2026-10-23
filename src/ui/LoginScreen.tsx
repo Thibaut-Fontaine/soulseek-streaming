@@ -1,8 +1,8 @@
 import React from 'react';
 import {
-  ActivityIndicator,
   KeyboardAvoidingView,
   Linking,
+  Modal,
   Platform,
   Pressable,
   ScrollView,
@@ -11,11 +11,28 @@ import {
   TextInput,
   View,
 } from 'react-native';
+import LinearGradient from 'react-native-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useAppStore } from '../state/store';
-import { CoverArt, PrimaryButton } from './components';
-import { colors, spacing } from './theme';
+import { Button, CoverArt } from './components';
+import { Icon } from './Icon';
+import { colors, gutter, radius, spacing, type } from './theme';
+
+const MOSAIC_SEEDS = [
+  'Teardrop',
+  'Roygbiv',
+  'Odessa',
+  'Kerala',
+  'Roads',
+  'Genesis',
+  'Bad Kingdom',
+  'Fake Plastic Trees',
+  'Windowlicker',
+  'Midnight City',
+  'Glory Box',
+  'Archangel',
+];
 
 export function LoginScreen() {
   const insets = useSafeAreaInsets();
@@ -24,27 +41,19 @@ export function LoginScreen() {
   const connectionError = useAppStore(state => state.connectionError);
   const prefillUsername = useAppStore(state => state.prefillUsername);
   const settings = useAppStore(state => state.settings);
-  const applySettings = useAppStore(state => state.applySettings);
 
   const [username, setUsername] = React.useState(prefillUsername);
   const [password, setPassword] = React.useState('');
   const [showPassword, setShowPassword] = React.useState(false);
   const [localError, setLocalError] = React.useState<string | null>(null);
-  const [showServer, setShowServer] = React.useState(false);
-  const [host, setHost] = React.useState(settings.serverHost);
-  const [port, setPort] = React.useState(String(settings.serverPort));
-  const [serverSaved, setServerSaved] = React.useState(false);
+  const [serverOpen, setServerOpen] = React.useState(false);
+  const passwordRef = React.useRef<TextInput>(null);
 
   React.useEffect(() => {
     if (prefillUsername) {
       setUsername(prefillUsername);
     }
   }, [prefillUsername]);
-
-  React.useEffect(() => {
-    setHost(settings.serverHost);
-    setPort(String(settings.serverPort));
-  }, [settings.serverHost, settings.serverPort]);
 
   const submit = async () => {
     const nick = username.trim();
@@ -70,42 +79,33 @@ export function LoginScreen() {
 
   const error = localError ?? connectionError;
 
-  const saveServer = async () => {
-    const nextPort = Number(port.trim());
-
-    if (!host.trim() || !Number.isInteger(nextPort) || nextPort < 1 || nextPort > 65535) {
-      setLocalError('Serveur ou port invalide');
-      return;
-    }
-
-    setLocalError(null);
-    await applySettings({ ...settings, serverHost: host.trim(), serverPort: nextPort });
-    setServerSaved(true);
-  };
-
   return (
-    <KeyboardAvoidingView
-      style={styles.flex}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-      <ScrollView
-        contentContainerStyle={[
-          styles.content,
-          { paddingTop: insets.top + 36, paddingBottom: insets.bottom + 28 },
-        ]}
-        keyboardShouldPersistTaps="handled">
-        <View style={styles.brand}>
-          <CoverArt seed="SoulStream" title="S" size={86} />
+    <View style={styles.root}>
+      <View style={styles.hero} pointerEvents="none">
+        <View style={styles.mosaic}>
+          {MOSAIC_SEEDS.map(seed => (
+            <CoverArt key={seed} seed={seed} title={seed} size={84} rounded="sm" />
+          ))}
+        </View>
+        <LinearGradient colors={HERO_FADE} locations={HERO_STOPS} style={StyleSheet.absoluteFill} />
+      </View>
+
+      <KeyboardAvoidingView
+        style={styles.flex}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+        <ScrollView
+          contentContainerStyle={[
+            styles.content,
+            { paddingTop: insets.top + 120, paddingBottom: insets.bottom + 28 },
+          ]}
+          keyboardShouldPersistTaps="handled">
+          <View style={styles.logo}>
+            <Icon name="wave" size={34} color={colors.onAccent} strokeWidth={2.6} />
+          </View>
           <Text style={styles.title}>SoulStream</Text>
           <Text style={styles.subtitle}>
-            Streaming musical pair-à-pair sur le réseau Soulseek
-          </Text>
-        </View>
-
-        <View style={styles.card}>
-          <Text style={styles.cardTitle}>Connexion au réseau</Text>
-          <Text style={styles.cardBody}>
-            Utilisez votre compte Soulseek. Vos identifiants sont conservés dans le
-            trousseau sécurisé de votre appareil.
+            Streaming musical pair-à-pair sur le réseau Soulseek. Vos identifiants restent
+            dans le trousseau sécurisé de l’appareil.
           </Text>
 
           <Text style={styles.label}>Nom d'utilisateur</Text>
@@ -122,18 +122,18 @@ export function LoginScreen() {
             editable={!connecting}
             style={styles.input}
             returnKeyType="next"
+            onSubmitEditing={() => passwordRef.current?.focus()}
+            accessibilityLabel="Nom d'utilisateur"
           />
 
-          <View style={styles.passwordRow}>
+          <View style={styles.passwordHead}>
             <Text style={styles.label}>Mot de passe</Text>
             <Pressable onPress={() => setShowPassword(value => !value)} hitSlop={8}>
-              <Text style={styles.showPassword}>
-                {showPassword ? 'Masquer' : 'Afficher'}
-              </Text>
+              <Text style={styles.link}>{showPassword ? 'Masquer' : 'Afficher'}</Text>
             </Pressable>
           </View>
-
           <TextInput
+            ref={passwordRef}
             value={password}
             onChangeText={value => {
               setPassword(value);
@@ -148,260 +148,302 @@ export function LoginScreen() {
             style={styles.input}
             onSubmitEditing={submit}
             returnKeyType="go"
+            accessibilityLabel="Mot de passe"
           />
 
           {error ? (
             <View style={styles.errorBox}>
+              <Icon name="info" size={16} color={colors.danger} />
               <Text style={styles.errorText}>{error}</Text>
             </View>
           ) : null}
 
-          <PrimaryButton
-            label={connecting ? 'Connexion…' : 'Se connecter'}
+          {/* TODO(wire): show Serveur → Auth → Port steps once the store exposes
+              login sub-states; `connection` is only "connecting" today. */}
+          <Button
+            label={connecting ? 'Connexion au serveur…' : 'Se connecter'}
             onPress={submit}
             loading={connecting}
+            block
             style={styles.submit}
           />
 
-          <View style={styles.connectingRow}>
-            {connecting ? (
-              <>
-                <ActivityIndicator size="small" color={colors.accentBright} />
-                <Text style={styles.connectingText}>Connexion au serveur Soulseek…</Text>
-              </>
-            ) : null}
+          <Pressable
+            onPress={() => setServerOpen(true)}
+            style={styles.serverLink}
+            accessibilityRole="button">
+            <Icon name="server" size={16} color={colors.textDim} />
+            <Text style={styles.serverLinkText}>
+              {settings.serverHost}:{settings.serverPort} · modifier
+            </Text>
+          </Pressable>
+
+          <Pressable onPress={() => Linking.openURL('https://www.slsknet.org/')} style={styles.create}>
+            <Text style={styles.link}>Pas encore de compte ? Créer un compte sur slsknet.org</Text>
+          </Pressable>
+
+          <Text style={styles.legal}>
+            SoulStream ne fournit aucun contenu. Vous êtes responsable des œuvres que vous
+            écoutez et partagez. Le réseau Soulseek nécessite un port entrant accessible pour
+            de meilleures performances.
+          </Text>
+        </ScrollView>
+      </KeyboardAvoidingView>
+
+      <ServerSheet visible={serverOpen} onClose={() => setServerOpen(false)} />
+    </View>
+  );
+}
+
+const HERO_FADE = ['rgba(11,10,15,0.15)', 'rgba(11,10,15,0.7)', colors.bg];
+const HERO_STOPS = [0, 0.55, 1];
+
+/** Bottom sheet for the server address (rarely changed, so kept out of the way). */
+function ServerSheet({ visible, onClose }: { visible: boolean; onClose: () => void }) {
+  const insets = useSafeAreaInsets();
+  const settings = useAppStore(state => state.settings);
+  const applySettings = useAppStore(state => state.applySettings);
+
+  const [host, setHost] = React.useState(settings.serverHost);
+  const [port, setPort] = React.useState(String(settings.serverPort));
+  const [error, setError] = React.useState<string | null>(null);
+
+  React.useEffect(() => {
+    if (visible) {
+      setHost(settings.serverHost);
+      setPort(String(settings.serverPort));
+      setError(null);
+    }
+  }, [visible, settings.serverHost, settings.serverPort]);
+
+  const save = async () => {
+    const nextPort = Number(port.trim());
+
+    if (!host.trim() || !Number.isInteger(nextPort) || nextPort < 1 || nextPort > 65535) {
+      setError('Serveur ou port invalide');
+      return;
+    }
+
+    await applySettings({ ...settings, serverHost: host.trim(), serverPort: nextPort });
+    onClose();
+  };
+
+  return (
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
+      <KeyboardAvoidingView
+        style={styles.sheetRoot}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+        <Pressable style={styles.sheetBackdrop} onPress={onClose} accessibilityLabel="Fermer" />
+        <View style={[styles.sheet, { paddingBottom: insets.bottom + spacing.lg }]}>
+          <View style={styles.sheetHandle} />
+          <Text style={styles.sheetTitle}>Serveur Soulseek</Text>
+          <Text style={styles.sheetBody}>
+            Le serveur officiel est server.slsknet.org:2242. Ne le changez que si vous utilisez
+            un proxy ou un serveur compatible.
+          </Text>
+          <View style={styles.sheetRow}>
+            <View style={styles.flex}>
+              <Text style={styles.label}>Hôte</Text>
+              <TextInput
+                value={host}
+                onChangeText={setHost}
+                autoCapitalize="none"
+                autoCorrect={false}
+                placeholder="server.slsknet.org"
+                placeholderTextColor={colors.textDim}
+                style={styles.input}
+              />
+            </View>
+            <View style={styles.sheetPort}>
+              <Text style={styles.label}>Port</Text>
+              <TextInput
+                value={port}
+                onChangeText={setPort}
+                keyboardType="number-pad"
+                placeholder="2242"
+                placeholderTextColor={colors.textDim}
+                style={styles.input}
+              />
+            </View>
+          </View>
+          {error ? <Text style={styles.sheetError}>{error}</Text> : null}
+          <View style={styles.sheetActions}>
+            <Button label="Annuler" variant="ghost" onPress={onClose} />
+            <Button label="Enregistrer" onPress={save} style={styles.flex} />
           </View>
         </View>
-
-        <Pressable
-          onPress={() => {
-            setShowServer(value => !value);
-            setServerSaved(false);
-          }}
-          style={styles.serverToggle}>
-          <Text style={styles.serverToggleText}>
-            Serveur : {settings.serverHost}:{settings.serverPort} · modifier
-          </Text>
-        </Pressable>
-
-        {showServer ? (
-          <View style={styles.serverCard}>
-            <View style={styles.serverRow}>
-              <View style={styles.serverField}>
-                <Text style={styles.label}>Hôte</Text>
-                <TextInput
-                  value={host}
-                  onChangeText={value => {
-                    setHost(value);
-                    setServerSaved(false);
-                  }}
-                  autoCapitalize="none"
-                  autoCorrect={false}
-                  placeholder="server.slsknet.org"
-                  placeholderTextColor={colors.textDim}
-                  style={styles.input}
-                />
-              </View>
-              <View style={styles.serverPortField}>
-                <Text style={styles.label}>Port</Text>
-                <TextInput
-                  value={port}
-                  onChangeText={value => {
-                    setPort(value);
-                    setServerSaved(false);
-                  }}
-                  keyboardType="number-pad"
-                  placeholder="2242"
-                  placeholderTextColor={colors.textDim}
-                  style={styles.input}
-                />
-              </View>
-            </View>
-            <Pressable onPress={saveServer} style={styles.serverSave}>
-              <Text style={styles.serverSaveText}>
-                {serverSaved ? 'Serveur enregistré ✓' : 'Enregistrer le serveur'}
-              </Text>
-            </Pressable>
-          </View>
-        ) : null}
-
-        <Pressable
-          onPress={() => Linking.openURL('https://www.slsknet.org/')}
-          style={styles.createAccount}>
-          <Text style={styles.createAccountText}>
-            Pas encore de compte ? Créer un compte sur slsknet.org
-          </Text>
-        </Pressable>
-
-        <Text style={styles.legal}>
-          SoulStream ne fournit aucun contenu. Vous êtes responsable des œuvres que
-          vous écoutez et partagez. Le réseau Soulseek nécessite un port entrant
-          accessible pour de meilleures performances.
-        </Text>
-      </ScrollView>
-    </KeyboardAvoidingView>
+      </KeyboardAvoidingView>
+    </Modal>
   );
 }
 
 const styles = StyleSheet.create({
-  flex: {
+  root: {
     flex: 1,
     backgroundColor: colors.bg,
+  },
+  flex: {
+    flex: 1,
+  },
+  hero: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    height: 420,
+    overflow: 'hidden',
+  },
+  mosaic: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing.sm,
+    width: 4 * 84 + 3 * spacing.sm,
+    alignSelf: 'center',
+    marginTop: -20,
+    opacity: 0.55,
+    transform: [{ rotate: '-8deg' }, { scale: 1.15 }],
   },
   content: {
     paddingHorizontal: spacing.xl,
     flexGrow: 1,
+    justifyContent: 'flex-end',
+  },
+  logo: {
+    width: 64,
+    height: 64,
+    borderRadius: 18,
+    backgroundColor: colors.accent,
+    alignItems: 'center',
     justifyContent: 'center',
   },
-  brand: {
-    alignItems: 'center',
-    marginBottom: spacing.xxl,
-  },
   title: {
+    ...type.display,
     color: colors.text,
-    fontSize: 32,
-    fontWeight: '800',
-    letterSpacing: -0.8,
     marginTop: spacing.lg,
   },
   subtitle: {
+    ...type.bodySm,
     color: colors.textMuted,
-    fontSize: 14,
-    lineHeight: 20,
-    textAlign: 'center',
     marginTop: spacing.sm,
-    maxWidth: 300,
-  },
-  card: {
-    backgroundColor: colors.card,
-    borderRadius: 22,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.border,
-    padding: spacing.xl,
-  },
-  cardTitle: {
-    color: colors.text,
-    fontSize: 18,
-    fontWeight: '700',
-  },
-  cardBody: {
-    color: colors.textMuted,
-    fontSize: 13,
-    lineHeight: 19,
-    marginTop: 6,
-    marginBottom: spacing.lg,
+    marginBottom: spacing.md,
   },
   label: {
     color: colors.textMuted,
     fontSize: 12,
-    fontWeight: '600',
-    letterSpacing: 0.3,
-    marginBottom: 7,
-    textTransform: 'uppercase',
+    fontWeight: '700',
+    marginTop: 14,
+    marginBottom: 6,
   },
-  input: {
-    height: 50,
-    borderRadius: 13,
-    backgroundColor: colors.bgSoft,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.border,
-    paddingHorizontal: 14,
-    color: colors.text,
-    fontSize: 16,
-    marginBottom: spacing.lg,
-  },
-  passwordRow: {
+  passwordHead: {
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'flex-end',
     justifyContent: 'space-between',
   },
-  showPassword: {
-    color: colors.accentBright,
-    fontSize: 12,
+  link: {
+    color: colors.accent,
+    fontSize: 12.5,
+    fontWeight: '700',
+    marginBottom: 6,
+    textAlign: 'center',
+  },
+  input: {
+    height: 52,
+    borderRadius: radius.md,
+    backgroundColor: colors.surfaceAlt,
+    borderWidth: 1,
+    borderColor: colors.border,
+    paddingHorizontal: spacing.lg,
+    color: colors.text,
+    fontSize: 15,
     fontWeight: '600',
-    marginBottom: 7,
   },
   errorBox: {
-    backgroundColor: 'rgba(248, 113, 113, 0.10)',
-    borderRadius: 12,
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: spacing.sm,
+    backgroundColor: colors.dangerSoft,
+    borderRadius: radius.md,
     padding: spacing.md,
-    marginBottom: spacing.md,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(248, 113, 113, 0.35)',
+    marginTop: spacing.lg,
   },
   errorText: {
-    color: '#fca5a5',
+    flex: 1,
+    color: colors.danger,
     fontSize: 13,
     lineHeight: 18,
   },
   submit: {
-    marginTop: spacing.xs,
+    marginTop: spacing.xl,
   },
-  connectingRow: {
-    height: 24,
+  serverLink: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 8,
-    marginTop: spacing.md,
-  },
-  connectingText: {
-    color: colors.textMuted,
-    fontSize: 12,
-  },
-  serverToggle: {
-    alignSelf: 'center',
+    gap: 6,
     marginTop: spacing.lg,
     paddingVertical: 6,
   },
-  serverToggleText: {
+  serverLinkText: {
     color: colors.textDim,
-    fontSize: 11.5,
-  },
-  serverCard: {
-    marginTop: spacing.md,
-    backgroundColor: colors.card,
-    borderRadius: 16,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.border,
-    padding: spacing.lg,
-  },
-  serverRow: {
-    flexDirection: 'row',
-    gap: spacing.md,
-    marginBottom: spacing.sm,
-  },
-  serverField: {
-    flex: 1,
-  },
-  serverPortField: {
-    width: 86,
-  },
-  serverSave: {
-    alignSelf: 'flex-end',
-    paddingVertical: 6,
-  },
-  serverSaveText: {
-    color: colors.accentBright,
     fontSize: 12,
-    fontWeight: '600',
   },
-  createAccount: {
-    marginTop: spacing.xl,
-    alignItems: 'center',
+  create: {
+    marginTop: spacing.md,
     paddingVertical: spacing.sm,
   },
-  createAccountText: {
-    color: colors.accentBright,
-    fontSize: 13,
-    fontWeight: '600',
-    textAlign: 'center',
-  },
   legal: {
+    ...type.caption,
     color: colors.textDim,
-    fontSize: 11,
-    lineHeight: 17,
     textAlign: 'center',
-    marginTop: spacing.lg,
+    marginTop: spacing.md,
+  },
+  sheetRoot: {
+    flex: 1,
+    justifyContent: 'flex-end',
+  },
+  sheetBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: colors.overlay,
+  },
+  sheet: {
+    backgroundColor: colors.surface,
+    borderTopLeftRadius: radius.xl,
+    borderTopRightRadius: radius.xl,
+    paddingHorizontal: gutter,
+    paddingTop: spacing.sm,
+  },
+  sheetHandle: {
+    alignSelf: 'center',
+    width: 40,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: colors.surfaceHigh,
+    marginBottom: spacing.lg,
+  },
+  sheetTitle: {
+    ...type.heading,
+    color: colors.text,
+  },
+  sheetBody: {
+    ...type.bodySm,
+    color: colors.textMuted,
+    marginTop: spacing.xs,
+  },
+  sheetRow: {
+    flexDirection: 'row',
+    gap: spacing.md,
+  },
+  sheetPort: {
+    width: 96,
+  },
+  sheetError: {
+    color: colors.danger,
+    fontSize: 12.5,
+    marginTop: spacing.md,
+  },
+  sheetActions: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+    marginTop: spacing.xl,
   },
 });

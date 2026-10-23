@@ -24,6 +24,27 @@ La page fournit l'APK, son empreinte SHA-256, les captures d'écran et l'archive
 du code source. L'APK est signé avec une clé de développement : il s'installe
 manuellement et n'est pas destiné à une publication sur le Play Store.
 
+### Build de la branche
+
+La branche `ccr-b56e6780-ko4xxa` contient un APK construit à partir de son code,
+dans [`releases/SoulStream.apk`](releases/SoulStream.apk) (build actuelle : ARM uniquement,
+signé avec la clé de debug). Le dépôt étant privé, le téléchargement demande
+d'être connecté à GitHub avec un compte qui a accès au dépôt.
+
+La page vitrine [`showcase/`](showcase/index.html) affiche un grand QR code vers
+cet APK, avec la branche, le commit, la taille et l'empreinte SHA-256. Pour la
+mettre à jour après une nouvelle build :
+
+```bash
+cd android && ./gradlew assembleRelease && cd ..
+node tools/showcase.mjs android/app/build/outputs/apk/release/app-release.apk
+git add releases showcase && git commit -m "build: refresh branch APK"
+```
+
+Le script copie l'APK dans `releases/` et régénère le QR code et les
+informations de build. Il refuse de tourner s'il reste des modifications non
+commitées dans le code de l'application.
+
 ## Fonctionnalités
 
 - Connexion au serveur Soulseek avec votre compte (`server.slsknet.org:2242`).
@@ -229,11 +250,25 @@ En revanche, la communauté l'attend fortement :
   utilisent une détection de « leech » ; ils peuvent refuser ou bloquer les
   utilisateurs qui ne partagent rien.
 
-SoulStream ne partage pas encore de fichiers. C'est une limite assumée de cette
-version : certains pairs peuvent refuser vos téléchargements, et l'application
-ne respecte pas encore la panoplie complète attendue par les règles du réseau.
-L'ajout du partage (liste de fichiers + upload) est la priorité de la prochaine
-version.
+SoulStream partage les morceaux que vous avez déjà écoutés. Chaque
+téléchargement terminé est gardé sur l'appareil (1 Go par défaut, les moins
+récemment écoutés sont supprimés en premier). Ce dossier `SoulStream` est
+déclaré au serveur (`SharedFoldersFiles`), il est consultable par les autres
+utilisateurs, et ils peuvent y télécharger : 1 envoi à la fois, et par défaut
+uniquement en Wi-Fi. Le partage se règle dans Réglages → Partage. Un morceau
+déjà présent sur l'appareil est relu depuis le stockage, sans réseau.
+
+Pour ne pas arriver sur le réseau avec un partage vide (certains pairs
+refusent alors d'envoyer quoi que ce soit), **Réglages → Partage → Ajouter des
+morceaux** ouvre le sélecteur de fichiers d'Android : les MP3 choisis sont
+copiés dans le dossier `SoulStream` et annoncés au serveur aussitôt. Ces
+morceaux ajoutés ne sont jamais supprimés pour faire de la place, ne comptent
+pas dans la limite de 1 Go, et se retirent séparément. Les fichiers d'origine
+ne sont pas modifiés.
+
+SoulStream ne participe pas encore à l'arbre de recherche distribué : vos
+fichiers sont consultables et téléchargeables, mais n'apparaissent pas dans les
+recherches des autres.
 
 Sources : [règles officielles](https://www.slsknet.org/rules.html),
 [FAQ](https://www.slsknet.org/news/faq-page) et
@@ -241,13 +276,18 @@ Sources : [règles officielles](https://www.slsknet.org/rules.html),
 
 ## Limites connues
 
-- Pas d'upload ni de partage de fichiers pour l'instant (voir ci-dessus).
+- Le partage se limite aux morceaux écoutés et aux MP3 ajoutés à la main (des
+  copies), et ils n'apparaissent pas dans les recherches des autres (voir
+  ci-dessus).
 - Pas de connexions de pairs obfusquées (comme Nicotine+ ; SoulseekQt les
   propose). Cela peut empêcher de joindre certains pairs.
 - Pas de participation à l'arbre de recherche distribué
   (`HaveNoParent`/`AcceptChildren` sont envoyés pour rester léger).
 - Un seul morceau en streaming à la fois.
-- La recherche dure 20 secondes ; les réponses tardives sont ignorées.
+- La recherche dure au plus 10 secondes, et s'arrête 4 secondes après le
+  premier bon résultat ; les réponses tardives sont ignorées.
+- Si une source refuse, met en file d'attente ou ne répond pas, la suivante
+  est essayée automatiquement (jusqu'à 5 sources).
 - Le déplacement dans un morceau n'est possible que dans les octets déjà reçus ;
   au-delà, le lecteur attend que le téléchargement rattrape sa position.
 - L'application ne redémarre pas le transfert à un offset arbitraire : le

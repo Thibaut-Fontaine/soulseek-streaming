@@ -1,17 +1,40 @@
 import React from 'react';
 import {
   ActivityIndicator,
+  Alert,
+  Pressable,
   ScrollView,
   StyleSheet,
   Text,
+  useWindowDimensions,
   View,
 } from 'react-native';
 import TrackPlayer, { State, usePlaybackState, useProgress } from 'react-native-track-player';
 
+import type { TransferSnapshot } from '../core/transfer';
 import { displayArtist, displayTitle } from '../core/types';
+import type { SearchHit } from '../core/types';
 import { useAppStore } from '../state/store';
-import { Chip, CoverArt, EmptyState, GhostButton, IconButton, ProgressBar } from './components';
-import { colors, formatBytes, formatDuration, formatQuality, percent, spacing } from './theme';
+import {
+  Button,
+  CoverArt,
+  Dot,
+  EmptyState,
+  IconButton,
+  StatusCard,
+  TrackGradient,
+} from './components';
+import type { CardAction } from './components';
+import { ACTION_LABELS, SHARING_EXPLANATION, describePlaybackError } from './errors';
+import type { ErrorAction } from './errors';
+import { useByteRate } from './hooks';
+import { Icon } from './Icon';
+import { QUEUE_WARN_POSITION, clampSeek, peerAvailability, sourceSummary } from './p2p';
+import { Scrubber, TransferSteps } from './peer';
+import { colors, coverSeed, formatBytes, percent, radius, spacing, type } from './theme';
+
+const SIDE = spacing.xl;
+const MAX_ART = 360;
 
 export function PlayerScreen() {
   const playerReady = useAppStore(state => state.playerReady);
@@ -19,7 +42,7 @@ export function PlayerScreen() {
   if (!playerReady) {
     return (
       <EmptyState
-        glyph="♪"
+        icon="music"
         title="Lecteur indisponible"
         body="Le module audio natif n’a pas pu démarrer. Réinstallez l’application ou consultez les réglages."
       />
@@ -31,34 +54,72 @@ export function PlayerScreen() {
 
 function PlayerContent() {
   const current = useAppStore(state => state.current);
-  const transfers = useAppStore(state => state.transfers);
+  const transfer = useAppStore(state =>
+    state.current ? state.transfers[state.current.transferId] : undefined,
+  );
+  const searchQuery = useAppStore(state => state.query);
   const setTab = useAppStore(state => state.setTab);
   const stopPlayback = useAppStore(state => state.stopPlayback);
   const retryPlayback = useAppStore(state => state.retryPlayback);
+  const playNextSource = useAppStore(state => state.playNextSource);
+  const reconnect = useAppStore(state => state.reconnect);
 
+  const { width } = useWindowDimensions();
   const progress = useProgress(250);
   const playbackState = usePlaybackState();
   const state = playbackState.state;
   const playing = state === State.Playing;
+  const speed = useByteRate(transfer?.received ?? 0, transfer?.id);
 
-  const transfer = current ? transfers[current.transferId] : undefined;
+  if (!current) {
+    return (
+      <EmptyState
+        icon="music"
+        title="Aucune lecture"
+        body="Cherchez un morceau dans l’onglet Rechercher pour commencer à écouter en streaming.">
+        <Button
+          label="Rechercher de la musique"
+          icon="search"
+          variant="ghost"
+          onPress={() => setTab('search')}
+          style={styles.emptyButton}
+        />
+      </EmptyState>
+    );
+  }
+
+  const hit = current.hit;
+  const seed = coverSeed(hit);
+  const title = displayTitle(hit.filename);
+  const artist = displayArtist(hit) ?? hit.username;
+  const preparing = current.phase === 'preparing';
+  const hasError = current.phase === 'error' || state === State.Error;
 
   const duration =
     progress.duration && Number.isFinite(progress.duration) && progress.duration > 0
       ? progress.duration
-      : current?.hit.durationSec ?? 0;
-
+      : hit.durationSec ?? 0;
   const position = Number.isFinite(progress.position) ? progress.position : 0;
-  const bufferedRatio = duration > 0 ? percent(progress.buffered, duration) : 0;
-  const playbackRatio = duration > 0 ? percent(position, duration) : 0;
+  const total = transfer?.size || hit.size || 0;
+  // A track played from the device is fully available.
+  const receivedRatio =
+    current.source === 'cache' || transfer?.state === 'complete'
+      ? 1
+      : percent(transfer?.received ?? 0, total);
 
-  const downloaded = transfer?.received ?? 0;
-  const total = transfer?.size || current?.hit.size || 0;
-  const downloadedRatio = percent(downloaded, total);
+  const seekTo = async (seconds: number) => {
+    try {
+      await TrackPlayer.seekTo(seconds);
+    } catch {
+      // Ignore: the player reports failures through its state.
+    }
+  };
 
-  const bufferTargetRatio = current
-    ? percent(downloaded, current.bufferTarget)
-    : 0;
+  const seekBy = (offset: number) => {
+    if (duration > 0) {
+      void seekTo(clampSeek(position + offset, duration, receivedRatio).seconds);
+    }
+  };
 
   const togglePlayback = async () => {
     try {
@@ -77,388 +138,419 @@ function PlayerContent() {
     }
   };
 
-  const seekToRatio = async (ratio: number) => {
-    if (duration <= 0) {
-      return;
-    }
+  const toCardActions = (actions: ErrorAction[]): CardAction[] =>
+    actions.map(action => {
+      switch (action) {
+        case 'next-source':
+          return { label: 'Autre source', icon: 'swap', onPress: () => void playNextSource() };
+        case 'learn-more':
+          return {
+            label: ACTION_LABELS[action],
+            onPress: () => Alert.alert('Pourquoi ce refus ?', SHARING_EXPLANATION),
+          };
+        case 'reconnect':
+          return { label: ACTION_LABELS[action], onPress: () => void reconnect() };
+        default:
+          return { label: ACTION_LABELS.retry, icon: 'refresh', onPress: () => void retryPlayback() };
+      }
+    });
 
-    try {
-      await TrackPlayer.seekTo(ratio * duration);
-    } catch {
-      // Ignore.
-    }
-  };
+  const failure = hasError
+    ? describePlaybackError(
+        current.error ?? 'Le flux audio n’a pas pu être lu. Le pair a peut-être coupé la connexion.',
+        { receivedRatio },
+      )
+    : null;
 
-  const seekBy = async (offset: number) => {
-    if (duration <= 0) {
-      return;
-    }
-
-    const target = Math.max(0, Math.min(duration, position + offset));
-
-    try {
-      await TrackPlayer.seekTo(target);
-    } catch {
-      // Ignore.
-    }
-  };
-
-  if (!current) {
-    return (
-      <View style={styles.container}>
-        <EmptyState
-          glyph="♫"
-          title="Aucune lecture"
-          body="Choisissez un morceau dans l’onglet Recherche pour commencer à écouter en streaming."
-        />
-        <GhostButton label="Rechercher de la musique" onPress={() => setTab('search')} />
-      </View>
-    );
-  }
-
-  const hit = current.hit;
-  const title = displayTitle(hit.filename);
-  const artist = displayArtist(hit) ?? hit.username;
-  const preparing = current.phase === 'preparing';
-  const hasError = current.phase === 'error' || state === State.Error;
+  const artSize = Math.min(MAX_ART, width - SIDE * 2);
 
   return (
-    <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
-      <CoverArt
-        seed={`${hit.username}:${hit.filename}`}
-        title={title}
-        size={252}
-        style={styles.cover}
-      />
-
-      <Text style={styles.title} numberOfLines={2}>
-        {title}
-      </Text>
-      <Text style={styles.artist} numberOfLines={1}>
-        {artist}
-      </Text>
-
-      <View style={styles.chipRow}>
-        <Chip label={formatQuality(hit)} tone="accent" />
-        <Chip label={formatBytes(hit.size)} tone="muted" />
-        <Chip label={`@${hit.username}`} tone="muted" />
-      </View>
-
-      <View style={styles.progressBlock}>
-        <ProgressBar
-          value={playbackRatio}
-          buffered={bufferedRatio}
-          height={6}
-          onSeek={preparing ? undefined : seekToRatio}
-        />
-        <View style={styles.timeRow}>
-          <Text style={styles.time}>{formatDuration(position)}</Text>
-          <Text style={styles.time}>{duration > 0 ? formatDuration(duration) : '—:—'}</Text>
+    <View style={styles.root}>
+      <TrackGradient seed={seed} />
+      <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
+        <View style={styles.top}>
+          <Text style={styles.eyebrow}>Lecture depuis la recherche</Text>
+          {searchQuery ? (
+            <Text style={styles.topQuery} numberOfLines={1}>
+              « {searchQuery} »
+            </Text>
+          ) : null}
         </View>
-      </View>
 
-      {preparing ? (
-        <View style={styles.preparingCard}>
-          <View style={styles.preparingHeader}>
-            <ActivityIndicator size="small" color={colors.accentBright} />
-            <Text style={styles.preparingTitle}>
-              {transferStateLabel(transfer?.state, transfer?.queuePosition)}
+        <CoverArt seed={seed} title={title} size={artSize} style={styles.art} />
+
+        <View style={styles.titleRow}>
+          <View style={styles.titleText}>
+            <Text style={styles.title} numberOfLines={2}>
+              {title}
+            </Text>
+            <Text style={styles.artist} numberOfLines={1}>
+              {artist}
             </Text>
           </View>
-          <ProgressBar value={bufferTargetRatio} height={4} />
-          <Text style={styles.preparingText}>
-            Mise en mémoire : {formatBytes(downloaded)} / {formatBytes(current.bufferTarget)}
-            {total > 0 ? ` · ${Math.round(downloadedRatio * 100)} % du morceau` : ''}
-          </Text>
-          <View style={styles.preparingActions}>
-            <GhostButton label="Annuler" onPress={stopPlayback} />
-          </View>
+          {/* TODO(wire): favourites (♥) — needs a persisted store.favourites. */}
         </View>
-      ) : hasError ? (
-        <View style={styles.errorCard}>
-          <Text style={styles.errorTitle}>Lecture interrompue</Text>
-          <Text style={styles.errorText}>
-            {current.error ??
-              'Le flux audio n’a pas pu être lu. Le pair a peut-être coupé la connexion.'}
-          </Text>
-          <View style={styles.errorActions}>
-            <GhostButton label="Réessayer" onPress={retryPlayback} />
-            <GhostButton label="Autre source" onPress={() => setTab('search')} />
-          </View>
-        </View>
-      ) : (
-        <View style={styles.controls}>
-          <IconButton
-            glyph="■"
-            size={44}
-            variant="plain"
-            accessibilityLabel="Arrêter"
-            onPress={stopPlayback}
+
+        {preparing ? (
+          <PreparingCard
+            hit={hit}
+            transfer={transfer}
+            bufferTarget={current.bufferTarget}
+            speed={speed}
+            onCancel={stopPlayback}
+            onOtherSource={() => void playNextSource()}
           />
-          <IconButton
-            glyph="−10"
-            size={52}
-            variant="plain"
-            accessibilityLabel="Reculer de 10 secondes"
-            onPress={() => seekBy(-10)}
-            disabled={duration <= 0}
+        ) : (
+          <>
+            <View style={styles.scrubber}>
+              <Scrubber
+                position={position}
+                duration={duration}
+                receivedRatio={receivedRatio}
+                onSeek={seconds => void seekTo(seconds)}
+              />
+            </View>
+
+            <View style={styles.controls}>
+              {/* TODO(wire): previous / next need a queue (phase 3). */}
+              <IconButton icon="prev" accessibilityLabel="Précédent" onPress={noop} disabled />
+              <IconButton
+                icon="back10"
+                iconSize={30}
+                accessibilityLabel="Reculer de 10 secondes"
+                onPress={() => seekBy(-10)}
+                disabled={duration <= 0}>
+                <Text style={styles.skipLabel}>10</Text>
+              </IconButton>
+              <IconButton
+                icon={playing ? 'pause' : 'play'}
+                filled
+                size={68}
+                iconSize={30}
+                variant="white"
+                accessibilityLabel={playing ? 'Pause' : 'Lecture'}
+                onPress={togglePlayback}
+              />
+              <IconButton
+                icon="fwd10"
+                iconSize={30}
+                accessibilityLabel="Avancer de 10 secondes"
+                onPress={() => seekBy(10)}
+                disabled={duration <= 0}>
+                <Text style={styles.skipLabel}>10</Text>
+              </IconButton>
+              <IconButton icon="next" accessibilityLabel="Suivant" onPress={noop} disabled />
+            </View>
+          </>
+        )}
+
+        {failure ? (
+          <StatusCard
+            tone={failure.tone}
+            icon={failure.icon}
+            title={failure.title}
+            body={failure.body}
+            actions={toCardActions(failure.actions)}
+            style={styles.card}
           />
-          <IconButton
-            glyph={playing ? '❚❚' : '▶'}
-            size={72}
-            variant="accent"
-            accessibilityLabel={playing ? 'Pause' : 'Lecture'}
-            onPress={togglePlayback}
+        ) : null}
+
+        {current.warning && !failure ? (
+          <StatusCard
+            tone="warn"
+            icon="offline"
+            title={`Source coupée à ${Math.round(receivedRatio * 100)} %`}
+            body="La lecture continue avec ce qui a déjà été reçu."
+            actions={[
+              { label: 'Autre source', icon: 'swap', onPress: () => void playNextSource() },
+            ]}
+            style={styles.card}
           />
-          <IconButton
-            glyph="+10"
-            size={52}
-            variant="plain"
-            accessibilityLabel="Avancer de 10 secondes"
-            onPress={() => seekBy(10)}
-            disabled={duration <= 0}
+        ) : null}
+
+        {current.source === 'cache' ? (
+          <StatusCard
+            tone="good"
+            icon="check"
+            title="Sur l’appareil"
+            body="Ce morceau a déjà été écouté : il est lu depuis le stockage, sans réseau."
+            style={styles.card}
           />
-          <IconButton
-            glyph={state === State.Buffering || state === State.Loading ? '…' : '↻'}
-            size={44}
-            variant="plain"
-            accessibilityLabel="Relancer le flux"
+        ) : (
+          <SourceChip hit={hit} transfer={transfer} speed={speed} />
+        )}
+
+        <View style={styles.foot}>
+          <Button label="Arrêter" icon="stop" size="sm" variant="ghost" onPress={stopPlayback} />
+          <Button
+            label={state === State.Buffering || state === State.Loading ? 'Chargement…' : 'Relancer le flux'}
+            icon="refresh"
+            size="sm"
+            variant="ghost"
             onPress={retryPlayback}
           />
         </View>
-      )}
-
-      <View style={styles.streamCard}>
-        <View style={styles.streamHeader}>
-          <Text style={styles.streamTitle}>Flux Soulseek</Text>
-          <View
-            style={[
-              styles.streamDot,
-              {
-                backgroundColor:
-                  transfer?.state === 'failed'
-                    ? colors.danger
-                    : transfer?.state === 'complete'
-                      ? colors.success
-                      : colors.cyan,
-              },
-            ]}
-          />
-        </View>
-
-        <ProgressBar value={downloadedRatio} height={3} style={styles.streamProgress} />
-        <Text style={styles.streamLine}>
-          Reçu {formatBytes(downloaded)} / {formatBytes(total)} ·{' '}
-          {transferStateLabel(transfer?.state, transfer?.queuePosition)}
-        </Text>
-
-        <Text style={styles.streamPath} numberOfLines={2}>
-          {hit.filename}
-        </Text>
-
-        <View style={styles.streamMeta}>
-          <Text style={styles.streamMetaText}>{formatQuality(hit)}</Text>
-          <Text style={styles.streamMetaText}>
-            {state === State.Buffering
-              ? 'Mise en mémoire par le lecteur…'
-              : state === State.Playing
-                ? 'Lecture en cours'
-                : state === State.Paused
-                  ? 'En pause'
-                  : 'Prêt'}
-          </Text>
-        </View>
-      </View>
-    </ScrollView>
+      </ScrollView>
+    </View>
   );
 }
 
-function transferStateLabel(
-  state?: 'requesting' | 'queued' | 'awaiting-file' | 'streaming' | 'complete' | 'failed' | 'cancelled',
-  queuePosition?: number | null,
-): string {
-  switch (state) {
+function noop() {}
+
+function PreparingCard({
+  hit,
+  transfer,
+  bufferTarget,
+  speed,
+  onCancel,
+  onOtherSource,
+}: {
+  hit: SearchHit;
+  transfer: TransferSnapshot | undefined;
+  bufferTarget: number;
+  speed: number;
+  onCancel: () => void;
+  onOtherSource: () => void;
+}) {
+  const queuePosition = transfer?.state === 'queued' ? transfer.queuePosition ?? 0 : 0;
+
+  return (
+    <>
+      <StatusCard
+        tone="accent"
+        title={`Préparation · @${hit.username}`}
+        leading={<ActivityIndicator size="small" color={colors.accent} />}
+        actions={[{ label: 'Annuler', onPress: onCancel, icon: 'x' }]}
+        style={styles.card}>
+        <TransferSteps snapshot={transfer} bufferTarget={bufferTarget} speed={speed} />
+      </StatusCard>
+      {queuePosition >= QUEUE_WARN_POSITION ? (
+        <StatusCard
+          tone="warn"
+          icon="clock"
+          title={`En file chez le pair · position ${queuePosition}`}
+          body="Ce pair n’a pas de slot libre ; l’attente peut être longue."
+          actions={[
+            { label: 'Autre source', icon: 'swap', onPress: onOtherSource, variant: 'accent' },
+            { label: 'Attendre', onPress: noop },
+          ]}
+          style={styles.card}
+        />
+      ) : null}
+    </>
+  );
+}
+
+function SourceChip({
+  hit,
+  transfer,
+  speed,
+}: {
+  hit: SearchHit;
+  transfer: TransferSnapshot | undefined;
+  speed: number;
+}) {
+  const [open, setOpen] = React.useState(false);
+  const availability = peerAvailability(hit);
+  const live = transfer?.state === 'streaming' ? speed : undefined;
+
+  // TODO(wire): open a Sources sheet with alternatives (phase 2); for now the
+  // chip expands in place to show the raw path.
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityState={{ expanded: open }}
+      accessibilityLabel={`Source : ${hit.username}`}
+      onPress={() => setOpen(value => !value)}
+      style={({ pressed }) => [styles.chip, pressed && styles.pressed]}>
+      <View style={styles.chipRow}>
+        <View style={styles.chipIcon}>
+          <Icon name="peer" size={18} color={colors.text} />
+        </View>
+        <View style={styles.chipText}>
+          <View style={styles.chipUser}>
+            <Text style={styles.chipName} numberOfLines={1}>
+              @{hit.username}
+            </Text>
+            <Dot tone={availability === 'free' ? 'good' : availability === 'queued' ? 'warn' : 'bad'} />
+          </View>
+          <Text style={styles.chipMeta} numberOfLines={1}>
+            {sourceSummary(hit, live)}
+          </Text>
+        </View>
+        <Icon
+          name={open ? 'down' : 'right'}
+          size={20}
+          color="rgba(255,255,255,0.6)"
+        />
+      </View>
+      {open ? (
+        <View style={styles.chipDetails}>
+          <Text style={styles.chipPath} selectable>
+            {hit.filename}
+          </Text>
+          <Text style={styles.chipMeta}>
+            Reçu {formatBytes(transfer?.received ?? 0)} / {formatBytes(transfer?.size || hit.size)}
+            {transfer ? ` · ${transferStateLabel(transfer)}` : ''}
+          </Text>
+        </View>
+      ) : null}
+    </Pressable>
+  );
+}
+
+function transferStateLabel(transfer: TransferSnapshot): string {
+  switch (transfer.state) {
     case 'requesting':
-      return 'Connexion au pair…';
+      return 'requête envoyée';
     case 'queued':
-      return queuePosition && queuePosition > 0
-        ? `File d’attente du pair : n°${queuePosition}`
-        : 'En file d’attente chez le pair…';
+      return transfer.queuePosition ? `en file, position ${transfer.queuePosition}` : 'en file';
     case 'awaiting-file':
-      return 'Le pair prépare le transfert…';
+      return 'connexion au pair';
     case 'streaming':
-      return 'Réception des données…';
+      return 'réception';
     case 'complete':
-      return 'Morceau entièrement reçu';
+      return 'entièrement reçu';
     case 'failed':
-      return 'Transfert échoué';
-    case 'cancelled':
-      return 'Transfert annulé';
+      return 'échec';
     default:
-      return 'Préparation du flux…';
+      return 'annulé';
   }
 }
 
 const styles = StyleSheet.create({
-  container: {
+  root: {
     flex: 1,
-    justifyContent: 'center',
-    paddingHorizontal: spacing.xl,
   },
   scroll: {
-    alignItems: 'center',
-    paddingHorizontal: spacing.xl,
-    paddingTop: spacing.lg,
+    paddingHorizontal: SIDE,
+    paddingTop: spacing.sm,
     paddingBottom: spacing.xxl,
   },
-  cover: {
+  emptyButton: {
+    alignSelf: 'center',
+    marginTop: spacing.lg,
+  },
+  pressed: {
+    opacity: 0.8,
+  },
+  top: {
+    alignItems: 'center',
+    paddingTop: spacing.xs,
+  },
+  eyebrow: {
+    ...type.eyebrow,
+    fontSize: 10,
+    color: 'rgba(255,255,255,0.75)',
+  },
+  topQuery: {
+    color: colors.text,
+    fontSize: 13,
+    fontWeight: '700',
+    marginTop: 2,
+  },
+  art: {
+    alignSelf: 'center',
+    marginTop: spacing.xl,
     marginBottom: spacing.xl,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(255,255,255,0.10)',
+    shadowColor: '#000',
+    shadowOpacity: 0.6,
+    shadowRadius: 24,
+    shadowOffset: { width: 0, height: 24 },
+    elevation: 12,
+  },
+  titleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+  },
+  titleText: {
+    flex: 1,
+    minWidth: 0,
   },
   title: {
+    ...type.title,
     color: colors.text,
-    fontSize: 24,
-    fontWeight: '800',
-    letterSpacing: -0.5,
-    textAlign: 'center',
   },
   artist: {
-    color: colors.textMuted,
-    fontSize: 15,
-    marginTop: 4,
-    textAlign: 'center',
+    ...type.body,
+    fontWeight: '400',
+    color: 'rgba(255,255,255,0.75)',
+    marginTop: 2,
   },
-  chipRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    justifyContent: 'center',
-    gap: 6,
-    marginTop: spacing.md,
-  },
-  progressBlock: {
-    width: '100%',
-    marginTop: spacing.xl,
-  },
-  timeRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginTop: 6,
-  },
-  time: {
-    color: colors.textDim,
-    fontSize: 11,
-    fontVariant: ['tabular-nums'],
+  scrubber: {
+    marginTop: spacing.lg,
   },
   controls: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    width: '100%',
-    marginTop: spacing.xl,
-    paddingHorizontal: spacing.xs,
-  },
-  preparingCard: {
-    width: '100%',
-    backgroundColor: colors.card,
-    borderRadius: 16,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.border,
-    padding: spacing.lg,
-    marginTop: spacing.xl,
-    gap: spacing.md,
-  },
-  preparingHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  preparingTitle: {
-    color: colors.text,
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  preparingText: {
-    color: colors.textMuted,
-    fontSize: 12,
-    lineHeight: 17,
-  },
-  preparingActions: {
-    flexDirection: 'row',
-    justifyContent: 'flex-end',
-  },
-  errorCard: {
-    width: '100%',
-    backgroundColor: 'rgba(248, 113, 113, 0.08)',
-    borderRadius: 16,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(248, 113, 113, 0.4)',
-    padding: spacing.lg,
-    marginTop: spacing.xl,
-    gap: spacing.sm,
-  },
-  errorTitle: {
-    color: '#fca5a5',
-    fontSize: 15,
-    fontWeight: '700',
-  },
-  errorText: {
-    color: colors.textMuted,
-    fontSize: 13,
-    lineHeight: 19,
-  },
-  errorActions: {
-    flexDirection: 'row',
-    gap: spacing.sm,
-    marginTop: spacing.xs,
-  },
-  streamCard: {
-    width: '100%',
-    backgroundColor: colors.card,
-    borderRadius: 16,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.border,
-    padding: spacing.lg,
-    marginTop: spacing.xl,
-  },
-  streamHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  streamTitle: {
-    color: colors.text,
-    fontSize: 13,
-    fontWeight: '700',
-    letterSpacing: 0.2,
-    textTransform: 'uppercase',
-  },
-  streamDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-  },
-  streamProgress: {
     marginTop: spacing.md,
   },
-  streamLine: {
-    color: colors.textMuted,
-    fontSize: 12,
-    marginTop: 8,
+  skipLabel: {
+    position: 'absolute',
+    color: colors.text,
+    fontSize: 9,
+    fontWeight: '800',
+    top: 18,
   },
-  streamPath: {
-    color: colors.textDim,
-    fontSize: 11,
+  card: {
+    marginTop: spacing.lg,
+  },
+  chip: {
+    marginTop: 18,
+    padding: spacing.md,
+    borderRadius: radius.md,
+    backgroundColor: colors.scrim,
+  },
+  chipRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  chipIcon: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: 'rgba(255,255,255,0.14)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  chipText: {
+    flex: 1,
+    minWidth: 0,
+  },
+  chipUser: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  chipName: {
+    flexShrink: 1,
+    color: colors.text,
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  chipMeta: {
+    color: colors.textOnMedia,
+    fontSize: 11.5,
+    marginTop: 2,
+  },
+  chipDetails: {
+    marginTop: spacing.md,
+    paddingTop: spacing.md,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: 'rgba(255,255,255,0.14)',
+    gap: spacing.xs,
+  },
+  chipPath: {
+    color: colors.textMuted,
+    fontSize: 11.5,
     lineHeight: 16,
-    marginTop: spacing.md,
   },
-  streamMeta: {
+  foot: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    marginTop: spacing.md,
-  },
-  streamMetaText: {
-    color: colors.textDim,
-    fontSize: 11,
+    marginTop: spacing.lg,
   },
 });

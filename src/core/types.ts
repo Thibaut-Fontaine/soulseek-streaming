@@ -35,29 +35,60 @@ export function baseName(filename: string): string {
   return filename.replace(/\\/g, '/').split('/').pop() ?? filename;
 }
 
-/** Best-effort "Artist - Title" parsing from a Soulseek path. */
-export function displayTitle(filename: string): string {
-  const base = baseName(filename);
-  const dot = base.lastIndexOf('.');
-  return dot > 0 ? base.slice(0, dot) : base;
+const TRACK_NUMBER = /^\s*(?:cd\s*\d+\s*)?(?:\d{1,2}[-.])?\d{1,3}(?:\s*[-._)]\s*|\s+)/i;
+
+function isTrackNumber(value: string): boolean {
+  return /^\s*(?:\d{1,2}[-.])?\d{1,3}\s*$/.test(value);
 }
 
-export function displayArtist(hit: SearchHit): string | null {
-  const title = displayTitle(hit.filename);
+/**
+ * Best-effort artist/title parsing from a Soulseek path such as
+ * `Music\Artist\Album\01 - Title.mp3` or `Artist - Title.mp3`.
+ */
+export function parseTrackName(filename: string): { artist: string | null; title: string } {
+  const base = baseName(filename);
+  const dot = base.lastIndexOf('.');
+  const stem = (dot > 0 ? base.slice(0, dot) : base).replace(/_/g, ' ').trim();
+  const parts = stem
+    .split(/\s+[-–—]\s+/)
+    .map(part => part.trim())
+    .filter(part => part.length > 0 && !isTrackNumber(part));
 
-  if (title.includes(' - ')) {
-    const [artist] = title.split(' - ');
-    return artist.trim() || null;
+  let artist: string | null = null;
+  let title = stem;
+
+  if (parts.length >= 2) {
+    artist = parts[0].replace(TRACK_NUMBER, '').trim() || null;
+    title = parts[parts.length - 1];
+  } else if (parts.length === 1) {
+    title = parts[0];
   }
 
-  // Try the parent folder name (".../Artist/Album/Track.mp3").
-  const parts = hit.filename.replace(/\\/g, '/').split('/').filter(Boolean);
-
-  if (parts.length >= 3) {
-    return parts[parts.length - 3];
+  // "01. Title", "1-03 Title": strip a leading track number, but keep titles
+  // that are only a number (e.g. "1999").
+  const stripped = title.replace(TRACK_NUMBER, '').trim();
+  if (stripped.length > 0) {
+    title = stripped;
   }
 
-  return null;
+  if (!artist) {
+    // ".../Artist/Album/Track.mp3"
+    const folders = filename.replace(/\\/g, '/').split('/').filter(Boolean);
+    if (folders.length >= 3) {
+      artist = folders[folders.length - 3];
+    }
+  }
+
+  return { artist, title };
+}
+
+/** Track title for display. */
+export function displayTitle(filename: string): string {
+  return parseTrackName(filename).title;
+}
+
+export function displayArtist(hit: { filename: string }): string | null {
+  return parseTrackName(hit.filename).artist;
 }
 
 export function hitKey(hit: { username: string; filename: string }): string {

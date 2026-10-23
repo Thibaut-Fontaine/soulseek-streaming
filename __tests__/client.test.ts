@@ -79,6 +79,12 @@ class FakeNetwork {
   peerPort = 0;
   searchToken = 0;
   indirectFile = false;
+  /** The peer is firewalled: direct connections fail, ConnectToPeer works. */
+  directUnreachable = false;
+  /** Drop the server connection once the file starts streaming. */
+  dropServerWhileStreaming = false;
+  closedPort = 0;
+  connectToPeerRequests = 0;
 
   constructor() {
     this.server = net.createServer(socket => this.handleServerConnection(socket));
@@ -91,6 +97,12 @@ class FakeNetwork {
 
     await new Promise<void>(resolve => this.server.listen(0, '127.0.0.1', resolve));
     this.serverPort = (this.server.address() as net.AddressInfo).port;
+
+    // A port nobody listens on, to simulate a firewalled peer.
+    const probe = net.createServer();
+    await new Promise<void>(resolve => probe.listen(0, '127.0.0.1', resolve));
+    this.closedPort = (probe.address() as net.AddressInfo).port;
+    await new Promise<void>(resolve => probe.close(() => resolve()));
   }
 
   async stop(): Promise<void> {
@@ -141,14 +153,51 @@ class FakeNetwork {
 
       case ServerCode.GET_PEER_ADDRESS: {
         const writer = new ByteWriter();
-        writer.string(USERNAME).raw(wireIp('127.0.0.1')).u32(this.peerPort).u32(0).u16(0);
+        const port = this.directUnreachable ? this.closedPort : this.peerPort;
+        writer.string(USERNAME).raw(wireIp('127.0.0.1')).u32(port).u32(0).u16(0);
         socket.write(encodeServerMessage(ServerCode.GET_PEER_ADDRESS, writer.toBytes()));
+        break;
+      }
+
+      case ServerCode.CONNECT_TO_PEER: {
+        // The client asks the server to make us connect to it.
+        this.connectToPeerRequests++;
+        const token = readU32(payload, 0);
+        const { value: type } = readString(payload, 4 + 4 + USERNAME.length);
+
+        if (this.directUnreachable && type === 'P') {
+          setTimeout(() => this.pierceClient(token), 10);
+        }
+
         break;
       }
 
       default:
         break;
     }
+  }
+
+  /** Connects to the client's listen port and sends PierceFirewall(token). */
+  private pierceClient(token: number): void {
+    const socket = net.createConnection({ host: '127.0.0.1', port: this.clientPort }, () => {
+      const writer = new ByteWriter();
+      writer.u32(token);
+      socket.write(encodePeerInitMessage(0, writer.toBytes()));
+    });
+
+    this.sockets.add(socket);
+    const state = {
+      stage: 'peer' as 'init' | 'peer' | 'file',
+      queue: new ByteQueue(),
+      framer: new Framer(4),
+      streaming: false,
+    };
+
+    socket.on('data', chunk => {
+      state.queue.push(new Uint8Array(chunk));
+      this.pumpPeer(socket, state);
+    });
+    socket.on('error', () => {});
   }
 
   private sendSearchResults(): void {
@@ -161,10 +210,27 @@ class FakeNetwork {
 
         const response = buildSearchPayload(this.searchToken);
         socket.write(encodePeerMessage(PeerCode.FILE_SEARCH_RESPONSE, response));
+
+        if (this.directUnreachable) {
+          // Many clients close the connection once results are delivered.
+          socket.end();
+        }
       },
     );
 
     this.sockets.add(socket);
+    // Like real clients, the peer also reads requests on the connection it
+    // opened (the downloader may reuse it for QueueUpload).
+    const state = {
+      stage: 'peer' as 'init' | 'peer' | 'file',
+      queue: new ByteQueue(),
+      framer: new Framer(4),
+      streaming: false,
+    };
+    socket.on('data', chunk => {
+      state.queue.push(new Uint8Array(chunk));
+      this.pumpPeer(socket, state);
+    });
     socket.on('error', () => {});
   }
 
@@ -345,6 +411,10 @@ class FakeNetwork {
       const end = Math.min(offset + 8192, FILE_DATA.length);
       socket.write(Buffer.from(FILE_DATA.subarray(offset, end)));
       offset = end;
+
+      if (this.dropServerWhileStreaming && offset === 8192) {
+        this.clientServerSocket?.destroy();
+      }
       setTimeout(send, 1);
     };
 
@@ -352,9 +422,14 @@ class FakeNetwork {
   }
 }
 
-async function runScenario(indirectFile: boolean): Promise<void> {
+async function runScenario(
+  indirectFile: boolean,
+  options: { directUnreachable?: boolean; dropServerWhileStreaming?: boolean } = {},
+): Promise<FakeNetwork> {
   const network = new FakeNetwork();
   network.indirectFile = indirectFile;
+  network.directUnreachable = options.directUnreachable ?? false;
+  network.dropServerWhileStreaming = options.dropServerWhileStreaming ?? false;
   await network.start();
 
   const client = new SoulseekClient({
@@ -408,6 +483,8 @@ async function runScenario(indirectFile: boolean): Promise<void> {
     client.disconnect();
     await network.stop();
   }
+
+  return network;
 }
 
 describe('SoulseekClient end to end (fake network)', () => {
@@ -417,5 +494,14 @@ describe('SoulseekClient end to end (fake network)', () => {
 
   test('streams a file through a ConnectToPeer indirect connection', async () => {
     await runScenario(true);
+  });
+
+  test('reaches a firewalled peer through our own ConnectToPeer request', async () => {
+    const network = await runScenario(false, { directUnreachable: true });
+    expect(network.connectToPeerRequests).toBeGreaterThan(0);
+  });
+
+  test('keeps streaming when the server connection drops', async () => {
+    await runScenario(false, { dropServerWhileStreaming: true });
   });
 });
