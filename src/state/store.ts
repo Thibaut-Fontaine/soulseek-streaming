@@ -20,6 +20,9 @@ import { ensurePlayer, resetPlayer } from '../player/player';
 import { clearCredentials, loadCredentials, loadSettings, saveCredentials, saveSettings } from '../services/settings';
 import type { Credentials, Settings } from '../services/settings';
 import { StreamingService } from '../services/streaming';
+import { createBlobUtilFs } from '../services/blobUtilFs';
+import { TrackCache } from '../services/trackCache';
+import type { CacheEntry } from '../services/trackCache';
 import { contentTypeFor } from '../stream/httpServer';
 
 export type Tab = 'search' | 'player' | 'settings';
@@ -35,6 +38,8 @@ export interface CurrentPlayback {
   attempt: number;
   /** Set when we switched away from a source that failed: who and why. */
   fallback: { username: string; reason: string } | null;
+  /** `cache` when played from a track already on the device. */
+  source: 'network' | 'cache';
   /**
    * The source dropped while playing. Playback continues with the bytes that
    * already arrived; the UI can offer another source.
@@ -84,9 +89,14 @@ interface AppState {
   retryPlayback: () => Promise<void>;
   stopPlayback: () => Promise<void>;
   dismissNotice: () => void;
+  /** Tracks on the device (shared with others when sharing is on). */
+  cacheStats: () => { count: number; bytes: number } | null;
+  clearCache: () => Promise<void>;
 }
 
 let service: StreamingService | null = null;
+/** Tracks already played; also our shared folder. Created on init. */
+let trackCache: TrackCache | null = null;
 let initStarted = false;
 let searchSequence = 0;
 let playSequence = 0;
@@ -327,6 +337,7 @@ export const useAppStore = create<AppState>((set, get) => {
         attempt,
         fallback,
         warning: null,
+        source: 'network',
       },
     });
 
@@ -401,6 +412,49 @@ export const useAppStore = create<AppState>((set, get) => {
     }
 
     return null;
+  }
+
+  /** Plays a track already on the device. No network involved. */
+  async function playCached(entry: CacheEntry): Promise<void> {
+    const sequence = ++playSequence;
+    const cache = trackCache!;
+    const hit = cache.asHit(entry);
+    const url = cache.uriFor(entry);
+
+    await ensurePlayer();
+    set({ playerReady: true });
+    await resetPlayer();
+    service?.cancelActive();
+
+    if (sequence !== playSequence) {
+      return;
+    }
+
+    set({
+      current: {
+        hit,
+        transferId: '',
+        url,
+        phase: 'playing',
+        error: null,
+        bufferTarget: 0,
+        attempt: 1,
+        fallback: null,
+        warning: null,
+        source: 'cache',
+      },
+    });
+
+    cache.markPlayed(entry);
+    await TrackPlayer.add({
+      id: `cache:${entry.file}`,
+      url,
+      title: displayTitle(hit.filename),
+      artist: displayArtist(hit) ?? 'SoulStream',
+      duration: hit.durationSec,
+      contentType: contentTypeFor(hit.filename),
+    });
+    await TrackPlayer.play();
   }
 
   async function playWithFallback(first: SearchHit): Promise<void> {
@@ -478,6 +532,9 @@ export const useAppStore = create<AppState>((set, get) => {
       listenPort: 22345,
       streamPort: 0,
       bufferMb: 2,
+      shareEnabled: true,
+      shareWifiOnly: true,
+      cacheMb: 1024,
     },
 
     username: null,
@@ -510,6 +567,16 @@ export const useAppStore = create<AppState>((set, get) => {
       try {
         const settings = await loadSettings();
         set({ settings });
+
+        try {
+          trackCache = new TrackCache(createBlobUtilFs(), settings.cacheMb * 1024 * 1024);
+          await trackCache.load();
+        } catch (error) {
+          trackCache = null;
+          if (__DEV__) {
+            console.log('[cache] unavailable', errorMessage(error));
+          }
+        }
 
         try {
           await ensurePlayer();
@@ -545,7 +612,7 @@ export const useAppStore = create<AppState>((set, get) => {
         service = null;
       }
 
-      const instance = new StreamingService(settings);
+      const instance = new StreamingService(settings, trackCache);
       service = instance;
       wire(instance);
 
@@ -649,6 +716,7 @@ export const useAppStore = create<AppState>((set, get) => {
     applySettings: async (settings: Settings) => {
       await saveSettings(settings);
       set({ settings });
+      trackCache?.setLimit(settings.cacheMb * 1024 * 1024);
 
       const currentUsername = get().username;
 
@@ -695,6 +763,25 @@ export const useAppStore = create<AppState>((set, get) => {
 
       const networkQuery = formatSearchQuery(rawQuery);
       const sequence = ++searchSequence;
+
+      // Already on the device: play it at once, no search needed.
+      const cached = trackCache?.findByQuery(networkQuery);
+
+      if (cached && trackCache) {
+        searchService.cancelSearch();
+        set({
+          query: rawQuery,
+          searching: false,
+          searchQuery: networkQuery,
+          searchEmpty: false,
+          searchError: null,
+          matchHit: trackCache.asHit(cached),
+          results: [],
+        });
+        await playCached(cached).catch(error => set({ searchError: errorMessage(error) }));
+        return;
+      }
+
       const collected: SearchHit[] = [];
       let matched = false;
       let windowTimer: ReturnType<typeof setTimeout> | null = null;
@@ -827,8 +914,14 @@ export const useAppStore = create<AppState>((set, get) => {
         return;
       }
 
+      const cached = trackCache?.findByHit(hit);
+
       try {
-        await playWithFallback(hit);
+        if (cached) {
+          await playCached(cached);
+        } else {
+          await playWithFallback(hit);
+        }
       } catch (error) {
         set(state => ({
           current: state.current
@@ -872,5 +965,12 @@ export const useAppStore = create<AppState>((set, get) => {
     },
 
     dismissNotice: () => set({ notice: null }),
+
+    cacheStats: () =>
+      trackCache ? { count: trackCache.count, bytes: trackCache.totalBytes } : null,
+
+    clearCache: async () => {
+      await trackCache?.clear();
+    },
   };
 });

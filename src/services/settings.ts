@@ -10,6 +10,12 @@ export interface Settings {
   streamPort: number;
   /** How much of a track to buffer before playback starts, in MiB. */
   bufferMb: number;
+  /** Share the tracks already played with other users. */
+  shareEnabled: boolean;
+  /** Only upload while on Wi-Fi (or Ethernet). */
+  shareWifiOnly: boolean;
+  /** Disk space for played tracks (the shared folder), in MiB. */
+  cacheMb: number;
 }
 
 export interface Credentials {
@@ -23,6 +29,9 @@ export const DEFAULT_SETTINGS: Settings = {
   listenPort: 22345,
   streamPort: 0,
   bufferMb: 2,
+  shareEnabled: true,
+  shareWifiOnly: true,
+  cacheMb: 1024,
 };
 
 const SETTINGS_KEY = '@soulstream/settings/v1';
@@ -50,6 +59,16 @@ export async function loadSettings(): Promise<Settings> {
         typeof parsed.bufferMb === 'number' && parsed.bufferMb >= 0.25 && parsed.bufferMb <= 64
           ? parsed.bufferMb
           : DEFAULT_SETTINGS.bufferMb,
+      shareEnabled:
+        typeof parsed.shareEnabled === 'boolean' ? parsed.shareEnabled : DEFAULT_SETTINGS.shareEnabled,
+      shareWifiOnly:
+        typeof parsed.shareWifiOnly === 'boolean'
+          ? parsed.shareWifiOnly
+          : DEFAULT_SETTINGS.shareWifiOnly,
+      cacheMb:
+        typeof parsed.cacheMb === 'number' && parsed.cacheMb >= 100 && parsed.cacheMb <= 20000
+          ? Math.round(parsed.cacheMb)
+          : DEFAULT_SETTINGS.cacheMb,
     };
   } catch {
     return { ...DEFAULT_SETTINGS };

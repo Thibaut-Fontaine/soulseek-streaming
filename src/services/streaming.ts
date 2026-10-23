@@ -1,3 +1,6 @@
+import NetInfo from '@react-native-community/netinfo';
+import type { NetInfoState } from '@react-native-community/netinfo';
+
 import { Emitter } from '../core/emitter';
 import type { ConnectionState, SoulseekClientEvents } from '../core/soulseekClient';
 import { SoulseekClient } from '../core/soulseekClient';
@@ -7,6 +10,7 @@ import { ReactNativeTransport } from '../transport/rnTcpTransport';
 import type { Transport } from '../transport/types';
 import { contentTypeFor, RangeHttpServer } from '../stream/httpServer';
 import type { Settings } from './settings';
+import type { TrackCache } from './trackCache';
 
 export interface PreparedStream {
   url: string;
@@ -34,6 +38,9 @@ export class StreamingService {
   private readonly settings: Settings;
   private client: SoulseekClient | null = null;
   private http: RangeHttpServer | null = null;
+  private onUnmeteredNetwork = false;
+  private unsubscribeNetInfo: (() => void) | null = null;
+  private unsubscribeCache: (() => void) | null = null;
 
   private active:
     | {
@@ -44,9 +51,33 @@ export class StreamingService {
       }
     | null = null;
 
-  constructor(settings: Settings, transport?: Transport) {
+  constructor(
+    settings: Settings,
+    private readonly cache: TrackCache | null = null,
+    transport?: Transport,
+  ) {
     this.settings = settings;
     this.transport = transport ?? new ReactNativeTransport();
+  }
+
+  /** Uploads are allowed when sharing is on and, if asked, on Wi-Fi only. */
+  private canUpload(): boolean {
+    return this.settings.shareEnabled && (!this.settings.shareWifiOnly || this.onUnmeteredNetwork);
+  }
+
+  private handleNetwork(state: NetInfoState): void {
+    const wasUnmetered = this.onUnmeteredNetwork;
+    this.onUnmeteredNetwork =
+      state.isConnected === true && (state.type === 'wifi' || state.type === 'ethernet');
+
+    if (state.isConnected) {
+      // The network came back or changed: reconnect now, not after backoff.
+      this.client?.reconnectNow();
+    }
+
+    if (wasUnmetered !== this.onUnmeteredNetwork) {
+      this.client?.refreshShares();
+    }
   }
 
   get listenPort(): number {
@@ -55,6 +86,10 @@ export class StreamingService {
 
   get httpPort(): number {
     return this.http?.port ?? 0;
+  }
+
+  get uploadStatus() {
+    return this.client?.uploadStatus ?? null;
   }
 
   get state(): ConnectionState {
@@ -75,9 +110,34 @@ export class StreamingService {
       listenPort: this.settings.listenPort,
       serverHost: this.settings.serverHost,
       serverPort: this.settings.serverPort,
+      shares: this.settings.shareEnabled && this.cache ? this.cache : undefined,
+      canUpload: () => this.canUpload(),
+      description: 'SoulStream : je partage les morceaux que j’écoute.',
     });
 
     this.client = client;
+
+    try {
+      this.unsubscribeNetInfo = NetInfo.addEventListener(state => this.handleNetwork(state));
+    } catch {
+      // No network info (tests): uploads stay limited by the settings.
+    }
+
+    // Keep finished downloads: they make replays instant and form our share.
+    this.unsubscribeCache = client.on('transfer', snapshot => {
+      if (snapshot.state !== 'complete' || !this.cache) {
+        return;
+      }
+
+      const transfer = client.getTransfer(snapshot.id);
+
+      if (transfer) {
+        void this.cache
+          .save(transfer.hit, transfer.buffer.read(0, transfer.buffer.total))
+          .then(() => this.client?.refreshShares())
+          .catch(() => {});
+      }
+    });
 
     client.on('state', payload => this.events.emit('state', payload));
     client.on('login', payload => this.events.emit('login', payload));
@@ -97,6 +157,10 @@ export class StreamingService {
 
   async stop(): Promise<void> {
     this.cancelActive();
+    this.unsubscribeNetInfo?.();
+    this.unsubscribeNetInfo = null;
+    this.unsubscribeCache?.();
+    this.unsubscribeCache = null;
 
     if (this.client) {
       this.client.disconnect();

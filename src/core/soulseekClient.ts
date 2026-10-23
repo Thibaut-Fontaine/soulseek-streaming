@@ -20,18 +20,27 @@ import {
   encodePierceFirewall,
   encodePlaceInQueueRequest,
   encodeQueueUpload,
+  encodeFolderContentsResponse,
   encodeServerPing,
   encodeSetStatus,
+  encodeSharedFileListResponse,
+  encodeSharedFoldersFiles,
+  encodeUserInfoResponse,
   encodeSetWaitPort,
   encodeTransferResponse,
+  encodeUploadDenied,
   parseCantConnectToPeer,
   parseConnectToPeer,
   parseFileSearchResponse,
+  parseFolderContentsRequest,
   parseLoginResponse,
   parsePeerAddress,
   parsePeerInit,
+  parsePlaceInQueueRequest,
   parsePlaceInQueueResponse,
+  parseQueueUpload,
   parseTransferRequest,
+  parseTransferResponse,
   parseUploadDenied,
   parseUploadFailed,
 } from './protocol';
@@ -42,6 +51,8 @@ import type {
   SearchResponse,
 } from './protocol';
 import { StreamTransfer } from './transfer';
+import { UploadManager } from './uploads';
+import type { ShareLibrary, UploadStatus } from './uploads';
 import type { TransferSnapshot } from './transfer';
 import { extensionOf, hitKey, isStreamableFile } from './types';
 import type { SearchHit } from './types';
@@ -75,6 +86,12 @@ export interface SoulseekClientOptions {
   serverPort?: number;
   searchDurationMs?: number;
   version?: { major: number; minor: number };
+  /** Files we share. Without it the client shares nothing. */
+  shares?: ShareLibrary;
+  /** Whether uploads may start right now (e.g. sharing on and on Wi-Fi). */
+  canUpload?: () => boolean;
+  /** Shown to users who look at our profile. */
+  description?: string;
 }
 
 export interface SearchOptions {
@@ -286,11 +303,17 @@ export class SoulseekClient extends Emitter<SoulseekClientEvents> {
     number,
     {
       username: string;
-      resolve: (session: PeerSession) => void;
+      type: string;
+      /** Takes over the socket synchronously, so no data is lost. */
+      accept: (socket: SocketLike, rest: Uint8Array | null) => void;
       reject: (error: Error) => void;
       timer: ReturnType<typeof setTimeout>;
     }
   >();
+
+  private readonly uploads: UploadManager | null;
+  private readonly shares: ShareLibrary | null;
+  private readonly description: string;
   private readonly pendingPeerTimers = new Set<ReturnType<typeof setTimeout>>();
 
   private readonly transfers = new Map<string, StreamTransfer>();
@@ -314,6 +337,51 @@ export class SoulseekClient extends Emitter<SoulseekClientEvents> {
     this.serverPort = options.serverPort ?? DEFAULT_SERVER_PORT;
     this.searchDurationMs = options.searchDurationMs ?? 20000;
     this.version = options.version ?? { major: 177, minor: 1 };
+    this.shares = options.shares ?? null;
+    this.description = options.description ?? 'SoulStream';
+    const canUpload = options.canUpload ?? (() => true);
+
+    this.uploads = this.shares
+      ? new UploadManager(
+          {
+            sendToPeer: async (username, message) => {
+              const session = await this.getPeerConnection(username);
+              session.send(message);
+            },
+            openFileConnection: username => this.openFileConnection(username),
+            nextToken: () => this.nextToken(),
+            log: message => this.log(message),
+          },
+          this.shares,
+          { canUpload },
+        )
+      : null;
+  }
+
+  /** Upload counters, for the settings screen. */
+  get uploadStatus(): UploadStatus | null {
+    return this.uploads?.status() ?? null;
+  }
+
+  /**
+   * Tells the server how much we share and starts queued uploads. Call after
+   * the shared files or the upload policy changed.
+   */
+  refreshShares(): void {
+    if (!this.isOnline()) {
+      return;
+    }
+
+    const files = this.shares?.files() ?? [];
+    const folders = new Set(files.map(file => file.path.slice(0, file.path.lastIndexOf('\\'))));
+
+    try {
+      this.sendServer(encodeSharedFoldersFiles(folders.size, files.length));
+    } catch {
+      // The close handler will clean up.
+    }
+
+    this.uploads?.pump();
   }
 
   get state(): ConnectionState {
@@ -407,6 +475,8 @@ export class SoulseekClient extends Emitter<SoulseekClientEvents> {
       this.startPing();
       this.reconnectAttempt = 0;
       this.setState('online');
+      // Report our share honestly: peers check it before sending to us.
+      this.refreshShares();
       this.emit('login', response);
       this.log(`Connecté en tant que ${this.username}, port ${this.actualListenPort}`);
 
@@ -437,6 +507,7 @@ export class SoulseekClient extends Emitter<SoulseekClientEvents> {
     }
 
     this.finishSearch();
+    this.uploads?.stop();
     this.failAllTransfers('Déconnecté');
     this.closePeerSessions();
     this.stopPing();
@@ -1007,7 +1078,15 @@ export class SoulseekClient extends Emitter<SoulseekClientEvents> {
   private async openPeerConnection(username: string): Promise<PeerSession> {
     let settled = false;
     const direct = this.connectDirect(username);
-    const indirect = this.connectIndirect(username, ConnectionType.PEER);
+    const indirect = this.connectIndirect(username, ConnectionType.PEER, (socket, rest) => {
+      const session = this.attachPeerSession(username, socket, 'out', false);
+
+      if (rest) {
+        session.receive(rest);
+      }
+
+      return session;
+    });
 
     // Whatever loses the race must not leak a socket.
     const discard = (socket: SocketLike) => {
@@ -1068,19 +1147,37 @@ export class SoulseekClient extends Emitter<SoulseekClientEvents> {
     return { promise };
   }
 
-  private connectIndirect(
+  /**
+   * Asks the server to make `username` connect to us (ConnectToPeer). When
+   * the peer's PierceFirewall arrives, `attach` takes over the socket.
+   */
+  private connectIndirect<T>(
     username: string,
     type: string,
-  ): { promise: Promise<PeerSession>; cancel: () => void } {
+    attach: (socket: SocketLike, rest: Uint8Array | null) => T,
+  ): { promise: Promise<T>; cancel: () => void } {
     const token = this.nextToken();
 
-    const promise = new Promise<PeerSession>((resolve, reject) => {
+    const promise = new Promise<T>((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pendingPierces.delete(token);
         reject(new Error(`${username} ne répond pas`));
       }, INDIRECT_CONNECT_TIMEOUT_MS);
 
-      this.pendingPierces.set(token, { username, resolve, reject, timer });
+      this.pendingPierces.set(token, {
+        username,
+        type,
+        accept: (socket, rest) => {
+          try {
+            resolve(attach(socket, rest));
+          } catch (error) {
+            socket.destroy();
+            reject(error as Error);
+          }
+        },
+        reject,
+        timer,
+      });
 
       try {
         this.sendServer(encodeConnectToPeer(token, username, type));
@@ -1104,6 +1201,44 @@ export class SoulseekClient extends Emitter<SoulseekClientEvents> {
         }
       },
     };
+  }
+
+  /**
+   * Opens an F connection to `username` for an upload: direct (with a
+   * PeerInit of type F) raced against ConnectToPeer.
+   */
+  private async openFileConnection(
+    username: string,
+  ): Promise<{ socket: SocketLike; rest: Uint8Array | null }> {
+    let settled = false;
+    const direct = this.connectDirect(username);
+    const indirect = this.connectIndirect(username, ConnectionType.FILE, (socket, rest) => ({
+      socket,
+      rest,
+    }));
+
+    try {
+      const winner = await firstSuccess([
+        direct.promise.then(socket => {
+          socket.write(encodePeerInit(this.username, ConnectionType.FILE));
+          return { socket, rest: null as Uint8Array | null, direct: true };
+        }),
+        indirect.promise.then(result => ({ ...result, direct: false })),
+      ]);
+
+      settled = true;
+
+      if (winner.direct) {
+        indirect.cancel();
+      } else {
+        direct.promise.then(socket => settled && socket.destroy(), () => {});
+      }
+
+      return { socket: winner.socket, rest: winner.rest };
+    } catch (error) {
+      indirect.cancel();
+      throw error instanceof Error ? error : new Error(`Impossible de joindre ${username}`);
+    }
   }
 
   private attachPeerSession(
@@ -1222,6 +1357,59 @@ export class SoulseekClient extends Emitter<SoulseekClientEvents> {
 
         const response = parseFileSearchResponse(payload);
         this.handleSearchResponse(response);
+        break;
+      }
+
+      case PeerCode.GET_SHARE_FILE_LIST: {
+        session.send(encodeSharedFileListResponse(this.shares?.files() ?? []));
+        break;
+      }
+
+      case PeerCode.FOLDER_CONTENTS_REQUEST: {
+        const request = parseFolderContentsRequest(payload);
+        session.send(
+          encodeFolderContentsResponse(request.token, request.folder, this.shares?.files() ?? []),
+        );
+        break;
+      }
+
+      case PeerCode.USER_INFO_REQUEST: {
+        session.send(
+          encodeUserInfoResponse({
+            description: this.description,
+            uploadSlots: this.uploads?.slots ?? 0,
+            queueSize: this.uploads?.queueLength ?? 0,
+            slotsFree: this.uploads?.hasFreeSlot ?? false,
+          }),
+        );
+        break;
+      }
+
+      case PeerCode.QUEUE_UPLOAD: {
+        const { filename } = parseQueueUpload(payload);
+
+        if (this.uploads) {
+          this.uploads.enqueue(session.username, filename, message => session.send(message));
+        } else {
+          session.send(encodeUploadDenied(filename, 'File not shared.'));
+        }
+
+        break;
+      }
+
+      case PeerCode.PLACE_IN_QUEUE_REQUEST: {
+        const { filename } = parsePlaceInQueueRequest(payload);
+
+        if (this.uploads) {
+          session.send(this.uploads.placeInQueue(session.username, filename));
+        }
+
+        break;
+      }
+
+      case PeerCode.TRANSFER_RESPONSE: {
+        const response = parseTransferResponse(payload);
+        this.uploads?.handleTransferResponse(response.token, response.allowed);
         break;
       }
 
@@ -1588,15 +1776,11 @@ export class SoulseekClient extends Emitter<SoulseekClientEvents> {
 
           this.pendingPierces.delete(token);
           clearTimeout(pierce.timer);
-          // Attach the session now, in the same tick, so no peer data is lost.
-          session = this.attachPeerSession(pierce.username, socket, 'out', false);
-          phase = 'peer';
-
-          if (queue.length > 0) {
-            session.receive(queue.take(queue.length));
-          }
-
-          pierce.resolve(session);
+          // From here the socket belongs to whoever asked for it (a P session
+          // or an upload); this listener stops reading.
+          phase = pierce.type === ConnectionType.PEER ? 'peer' : 'file-data';
+          const rest = queue.length > 0 ? queue.take(queue.length) : null;
+          pierce.accept(socket, rest);
           return;
         }
 

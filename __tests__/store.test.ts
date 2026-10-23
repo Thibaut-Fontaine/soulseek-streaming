@@ -41,6 +41,9 @@ async function withNetwork(peers: FakePeer[], run: (network: MultiPeerNetwork) =
       listenPort: 0,
       streamPort: 0,
       bufferMb: 0.25,
+      shareEnabled: false,
+      shareWifiOnly: true,
+      cacheMb: 1024,
     },
   });
 
