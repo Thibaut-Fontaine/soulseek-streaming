@@ -24,26 +24,28 @@ La page fournit l'APK, son empreinte SHA-256, les captures d'écran et l'archive
 du code source. L'APK est signé avec une clé de développement : il s'installe
 manuellement et n'est pas destiné à une publication sur le Play Store.
 
-### Build de la branche
+### Build actuelle (0.2.0)
 
-La branche `ccr-b56e6780-ko4xxa` contient un APK construit à partir de son code,
-dans [`releases/SoulStream.apk`](releases/SoulStream.apk) (build actuelle : ARM uniquement,
-signé avec la clé de debug). Le dépôt étant privé, le téléchargement demande
-d'être connecté à GitHub avec un compte qui a accès au dépôt.
+La version publiée sur la page est construite depuis `main` et signée avec la
+clé de développement. Elle inclut les architectures ARM (téléphones) et x86_64
+(émulateurs), et son APK est aussi conservé dans
+[`releases/SoulStream.apk`](releases/SoulStream.apk) pour les tests locaux.
 
-La page vitrine [`showcase/`](showcase/index.html) affiche un grand QR code vers
-cet APK, avec la branche, le commit, la taille et l'empreinte SHA-256. Pour la
-mettre à jour après une nouvelle build :
+La page vitrine [`showcase/index.html`](showcase/index.html) affiche le QR code
+de téléchargement, les captures et les informations de build. Pour la
+régénérer après une nouvelle build :
 
 ```bash
-cd android && ./gradlew assembleRelease && cd ..
-node tools/showcase.mjs android/app/build/outputs/apk/release/app-release.apk
-git add releases showcase && git commit -m "build: refresh branch APK"
+cd android && ./gradlew assembleRelease --no-daemon \
+  -PreactNativeArchitectures=arm64-v8a,armeabi-v7a,x86_64 && cd ..
+node tools/showcase.mjs android/app/build/outputs/apk/release/app-release.apk \
+  --url https://thibautfontaine.space/streaming/SoulStream.apk
+git add releases showcase && git commit -m "build: refresh APK and QR code"
 ```
 
-Le script copie l'APK dans `releases/` et régénère le QR code et les
-informations de build. Il refuse de tourner s'il reste des modifications non
-commitées dans le code de l'application.
+Le script copie l'APK dans `releases/`, régénère le QR code et les informations
+de build. Il refuse de tourner s'il reste des modifications non commitées dans
+le code de l'application.
 
 ## Fonctionnalités
 

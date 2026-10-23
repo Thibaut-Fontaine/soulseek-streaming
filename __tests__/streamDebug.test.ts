@@ -25,7 +25,7 @@ jest.mock('../src/transport/rnTcpTransport', () => ({
   ReactNativeTransport: jest.requireActual('../src/transport/nodeTransport').NodeTransport,
 }));
 
-import { playbackTimeouts, useAppStore } from '../src/state/store';
+import { useAppStore } from '../src/state/store';
 
 jest.setTimeout(30000);
 
