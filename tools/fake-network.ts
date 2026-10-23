@@ -35,6 +35,7 @@ const PEER_PORT = Number(process.env.PEER_PORT ?? 22421);
 const CLIENT_PORT = Number(process.env.CLIENT_PORT ?? 22345);
 const PEER_IP = process.env.PEER_IP ?? '10.0.2.2';
 const FILE_PATH = process.env.FILE ?? path.resolve(process.cwd(), 'tools/demo.mp3');
+const DURATION_SEC = Number(process.env.DURATION ?? 28);
 const sourceFile = fs.existsSync(FILE_PATH) ? FILE_PATH : null;
 const extension = sourceFile ? path.extname(sourceFile).slice(1).toLowerCase() || 'mp3' : 'wav';
 const USERNAME = 'alice';
@@ -98,7 +99,7 @@ function readString(payload: Uint8Array, offset: number): { value: string; next:
 
 function buildSearchPayload(token: number): Uint8Array {
   const files = [1, 2, 3].map(
-    index => `Music\\Fake Artist ${token} - Track ${index}.${extension}`,
+    index => `Music\\Fake Artist\\Fake Album\\0${index} - Fake Song ${index}.${extension}`,
   );
 
   const writer = new ByteWriter();
@@ -107,7 +108,7 @@ function buildSearchPayload(token: number): Uint8Array {
   for (const filename of files) {
     writer.u8(1).string(filename).u64(data.length).string('');
     // bitrate (0), duration (1), sample rate (4)
-    writer.u32(3).u32(0).u32(192).u32(1).u32(28).u32(4).u32(44100);
+    writer.u32(3).u32(0).u32(192).u32(1).u32(DURATION_SEC).u32(4).u32(44100);
   }
 
   writer.bool(true).u32(500000).u32(0).u32(0);
