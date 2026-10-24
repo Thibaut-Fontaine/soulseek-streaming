@@ -72,6 +72,8 @@ export interface PlayContext {
 export type Sheet =
   | { kind: 'actions'; hit: SearchHit; context?: PlayContext }
   | { kind: 'sources'; hits: SearchHit[]; title: string; context?: PlayContext }
+  /** Menu of a catalog track (artist/album pages, catalog search results). */
+  | { kind: 'catalogActions'; track: CatalogTrack; context?: CatalogPlayContext }
   | { kind: 'queue' };
 
 export interface CurrentPlayback {
@@ -155,6 +157,8 @@ interface AppState {
   resolutions: Record<string, Resolution>;
   /** Catalog track of each Soulseek file we matched, by `hitKey`. */
   hitTracks: Record<string, CatalogTrack>;
+  /** Catalog list being played (album, top tracks, radio); `context` is null then. */
+  catalogContext: CatalogPlayContext | null;
 
   init: () => Promise<void>;
   login: (username: string, password: string, keepSessionOnFailure?: boolean) => Promise<boolean>;
@@ -227,6 +231,8 @@ interface AppState {
   enqueueCatalogTrack: (track: CatalogTrack, first?: boolean) => void;
   /** Catalog track for a Soulseek file, when one was matched. */
   trackForHit: (hit: SearchHit) => CatalogTrack | null;
+  /** Plays "Radio <artist>": tracks similar to that artist. */
+  playArtistRadio: (artistId: string, name: string) => Promise<void>;
 }
 
 let service: StreamingService | null = null;
@@ -825,6 +831,7 @@ export const useAppStore = create<AppState>((set, get) => {
       shareEnabled: true,
       shareWifiOnly: true,
       cacheMb: 1024,
+      catalogEnabled: true,
     },
 
     username: null,
@@ -864,6 +871,7 @@ export const useAppStore = create<AppState>((set, get) => {
     browse: null,
     resolutions: {},
     hitTracks: {},
+    catalogContext: null,
     notice: null,
 
     init: async () => {
@@ -1390,6 +1398,7 @@ export const useAppStore = create<AppState>((set, get) => {
     resolveTrack: async () => ({ status: 'none', sources: [] }),
     enqueueCatalogTrack: () => {},
     trackForHit: hit => get().hitTracks[hitKey(hit)] ?? null,
+    playArtistRadio: async () => {},
 
     importTracks: async () => {
       const cache = trackCache;

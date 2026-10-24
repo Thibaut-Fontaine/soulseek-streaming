@@ -1,5 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
+import type { CatalogTrack } from '../core/catalogTypes';
 import { normalizeForMatch } from '../core/search';
 import { displayArtist, displayTitle } from '../core/types';
 import type { SearchHit } from '../core/types';
@@ -13,6 +14,8 @@ export interface SavedTrack {
   hit: SearchHit;
   /** When it was liked, or last played. */
   at: number;
+  /** Catalog track this entry was matched to, when known. */
+  catalog?: CatalogTrack;
 }
 
 export interface Library {
