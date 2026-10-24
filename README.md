@@ -24,10 +24,10 @@ La page fournit l'APK, son empreinte SHA-256, les captures d'écran et l'archive
 du code source. L'APK est signé avec une clé de développement : il s'installe
 manuellement et n'est pas destiné à une publication sur le Play Store.
 
-### Build actuelle (0.2.0)
+### Build actuelle (1.2.0)
 
-La version publiée sur la page est construite depuis `main` et signée avec la
-clé de développement. Elle inclut les architectures ARM (téléphones) et x86_64
+La version 1.2.0 publiée sur la page est construite depuis `main` et signée avec
+la clé de développement. Elle inclut les architectures ARM (téléphones) et x86_64
 (émulateurs), et son APK est aussi conservé dans
 [`releases/SoulStream.apk`](releases/SoulStream.apk) pour les tests locaux.
 
