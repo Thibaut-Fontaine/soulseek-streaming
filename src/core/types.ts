@@ -91,6 +91,15 @@ export function displayArtist(hit: { filename: string }): string | null {
   return parseTrackName(hit.filename).artist;
 }
 
+/** Details read from a track's ID3 tag, when it has one. */
+export interface TrackMeta {
+  title?: string;
+  artist?: string;
+  album?: string;
+  /** `file://` or `data:` URI of the embedded cover; null when there is none. */
+  coverUri: string | null;
+}
+
 export function hitKey(hit: { username: string; filename: string }): string {
   return `${hit.username.toLowerCase()}\u0000${hit.filename}`;
 }

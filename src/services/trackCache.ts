@@ -1,9 +1,11 @@
 import { Buffer } from 'buffer';
 
+import { id3TagSize, parseId3 } from '../core/id3';
+import type { Id3Tags } from '../core/id3';
 import type { SharedFileInfo } from '../core/protocol';
 import { AUTO_MATCH_SCORE, matchScore } from '../core/search';
 import { baseName, hitKey } from '../core/types';
-import type { SearchHit } from '../core/types';
+import type { SearchHit, TrackMeta } from '../core/types';
 import type { ShareFileReader, ShareLibrary } from '../core/uploads';
 
 /** The few file operations the cache needs. Backed by react-native-blob-util. */
@@ -18,6 +20,8 @@ export interface CacheFs {
   unlink(path: string): Promise<void>;
   /** Moves a file, e.g. a picked file copied to the app's caches first. */
   move(from: string, to: string): Promise<void>;
+  /** Bytes `start`..`end` of a file, base64. Used to read tags cheaply. */
+  readSliceBase64?(path: string, start: number, end: number): Promise<string>;
 }
 
 export interface CacheEntry {
@@ -38,6 +42,14 @@ export interface CacheEntry {
    * and not counted in the cache limit: it is there to be shared.
    */
   imported?: boolean;
+  /**
+   * Cover file name in the cache directory. `null`: the track has no cover.
+   * `undefined`: not looked at yet.
+   */
+  cover?: string | null;
+  tagTitle?: string;
+  tagArtist?: string;
+  tagAlbum?: string;
 }
 
 /** Result of adding one file from the phone. */
@@ -52,6 +64,8 @@ const SHARE_FOLDER = 'SoulStream';
 const MAX_FILE_BYTES = 40 * 1024 * 1024;
 /** Added files can be longer (mixes, live sets) but stay reasonable. */
 const MAX_IMPORT_BYTES = 150 * 1024 * 1024;
+/** Tags bigger than this are not read from disk (covers are small). */
+const MAX_TAG_BYTES = 4 * 1024 * 1024;
 
 function safeName(value: string): string {
   return value.replace(/[\\/:*?"<>|\u0000-\u001f]/g, '_').slice(0, 150);
@@ -66,11 +80,18 @@ export class TrackCache implements ShareLibrary {
   private entries: CacheEntry[] = [];
   private loaded = false;
   private writing: Promise<void> = Promise.resolve();
+  private readonly listeners = new Set<() => void>();
 
   constructor(
     private readonly fs: CacheFs,
     private maxBytes: number,
   ) {}
+
+  /** Called after every change to the list of tracks or their tags. */
+  onChange(listener: () => void): () => void {
+    this.listeners.add(listener);
+    return () => this.listeners.delete(listener);
+  }
 
   setLimit(maxBytes: number): void {
     this.maxBytes = maxBytes;
@@ -140,9 +161,109 @@ export class TrackCache implements ShareLibrary {
   }
 
   /** The cached copy of a search hit, if we already have that file. */
-  findByHit(hit: SearchHit): CacheEntry | null {
+  findByHit(hit: Pick<SearchHit, 'username' | 'filename'>): CacheEntry | null {
     const key = hitKey(hit);
-    return this.entries.find(entry => entry.sourceKey === key) ?? null;
+    const exact = this.entries.find(entry => entry.sourceKey === key);
+
+    if (exact || hit.username) {
+      return exact ?? null;
+    }
+
+    // Added files have no peer.
+    return this.entries.find(entry => entry.imported && entry.sourceFilename === hit.filename) ?? null;
+  }
+
+  /** Cached tracks matching a query, best first. */
+  search(query: string, minScore: number): CacheEntry[] {
+    return this.entries
+      .map(entry => ({ entry, score: matchScore(query, this.asHit(entry)) }))
+      .filter(item => item.score >= minScore)
+      .sort((a, b) => b.score - a.score)
+      .map(item => item.entry);
+  }
+
+  /** Every track on the device, most recently played (or added) first. */
+  all(): CacheEntry[] {
+    return [...this.entries].sort(
+      (a, b) => Math.max(b.lastPlayedAt, b.addedAt) - Math.max(a.lastPlayedAt, a.addedAt),
+    );
+  }
+
+  /**
+   * Title, artist and cover from the file's tag. Read once from disk, then
+   * remembered in the index.
+   */
+  async readMeta(entry: CacheEntry): Promise<TrackMeta> {
+    if (entry.cover === undefined) {
+      await this.serialize(() => this.extractFromDisk(entry));
+    }
+
+    return this.metaOf(entry);
+  }
+
+  metaOf(entry: CacheEntry): TrackMeta {
+    return {
+      title: entry.tagTitle,
+      artist: entry.tagArtist,
+      album: entry.tagAlbum,
+      coverUri: entry.cover ? `file://${this.fs.dir}/${entry.cover}` : null,
+    };
+  }
+
+  private async extractFromDisk(entry: CacheEntry): Promise<void> {
+    if (entry.cover !== undefined || !this.entries.includes(entry)) {
+      return;
+    }
+
+    const path = `${this.fs.dir}/${entry.file}`;
+    let tags: Id3Tags | null = null;
+
+    try {
+      if (this.fs.readSliceBase64) {
+        const head = Buffer.from(await this.fs.readSliceBase64(path, 0, 10), 'base64');
+        const size = id3TagSize(new Uint8Array(head));
+
+        if (size > 0 && size <= MAX_TAG_BYTES) {
+          const bytes = Buffer.from(await this.fs.readSliceBase64(path, 0, size), 'base64');
+          tags = parseId3(new Uint8Array(bytes));
+        }
+      } else if (entry.size <= MAX_FILE_BYTES) {
+        tags = parseId3(new Uint8Array(Buffer.from(await this.fs.readBase64(path), 'base64')));
+      }
+    } catch {
+      tags = null;
+    }
+
+    await this.applyTags(entry, tags);
+    await this.saveIndex();
+  }
+
+  /** Writes the cover next to the track and keeps the text tags. */
+  private async applyTags(entry: CacheEntry, tags: Id3Tags | null): Promise<void> {
+    entry.tagTitle = tags?.title;
+    entry.tagArtist = tags?.artist;
+    entry.tagAlbum = tags?.album;
+    entry.cover = null;
+
+    if (tags?.picture) {
+      const extension = tags.picture.mime === 'image/png' ? 'png' : 'jpg';
+      const cover = `${entry.file.replace(/\.[^.]+$/, '')}.cover.${extension}`;
+
+      try {
+        await this.fs.writeBase64(`${this.fs.dir}/${cover}`, Buffer.from(tags.picture.data).toString('base64'));
+        entry.cover = cover;
+      } catch {
+        entry.cover = null;
+      }
+    }
+  }
+
+  private async removeFiles(entry: CacheEntry): Promise<void> {
+    await this.fs.unlink(`${this.fs.dir}/${entry.file}`).catch(() => {});
+
+    if (entry.cover) {
+      await this.fs.unlink(`${this.fs.dir}/${entry.cover}`).catch(() => {});
+    }
   }
 
   /** The best cached track for a query, if it matches well enough. */
@@ -162,8 +283,12 @@ export class TrackCache implements ShareLibrary {
 
   /** A SearchHit describing a cached entry, for display and matching. */
   asHit(entry: CacheEntry): SearchHit {
+    // Downloads keep the peer's name (`sourceKey` is its hitKey), so the hit
+    // matches the one in search results, likes and history.
+    const separator = entry.sourceKey.indexOf('\u0000');
+
     return {
-      username: '',
+      username: !entry.imported && separator > 0 ? entry.sourceKey.slice(0, separator) : '',
       filename: entry.sourceFilename,
       size: entry.size,
       bitrate: entry.bitrate,
@@ -216,6 +341,9 @@ export class TrackCache implements ShareLibrary {
         addedAt: Date.now(),
         lastPlayedAt: Date.now(),
       };
+
+      const size = id3TagSize(bytes);
+      await this.applyTags(entry, size > 0 ? parseId3(bytes.subarray(0, Math.min(bytes.length, size))) : null);
 
       this.entries.push(entry);
       await this.evict();
@@ -308,7 +436,7 @@ export class TrackCache implements ShareLibrary {
       const removed = this.entries.filter(entry => Boolean(entry.imported) === imported);
 
       for (const entry of removed) {
-        await this.fs.unlink(`${this.fs.dir}/${entry.file}`).catch(() => {});
+        await this.removeFiles(entry);
       }
 
       this.entries = this.entries.filter(entry => Boolean(entry.imported) !== imported);
@@ -328,12 +456,20 @@ export class TrackCache implements ShareLibrary {
       const victim = downloads.pop()!;
       bytes -= victim.size;
       this.entries = this.entries.filter(entry => entry !== victim);
-      await this.fs.unlink(`${this.fs.dir}/${victim.file}`).catch(() => {});
+      await this.removeFiles(victim);
     }
   }
 
   private async saveIndex(): Promise<void> {
     await this.fs.writeText(`${this.fs.dir}/${INDEX_FILE}`, JSON.stringify(this.entries));
+
+    for (const listener of this.listeners) {
+      try {
+        listener();
+      } catch {
+        // A listener must not break the cache.
+      }
+    }
   }
 
   /** Runs file operations one at a time. */

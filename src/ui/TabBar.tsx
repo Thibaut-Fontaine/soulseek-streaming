@@ -6,12 +6,11 @@ import { Icon } from './Icon';
 import type { IconName } from './Icon';
 import { colors, spacing } from './theme';
 
-// TODO(phase-3): Accueil / Rechercher / Bibliothèque, with Réglages behind
-// the avatar (DESIGN.md §5).
+// Réglages open from the avatar on Accueil and Bibliothèque.
 const TABS: Array<{ id: Tab; icon: IconName; label: string; fillable: boolean }> = [
+  { id: 'home', icon: 'home', label: 'Accueil', fillable: false },
   { id: 'search', icon: 'search', label: 'Rechercher', fillable: false },
-  { id: 'player', icon: 'play', label: 'Lecture', fillable: true },
-  { id: 'settings', icon: 'gear', label: 'Réglages', fillable: false },
+  { id: 'library', icon: 'library', label: 'Bibliothèque', fillable: false },
 ];
 
 export function TabBar({

@@ -1,3 +1,4 @@
+import { Buffer } from 'buffer';
 import { PermissionsAndroid, Platform } from 'react-native';
 import TrackPlayer, { Event } from 'react-native-track-player';
 import { create } from 'zustand';
@@ -9,32 +10,56 @@ import {
   types,
 } from '@react-native-documents/picker';
 
+import { id3TagSize, parseId3 } from '../core/id3';
 import type { ConnectionState } from '../core/soulseekClient';
 import type { TransferSnapshot } from '../core/transfer';
 import {
-  AUTO_MATCH_SCORE,
   formatSearchQuery,
   normalizeForMatch,
-  pickBestMatch,
   rankHits,
   similarity,
 } from '../core/search';
 import type { RankedHit } from '../core/search';
 import { displayArtist, displayTitle, hitKey, isStreamableFile } from '../core/types';
-import type { SearchHit } from '../core/types';
+import type { SearchHit, TrackMeta } from '../core/types';
 import type { StreamTransfer } from '../core/transfer';
 import { ensurePlayer, resetPlayer } from '../player/player';
 import { clearCredentials, loadCredentials, loadSettings, saveCredentials, saveSettings } from '../services/settings';
 import type { Credentials, Settings } from '../services/settings';
 import { StreamingService } from '../services/streaming';
 import { debugLog } from '../services/debugLog';
+import {
+  EMPTY_LIBRARY,
+  addRecentSearch,
+  addToHistory,
+  loadLibrary,
+  removeRecentSearch,
+  saveLibrary,
+  savedTrack,
+  toggleLike,
+} from '../services/library';
+import type { Library } from '../services/library';
 import type { LogTag } from '../services/debugLog';
 import { createBlobUtilFs } from '../services/blobUtilFs';
 import { TrackCache } from '../services/trackCache';
 import type { CacheEntry } from '../services/trackCache';
 import { contentTypeFor } from '../stream/httpServer';
 
-export type Tab = 'search' | 'player' | 'settings';
+export type Tab = 'home' | 'search' | 'library' | 'settings';
+
+/** What "next" and "previous" walk through: the list a track was played from. */
+export interface PlayContext {
+  /** Shown as "Lecture depuis …" in the player. */
+  label: string;
+  items: SearchHit[];
+  index: number;
+}
+
+/** Bottom sheets shown above everything, the player included. */
+export type Sheet =
+  | { kind: 'actions'; hit: SearchHit; context?: PlayContext }
+  | { kind: 'sources'; hits: SearchHit[]; title: string; context?: PlayContext }
+  | { kind: 'queue' };
 
 export interface CurrentPlayback {
   hit: SearchHit;
@@ -69,14 +94,31 @@ interface AppState {
   httpPort: number;
 
   tab: Tab;
+  /** The full-screen player, opened from the bottom bar. */
+  playerOpen: boolean;
+  sheet: Sheet | null;
   query: string;
   searching: boolean;
   searchQuery: string;
   searchEmpty: boolean;
   searchError: string | null;
-  matchHit: SearchHit | null;
   /** Ranked sources for the last search, best first. Includes weaker matches. */
   results: RankedHit[];
+  /** Tracks already on the device that match the last search. */
+  deviceResults: SearchHit[];
+
+  /** Liked tracks, history and recent searches, saved on the device. */
+  library: Library;
+  /** Every track on the device (downloads and added files), newest first. */
+  device: SearchHit[];
+  /** Tags and covers read from MP3s, by `hitKey`. */
+  meta: Record<string, TrackMeta>;
+  /** Tracks the user queued; played before the rest of the context. */
+  queue: SearchHit[];
+  context: PlayContext | null;
+  shuffle: boolean;
+  /** Repeat the current track. */
+  repeat: boolean;
 
   transfers: Record<string, TransferSnapshot>;
   current: CurrentPlayback | null;
@@ -98,6 +140,24 @@ interface AppState {
   retryPlayback: () => Promise<void>;
   stopPlayback: () => Promise<void>;
   dismissNotice: () => void;
+
+  /** Plays a track the user picked, from a list that "next" will follow. */
+  playTrack: (hit: SearchHit, context?: PlayContext) => Promise<void>;
+  playNext: () => Promise<void>;
+  /** Restarts the track, or goes back when it has just started. */
+  playPrevious: (positionSec: number) => Promise<void>;
+  enqueue: (hit: SearchHit, first?: boolean) => void;
+  toggleShuffle: () => void;
+  toggleRepeat: () => void;
+  removeFromQueue: (index: number) => void;
+  toggleLike: (hit: SearchHit) => void;
+  forgetSearch: (query: string) => void;
+  /** Reads the tag of a track on the device, for its cover and title. */
+  loadMeta: (hit: SearchHit) => void;
+  openPlayer: () => void;
+  closePlayer: () => void;
+  openSheet: (sheet: Sheet) => void;
+  closeSheet: () => void;
   /** Tracks on the device (shared with others when sharing is on). */
   cacheStats: () => {
     count: number;
@@ -120,6 +180,8 @@ let trackCache: TrackCache | null = null;
 let initStarted = false;
 let searchSequence = 0;
 let playSequence = 0;
+/** When the user last started a track; see the queue-ended listener. */
+let lastPlayStartedAt = 0;
 
 /** Peers that refused us during this session, by lower-cased username. */
 const deniedPeers = new Map<string, string>();
@@ -134,13 +196,15 @@ const MAX_TRANSFER_HISTORY = 20;
 
 /** How many sources to try for one track before giving up. */
 const MAX_ATTEMPTS = 5;
-/** After the first good match, keep collecting this long before choosing. */
-const MATCH_WINDOW_MS = 1200;
-/** Keep the search open this long after the first match, to fill `results`. */
-const RESULTS_AFTER_MATCH_MS = 4000;
 const SEARCH_DURATION_MS = 10000;
-/** Weaker matches are listed for manual choice but never auto-played. */
+/** Weaker matches are still listed; the user picks what to play. */
 const LIST_SCORE = 0.55;
+/** Stop listening for results once this many sources came in. */
+const ENOUGH_RESULTS = 300;
+/** A tag bigger than this is not waited for (it would delay nothing, but costs memory). */
+const MAX_STREAM_TAG_BYTES = 4 * 1024 * 1024;
+/** "Previous" restarts the track after this many seconds of playback. */
+const RESTART_THRESHOLD_SEC = 3;
 
 /**
  * Per-step limits. A P2P source that is slow to answer is usually not worth
@@ -203,6 +267,68 @@ async function requestNotificationPermission(): Promise<void> {
 }
 
 export const useAppStore = create<AppState>((set, get) => {
+  const metaLoading = new Set<string>();
+
+  function updateLibrary(change: (library: Library) => Library): void {
+    const library = change(get().library);
+    set({ library });
+    void saveLibrary(library);
+  }
+
+  function setMeta(key: string, meta: TrackMeta): void {
+    set(state => ({ meta: { ...state.meta, [key]: meta } }));
+  }
+
+  function refreshDevice(): void {
+    const cache = trackCache;
+    set({ device: cache ? cache.all().map(entry => cache.asHit(entry)) : [] });
+  }
+
+  /**
+   * Reads the ID3 tag from the first bytes of a stream: the cover appears as
+   * soon as the tag has arrived, usually before playback starts.
+   */
+  async function readStreamMeta(transferId: string, hit: SearchHit): Promise<void> {
+    const key = hitKey(hit);
+    const buffer = service?.getTransfer(transferId)?.buffer;
+
+    if (!buffer || get().meta[key]) {
+      return;
+    }
+
+    try {
+      await buffer.waitFor(9, 30000);
+      const size = id3TagSize(buffer.read(0, 10));
+
+      if (size === 0 || size > MAX_STREAM_TAG_BYTES) {
+        setMeta(key, { coverUri: null });
+        return;
+      }
+
+      if (buffer.total < size) {
+        await buffer.waitFor(size - 1, 120000);
+      }
+
+      const tags = parseId3(buffer.read(0, size));
+      setMeta(key, {
+        title: tags?.title,
+        artist: tags?.artist,
+        album: tags?.album,
+        coverUri: tags?.picture
+          ? `data:${tags.picture.mime};base64,${Buffer.from(tags.picture.data).toString('base64')}`
+          : null,
+      });
+    } catch {
+      // The transfer ended or failed first: no cover for this one.
+    }
+  }
+
+  /** Marks the current track as played, once it really started. */
+  function recordPlay(hit: SearchHit): void {
+    const meta = get().meta[hitKey(hit)];
+    updateLibrary(library => addToHistory(library, savedTrack(hit, meta)));
+  }
+
   function wire(instance: StreamingService): void {
     instance.events.on('state', payload => {
       debugLog('net', `connexion : ${payload.state}${payload.error ? ` (${payload.error})` : ''}`);
@@ -401,6 +527,7 @@ export const useAppStore = create<AppState>((set, get) => {
       `${hit.username} n'a pas ouvert le transfert`,
     );
     step('connexion F ouverte, octets en route');
+    void readStreamMeta(id, hit);
 
     await waitForTransfer(
       id,
@@ -493,13 +620,35 @@ export const useAppStore = create<AppState>((set, get) => {
     TrackPlayer.addEventListener(Event.PlaybackActiveTrackChanged, event => {
       debugLog('player', `piste active : ${event.track?.url ?? 'aucune'}`);
     });
+
+    // One track at a time in the native player: at its end, play what's next.
+    TrackPlayer.addEventListener(Event.PlaybackQueueEnded, event => {
+      // Ignore the end of a track we are replacing anyway.
+      if (get().current?.phase !== 'playing' || Date.now() - lastPlayStartedAt < 3000 || !(event.position > 0)) {
+        return;
+      }
+
+      if (get().repeat) {
+        void TrackPlayer.seekTo(0)
+          .then(() => TrackPlayer.play())
+          .catch(() => {});
+        return;
+      }
+
+      void get().playNext();
+    });
   }
 
   /** Plays a track already on the device. No network involved. */
-  async function playCached(entry: CacheEntry): Promise<void> {
+  /**
+   * `original` is the search result or saved track that led here: it keeps
+   * the peer's exact name, needed to download the file again if the copy on
+   * the device is ever removed.
+   */
+  async function playCached(entry: CacheEntry, original?: SearchHit): Promise<void> {
     const sequence = ++playSequence;
     const cache = trackCache!;
-    const hit = cache.asHit(entry);
+    const hit = original ?? cache.asHit(entry);
     const url = cache.uriFor(entry);
 
     await ensurePlayer();
@@ -527,6 +676,8 @@ export const useAppStore = create<AppState>((set, get) => {
     });
 
     cache.markPlayed(entry);
+    get().loadMeta(hit);
+    recordPlay(hit);
     await TrackPlayer.add({
       id: `cache:${entry.file}`,
       url,
@@ -566,6 +717,7 @@ export const useAppStore = create<AppState>((set, get) => {
           set(state => ({
             current: state.current ? { ...state.current, phase: 'playing' } : null,
           }));
+          recordPlay(hit);
         }
 
         return;
@@ -627,14 +779,24 @@ export const useAppStore = create<AppState>((set, get) => {
     listenPort: 0,
     httpPort: 0,
 
-    tab: 'search',
+    tab: 'home',
+    playerOpen: false,
+    sheet: null,
     query: '',
     searching: false,
     searchQuery: '',
     searchEmpty: false,
     searchError: null,
-    matchHit: null,
     results: [],
+    deviceResults: [],
+
+    library: { ...EMPTY_LIBRARY },
+    device: [],
+    meta: {},
+    queue: [],
+    context: null,
+    shuffle: false,
+    repeat: false,
 
     transfers: {},
     current: null,
@@ -649,11 +811,13 @@ export const useAppStore = create<AppState>((set, get) => {
 
       try {
         const settings = await loadSettings();
-        set({ settings });
+        set({ settings, library: await loadLibrary() });
 
         try {
           trackCache = new TrackCache(createBlobUtilFs(), settings.cacheMb * 1024 * 1024);
           await trackCache.load();
+          trackCache.onChange(refreshDevice);
+          refreshDevice();
         } catch (error) {
           trackCache = null;
           debugLog('app', `cache indisponible : ${errorMessage(error)}`);
@@ -705,10 +869,14 @@ export const useAppStore = create<AppState>((set, get) => {
         searchQuery: '',
         searchEmpty: false,
         searchError: null,
-        matchHit: null,
         results: [],
+        deviceResults: [],
         transfers: {},
         current: null,
+        queue: [],
+        context: null,
+        playerOpen: false,
+        sheet: null,
         listenPort: 0,
         httpPort: 0,
       });
@@ -721,7 +889,7 @@ export const useAppStore = create<AppState>((set, get) => {
           connection: 'online',
           listenPort: instance.listenPort,
           httpPort: instance.httpPort,
-          tab: keepSessionOnFailure ? get().tab : 'search',
+          tab: keepSessionOnFailure ? get().tab : 'home',
         });
         return true;
       } catch (error) {
@@ -760,16 +928,20 @@ export const useAppStore = create<AppState>((set, get) => {
         connectionError: null,
         listenPort: 0,
         httpPort: 0,
-        tab: 'search',
+        tab: 'home',
+        playerOpen: false,
+        sheet: null,
         query: '',
         searching: false,
         searchQuery: '',
         searchEmpty: false,
         searchError: null,
-        matchHit: null,
         results: [],
+        deviceResults: [],
         transfers: {},
         current: null,
+        queue: [],
+        context: null,
         notice: null,
       });
     },
@@ -844,46 +1016,36 @@ export const useAppStore = create<AppState>((set, get) => {
         return;
       }
 
+      const networkQuery = formatSearchQuery(rawQuery);
+      const cache = trackCache;
+      const deviceResults = cache
+        ? cache.search(networkQuery, LIST_SCORE).map(entry => cache.asHit(entry))
+        : [];
+
+      updateLibrary(library => addRecentSearch(library, rawQuery));
+
       const searchService = service;
 
       if (!searchService || get().connection !== 'online') {
-        set({ searchError: 'Non connecté au réseau Soulseek' });
-        return;
-      }
-
-      if (get().searching && get().searchQuery === formatSearchQuery(rawQuery)) {
-        return;
-      }
-
-      const networkQuery = formatSearchQuery(rawQuery);
-      const sequence = ++searchSequence;
-
-      // Already on the device: play it at once, no search needed.
-      const cached = trackCache?.findByQuery(networkQuery);
-
-      if (cached && trackCache) {
-        searchService.cancelSearch();
         set({
           query: rawQuery,
-          searching: false,
           searchQuery: networkQuery,
-          searchEmpty: false,
-          searchError: null,
-          matchHit: trackCache.asHit(cached),
+          deviceResults,
           results: [],
+          searchError: deviceResults.length > 0 ? null : 'Non connecté au réseau Soulseek',
         });
-        await playCached(cached).catch(error => set({ searchError: errorMessage(error) }));
         return;
       }
 
+      if (get().searching && get().searchQuery === networkQuery) {
+        return;
+      }
+
+      const sequence = ++searchSequence;
       const collected: SearchHit[] = [];
-      let matched = false;
-      let windowTimer: ReturnType<typeof setTimeout> | null = null;
-      let closeTimer: ReturnType<typeof setTimeout> | null = null;
       let rankTimer: ReturnType<typeof setTimeout> | null = null;
 
       debugLog('play', `recherche « ${networkQuery} » (saisie : « ${rawQuery} »)`);
-      const searchStartedAt = Date.now();
 
       set({
         query: rawQuery,
@@ -891,56 +1053,18 @@ export const useAppStore = create<AppState>((set, get) => {
         searchQuery: networkQuery,
         searchEmpty: false,
         searchError: null,
-        matchHit: null,
         results: [],
+        deviceResults,
       });
 
+      // Nothing plays until the user picks a result: the list fills in as
+      // peers answer, ranked by match then availability.
       const publishResults = () => {
         rankTimer = null;
 
         if (sequence === searchSequence) {
           set({ results: rankHits(networkQuery, collected, LIST_SCORE) });
         }
-      };
-
-      const choose = () => {
-        windowTimer = null;
-
-        if (sequence !== searchSequence) {
-          return;
-        }
-
-        if (rankTimer) {
-          clearTimeout(rankTimer);
-        }
-
-        publishResults();
-        const best = rankHits(networkQuery, collected, AUTO_MATCH_SCORE).find(
-          ranked => !deniedPeers.has(ranked.hit.username.toLowerCase()),
-        );
-
-        if (!best) {
-          return;
-        }
-
-        matched = true;
-        debugLog(
-          'play',
-          `meilleur résultat après ${Date.now() - searchStartedAt} ms parmi ${collected.length} : ` +
-            `${best.hit.username} — ${best.hit.filename} (score ${best.score.toFixed(2)})`,
-        );
-        // `searching` ends at the match; results keep filling in the
-        // background for fallback and the sources list.
-        set({ searching: false, searchEmpty: false, matchHit: best.hit });
-        void get().playHit(best.hit);
-
-        // Keep listening a little longer so other sources are available for
-        // fallback and manual choice, then stop: late responses cost CPU.
-        closeTimer = setTimeout(() => {
-          if (sequence === searchSequence) {
-            searchService.cancelSearch();
-          }
-        }, RESULTS_AFTER_MATCH_MS);
       };
 
       try {
@@ -957,10 +1081,8 @@ export const useAppStore = create<AppState>((set, get) => {
               rankTimer = setTimeout(publishResults, 400);
             }
 
-            // Wait a moment after the first good match: the best source is
-            // often a few hundred milliseconds behind the first one.
-            if (!matched && !windowTimer && pickBestMatch(networkQuery, batch, AUTO_MATCH_SCORE)) {
-              windowTimer = setTimeout(choose, MATCH_WINDOW_MS);
+            if (collected.length >= ENOUGH_RESULTS) {
+              searchService.cancelSearch();
             }
           },
           SEARCH_DURATION_MS,
@@ -968,12 +1090,6 @@ export const useAppStore = create<AppState>((set, get) => {
 
         if (sequence !== searchSequence) {
           return;
-        }
-
-        if (windowTimer) {
-          // The search ended inside the window: decide now.
-          clearTimeout(windowTimer);
-          choose();
         }
 
         if (rankTimer) {
@@ -985,32 +1101,22 @@ export const useAppStore = create<AppState>((set, get) => {
         debugLog(
           'play',
           top.length > 0
-            ? `meilleurs candidats : ${top
-                .map(r => `${r.score.toFixed(2)} ${r.hit.filename}`)
-                .join(' | ')} (lecture auto ≥ ${AUTO_MATCH_SCORE}, liste ≥ ${LIST_SCORE})`
+            ? `meilleurs candidats : ${top.map(r => `${r.score.toFixed(2)} ${r.hit.filename}`).join(' | ')}`
             : 'aucun MP3 reçu des pairs',
         );
-        debugLog(
-          'play',
-          `recherche terminée : ${collected.length} MP3 reçus, ${get().results.length} retenus, ` +
-            (matched ? 'lecture lancée' : 'aucun résultat assez proche pour la lecture auto'),
-        );
-        set({ searching: false, searchEmpty: !matched && get().results.length === 0 });
+        debugLog('play', `recherche terminée : ${collected.length} MP3 reçus, ${get().results.length} retenus`);
+        set({
+          searching: false,
+          searchEmpty: get().results.length === 0 && deviceResults.length === 0,
+        });
       } catch (error) {
         debugLog('play', `recherche en erreur : ${errorMessage(error)}`);
         if (sequence === searchSequence) {
           set({ searching: false, searchError: errorMessage(error) });
         }
       } finally {
-        if (sequence !== searchSequence) {
-          // A newer search replaced this one.
-          if (windowTimer) {
-            clearTimeout(windowTimer);
-          }
-
-          if (closeTimer) {
-            clearTimeout(closeTimer);
-          }
+        if (rankTimer && sequence !== searchSequence) {
+          clearTimeout(rankTimer);
         }
       }
     },
@@ -1034,8 +1140,10 @@ export const useAppStore = create<AppState>((set, get) => {
       const cached = trackCache?.findByHit(hit);
 
       try {
+        lastPlayStartedAt = Date.now();
+
         if (cached) {
-          await playCached(cached);
+          await playCached(cached, hit);
         } else {
           await playWithFallback(hit);
         }
@@ -1078,10 +1186,110 @@ export const useAppStore = create<AppState>((set, get) => {
       playSequence++;
       await resetPlayer();
       service?.cancelActive();
-      set({ current: null, matchHit: null });
+      set({ current: null, playerOpen: false });
     },
 
     dismissNotice: () => set({ notice: null }),
+
+    playTrack: async (hit, context) => {
+      set({ context: context ?? null });
+      await get().playHit(hit);
+    },
+
+    playNext: async () => {
+      const { queue, context } = get();
+
+      if (queue.length > 0) {
+        const [next, ...rest] = queue;
+        set({ queue: rest });
+        await get().playHit(next);
+        return;
+      }
+
+      if (context && get().shuffle && context.items.length > 1) {
+        let index = Math.floor(Math.random() * (context.items.length - 1));
+        if (index >= context.index) {
+          index++;
+        }
+        set({ context: { ...context, index } });
+        await get().playHit(context.items[index]);
+        return;
+      }
+
+      if (context && context.index + 1 < context.items.length) {
+        const index = context.index + 1;
+        set({ context: { ...context, index } });
+        await get().playHit(context.items[index]);
+        return;
+      }
+
+      set({ notice: 'Fin de la liste de lecture.' });
+    },
+
+    playPrevious: async positionSec => {
+      const { context, current } = get();
+
+      if (current && (positionSec > RESTART_THRESHOLD_SEC || !context || context.index === 0)) {
+        try {
+          await TrackPlayer.seekTo(0);
+        } catch {
+          // The player reports failures through its state.
+        }
+        return;
+      }
+
+      if (context && context.index > 0) {
+        const index = context.index - 1;
+        set({ context: { ...context, index } });
+        await get().playHit(context.items[index]);
+      }
+    },
+
+    enqueue: (hit, first = false) =>
+      set(state => ({
+        queue: first ? [hit, ...state.queue] : [...state.queue, hit],
+        notice: first ? 'Sera lu ensuite.' : 'Ajouté à la file d’attente.',
+      })),
+
+    toggleShuffle: () => set(state => ({ shuffle: !state.shuffle })),
+    toggleRepeat: () => set(state => ({ repeat: !state.repeat })),
+
+    removeFromQueue: index =>
+      set(state => ({ queue: state.queue.filter((_, i) => i !== index) })),
+
+    toggleLike: hit => {
+      const meta = get().meta[hitKey(hit)];
+      updateLibrary(library => toggleLike(library, savedTrack(hit, meta)));
+    },
+
+    forgetSearch: query => updateLibrary(library => removeRecentSearch(library, query)),
+
+    loadMeta: hit => {
+      const key = hitKey(hit);
+      const cache = trackCache;
+
+      if (!cache || get().meta[key] || metaLoading.has(key)) {
+        return;
+      }
+
+      const entry = cache.findByHit(hit);
+
+      if (!entry) {
+        return;
+      }
+
+      metaLoading.add(key);
+      cache
+        .readMeta(entry)
+        .then(meta => setMeta(key, meta))
+        .catch(() => setMeta(key, { coverUri: null }))
+        .finally(() => metaLoading.delete(key));
+    },
+
+    openPlayer: () => set({ playerOpen: true }),
+    closePlayer: () => set({ playerOpen: false }),
+    openSheet: sheet => set({ sheet }),
+    closeSheet: () => set({ sheet: null }),
 
     cacheStats: () =>
       trackCache
@@ -1167,6 +1375,7 @@ export const useAppStore = create<AppState>((set, get) => {
         }
       }
 
+      refreshDevice();
       // Announce the new file count to the server and to peers browsing us.
       service?.updateSettings(get().settings);
 

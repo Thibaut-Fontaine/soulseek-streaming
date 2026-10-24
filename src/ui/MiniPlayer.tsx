@@ -1,38 +1,84 @@
 import React from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Animated, PanResponder, Pressable, StyleSheet, Text, View } from 'react-native';
 import LinearGradient from 'react-native-linear-gradient';
 import TrackPlayer, { State, usePlaybackState, useProgress } from 'react-native-track-player';
 
-import { displayTitle } from '../core/types';
 import { useAppStore } from '../state/store';
-import { CoverArt, ProgressBar } from './components';
+import { ProgressBar } from './components';
 import { Icon } from './Icon';
+import { TrackCover, useIsLiked, useTrackInfo } from './track';
 import { colors, coverPalette, coverSeed, formatBytes, percent, radius, spacing } from './theme';
 
+const SWIPE_SKIP = 60;
+const SWIPE_OPEN = 30;
+
+/**
+ * The bar above the tabs. Tap or swipe up: open the player. Swipe left or
+ * right: next or previous track.
+ */
 export function MiniPlayer() {
   const current = useAppStore(state => state.current);
   const transfer = useAppStore(state =>
     state.current ? state.transfers[state.current.transferId] : undefined,
   );
-  const setTab = useAppStore(state => state.setTab);
+  const openPlayer = useAppStore(state => state.openPlayer);
   const stopPlayback = useAppStore(state => state.stopPlayback);
+  const toggleLike = useAppStore(state => state.toggleLike);
+  const playNext = useAppStore(state => state.playNext);
+  const playPrevious = useAppStore(state => state.playPrevious);
   const playerReady = useAppStore(state => state.playerReady);
 
   const playbackState = usePlaybackState();
   const progress = useProgress(500);
+  const info = useTrackInfo(current?.hit);
+  const liked = useIsLiked(current?.hit);
+
+  const shift = React.useRef(new Animated.Value(0)).current;
+  const latest = React.useRef({ openPlayer, playNext, playPrevious, position: 0 });
+  latest.current = { openPlayer, playNext, playPrevious, position: progress.position };
+
+  const responder = React.useMemo(
+    () =>
+      PanResponder.create({
+        onMoveShouldSetPanResponder: (_event, g) =>
+          (Math.abs(g.dx) > 10 && Math.abs(g.dx) > Math.abs(g.dy)) || (g.dy < -12 && -g.dy > Math.abs(g.dx)),
+        onPanResponderMove: (_event, g) => {
+          if (Math.abs(g.dx) > Math.abs(g.dy)) {
+            shift.setValue(g.dx);
+          }
+        },
+        onPanResponderRelease: (_event, g) => {
+          Animated.spring(shift, { toValue: 0, useNativeDriver: true, bounciness: 4 }).start();
+          const actions = latest.current;
+
+          if (Math.abs(g.dx) > Math.abs(g.dy)) {
+            if (g.dx < -SWIPE_SKIP) {
+              void actions.playNext();
+            } else if (g.dx > SWIPE_SKIP) {
+              // A swipe back always goes to the previous track.
+              void actions.playPrevious(0);
+            }
+          } else if (g.dy < -SWIPE_OPEN) {
+            actions.openPlayer();
+          }
+        },
+        onPanResponderTerminate: () => {
+          Animated.spring(shift, { toValue: 0, useNativeDriver: true }).start();
+        },
+      }),
+    [shift],
+  );
 
   if (!current || !playerReady) {
     return null;
   }
 
   const hit = current.hit;
-  const seed = coverSeed(hit);
-  const palette = coverPalette(seed);
+  const palette = coverPalette(coverSeed(hit));
   const preparing = current.phase === 'preparing';
   const error = current.phase === 'error';
   const playing = playbackState.state === State.Playing;
 
-  const title = displayTitle(hit.filename);
   const received = transfer?.received ?? 0;
   const receivedRatio =
     current.source === 'cache' || transfer?.state === 'complete'
@@ -53,7 +99,6 @@ export function MiniPlayer() {
         if (playbackState.state === State.Ended) {
           await TrackPlayer.seekTo(0);
         }
-
         await TrackPlayer.play();
       }
     } catch {
@@ -66,67 +111,55 @@ export function MiniPlayer() {
     : preparing
       ? transfer?.state === 'queued'
         ? transfer.queuePosition
-          ? `En file chez le pair · position ${transfer.queuePosition}`
-          : 'En file chez le pair…'
+          ? `En file chez ${hit.username} · position ${transfer.queuePosition}`
+          : `En file chez ${hit.username}…`
         : transfer?.state === 'streaming'
           ? `Mise en mémoire · ${formatBytes(Math.min(received, current.bufferTarget))} / ${formatBytes(current.bufferTarget)}`
-          : 'Connexion au pair…'
-      : [
-          current.source === 'cache' ? 'Sur l’appareil' : `@${hit.username}`,
-          hit.bitrate ? `${hit.bitrate} kb/s` : null,
-        ]
-          .filter(Boolean)
-          .join(' · ');
+          : `Connexion à ${hit.username}…`
+      : info.artist;
 
   return (
-    <View style={styles.wrap}>
-      <LinearGradient
-        colors={[palette.deep, palette.bgTop]}
-        start={START}
-        end={END}
-        style={StyleSheet.absoluteFill}
-      />
-      <Pressable
-        style={styles.main}
-        onPress={() => setTab('player')}
-        accessibilityRole="button"
-        accessibilityLabel={`Ouvrir le lecteur : ${title}`}>
-        <CoverArt seed={seed} title={title} size={40} rounded="xs" />
-        <View style={styles.textBlock}>
-          <Text style={styles.title} numberOfLines={1}>
-            {title}
-          </Text>
-          <View style={styles.subtitleRow}>
-            {!preparing && !error ? (
-              <Icon name="peer" size={12} color={colors.textOnMedia} />
-            ) : null}
-            <Text style={[styles.subtitle, error && styles.subtitleError]} numberOfLines={1}>
+    <View style={styles.wrap} {...responder.panHandlers}>
+      <LinearGradient colors={[palette.deep, palette.bgTop]} start={START} end={END} style={StyleSheet.absoluteFill} />
+      <Animated.View style={[styles.slide, { transform: [{ translateX: shift }] }]}>
+        <Pressable
+          style={styles.main}
+          onPress={openPlayer}
+          accessibilityRole="button"
+          accessibilityLabel={`Ouvrir le lecteur : ${info.title}`}
+          accessibilityHint="Glissez à gauche ou à droite pour changer de titre">
+          <TrackCover hit={hit} size={40} rounded="xs" />
+          <View style={styles.textBlock}>
+            <Text style={styles.title} numberOfLines={1}>
+              {info.title}
+            </Text>
+            <Text
+              style={[styles.subtitle, preparing && styles.subtitleWait, error && styles.subtitleError]}
+              numberOfLines={1}>
               {subtitle}
             </Text>
           </View>
-        </View>
-      </Pressable>
+        </Pressable>
+      </Animated.View>
 
       <Pressable
         accessibilityRole="button"
-        accessibilityLabel={preparing ? 'Annuler la préparation' : playing ? 'Pause' : 'Lecture'}
-        onPress={toggle}
-        hitSlop={8}
+        accessibilityLabel={liked ? 'Retirer des titres likés' : 'Ajouter aux titres likés'}
+        onPress={() => toggleLike(hit)}
+        hitSlop={6}
         style={styles.action}>
-        <Icon
-          name={preparing ? 'x' : playing ? 'pause' : 'play'}
-          size={24}
-          filled={!preparing}
-          color={colors.text}
-        />
+        <Icon name="heart" size={22} filled={liked} color={liked ? colors.accent : colors.text} />
+      </Pressable>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={preparing ? 'Annuler' : playing ? 'Pause' : 'Lecture'}
+        onPress={toggle}
+        hitSlop={6}
+        style={styles.action}>
+        <Icon name={preparing ? 'x' : playing ? 'pause' : 'play'} size={24} filled={!preparing} color={colors.text} />
       </Pressable>
 
-      <ProgressBar
-        value={preparing ? 0 : playbackRatio}
-        buffered={receivedRatio}
-        height={2}
-        style={styles.progress}
-      />
+      <ProgressBar value={preparing ? 0 : playbackRatio} buffered={receivedRatio} height={2} style={styles.progress} />
     </View>
   );
 }
@@ -139,19 +172,22 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     marginHorizontal: spacing.sm,
+    height: 58,
     borderRadius: radius.sm,
-    paddingHorizontal: spacing.sm,
-    paddingTop: spacing.sm,
-    paddingBottom: 10,
-    gap: 10,
+    paddingLeft: spacing.sm,
+    paddingRight: spacing.xs,
     overflow: 'hidden',
     backgroundColor: colors.surfaceAlt,
   },
-  main: {
+  slide: {
     flex: 1,
+    minWidth: 0,
+  },
+  main: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
+    height: 58,
   },
   textBlock: {
     flex: 1,
@@ -160,25 +196,22 @@ const styles = StyleSheet.create({
   },
   title: {
     color: colors.text,
-    fontSize: 13.5,
+    fontSize: 14,
     fontWeight: '700',
   },
-  subtitleRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-  },
   subtitle: {
-    flexShrink: 1,
     color: colors.textOnMedia,
-    fontSize: 12,
+    fontSize: 12.5,
+  },
+  subtitleWait: {
+    color: colors.warning,
   },
   subtitleError: {
     color: colors.danger,
   },
   action: {
-    width: 36,
-    height: 36,
+    width: 42,
+    height: 42,
     alignItems: 'center',
     justifyContent: 'center',
   },

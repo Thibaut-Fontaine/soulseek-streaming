@@ -3,6 +3,22 @@
 jest.mock('@react-native-community/netinfo', () =>
   require('@react-native-community/netinfo/jest/netinfo-mock.js'),
 );
+jest.mock('@react-native-async-storage/async-storage', () => {
+  const data = new Map();
+  return {
+    __esModule: true,
+    default: {
+      getItem: jest.fn(async key => (data.has(key) ? data.get(key) : null)),
+      setItem: jest.fn(async (key, value) => {
+        data.set(key, value);
+      }),
+      removeItem: jest.fn(async key => {
+        data.delete(key);
+      }),
+      clear: jest.fn(async () => data.clear()),
+    },
+  };
+});
 jest.mock('react-native-blob-util', () => ({
   __esModule: true,
   default: { fs: { dirs: { DocumentDir: '/tmp' } } },

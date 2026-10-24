@@ -72,6 +72,15 @@ function waitFor(predicate: () => boolean, timeoutMs = 20000): Promise<void> {
   });
 }
 
+/** Search, check nothing played by itself, then pick the top result. */
+async function searchAndPickBest(): Promise<void> {
+  await useAppStore.getState().runSearch('fake artist stream me');
+  expect(useAppStore.getState().current).toBeNull();
+  const best = useAppStore.getState().results[0]?.hit;
+  expect(best).toBeDefined();
+  await useAppStore.getState().playTrack(best!);
+}
+
 beforeAll(() => {
   playbackTimeouts.reachPeerMs = 4000;
   playbackTimeouts.acceptFreeSlotMs = 1500;
@@ -87,7 +96,7 @@ describe('playback with source fallback', () => {
         { username: 'slow_ok', filename: TRACK, behavior: 'ok', avgSpeed: 50_000 },
       ],
       async network => {
-        await useAppStore.getState().runSearch('fake artist stream me');
+        await searchAndPickBest();
         await waitFor(() => useAppStore.getState().current?.phase === 'playing');
 
         const current = useAppStore.getState().current!;
@@ -107,7 +116,7 @@ describe('playback with source fallback', () => {
         { username: 'steady', filename: TRACK, behavior: 'ok', avgSpeed: 50_000 },
       ],
       async () => {
-        await useAppStore.getState().runSearch('fake artist stream me');
+        await searchAndPickBest();
         await waitFor(() => useAppStore.getState().current?.phase === 'playing');
         expect(useAppStore.getState().current?.hit.username).toBe('steady');
       },
@@ -121,9 +130,60 @@ describe('playback with source fallback', () => {
         { username: 'no2', filename: TRACK, behavior: 'deny' },
       ],
       async () => {
-        await useAppStore.getState().runSearch('fake artist stream me');
+        await searchAndPickBest();
         await waitFor(() => useAppStore.getState().current?.phase === 'error');
         expect(useAppStore.getState().current?.error).toMatch(/2 sources essayées/);
+      },
+    );
+  });
+});
+
+describe('search and library', () => {
+  test('a search lists results but never starts playback', async () => {
+    await withNetwork(
+      [{ username: 'only_peer', filename: TRACK, behavior: 'ok' }],
+      async network => {
+        await useAppStore.getState().runSearch('fake artist stream me');
+        const state = useAppStore.getState();
+        expect(state.results.map(r => r.hit.username)).toEqual(['only_peer']);
+        expect(state.current).toBeNull();
+        expect(network.queueRequests).toEqual([]);
+        expect(state.library.recentSearches[0]).toBe('fake artist stream me');
+      },
+    );
+  });
+
+  test('playing records history, likes toggle, next follows the queue', async () => {
+    const OTHER = 'Music\\Fake Artist\\Album\\02 - Second Song.mp3';
+    await withNetwork(
+      [
+        { username: 'peer_a', filename: TRACK, behavior: 'ok' },
+        { username: 'peer_b', filename: OTHER, behavior: 'ok' },
+      ],
+      async () => {
+        await useAppStore.getState().runSearch('fake artist');
+        const hits = useAppStore.getState().results.map(r => r.hit);
+        const first = hits.find(hit => hit.filename === TRACK)!;
+        const second = hits.find(hit => hit.filename === OTHER)!;
+
+        useAppStore.getState().enqueue(second);
+        await useAppStore.getState().playTrack(first);
+        await waitFor(() => useAppStore.getState().current?.phase === 'playing');
+        expect(useAppStore.getState().library.history[0].hit.filename).toBe(TRACK);
+
+        useAppStore.getState().toggleLike(first);
+        expect(useAppStore.getState().library.liked).toHaveLength(1);
+        useAppStore.getState().toggleLike(first);
+        expect(useAppStore.getState().library.liked).toHaveLength(0);
+
+        await useAppStore.getState().playNext();
+        await waitFor(
+          () =>
+            useAppStore.getState().current?.hit.filename === OTHER &&
+            useAppStore.getState().current?.phase === 'playing',
+        );
+        expect(useAppStore.getState().queue).toHaveLength(0);
+        expect(useAppStore.getState().library.history.map(t => t.hit.filename)).toEqual([OTHER, TRACK]);
       },
     );
   });

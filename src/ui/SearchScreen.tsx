@@ -1,27 +1,16 @@
 import React from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 
-import { formatSearchQuery } from '../core/search';
-import { displayArtist, displayTitle, hitKey } from '../core/types';
+import { AUTO_MATCH_SCORE } from '../core/search';
 import type { SearchHit } from '../core/types';
 import { useAppStore } from '../state/store';
-import type { CurrentPlayback } from '../state/store';
-import {
-  Button,
-  ConnectionPill,
-  CoverArt,
-  EmptyState,
-  ScanBar,
-  SectionHeader,
-  StatusCard,
-  TrackGradient,
-} from './components';
-import type { CardAction } from './components';
-import { ACTION_LABELS, describePlaybackError } from './errors';
-import type { ErrorAction } from './errors';
+import type { PlayContext } from '../state/store';
+import { ConnectionPill, ScanBar, StatusCard } from './components';
+import { ACTION_LABELS } from './errors';
 import { Icon } from './Icon';
-import { PeerBadges, SourcesList } from './peer';
-import { colors, coverSeed, gutter, percent, radius, spacing, type } from './theme';
+import { groupSources } from './p2p';
+import { TrackCover, TrackRow, useIsCurrent, useTrackInfo } from './track';
+import { colors, gutter, radius, spacing, type } from './theme';
 
 export function SearchScreen() {
   const query = useAppStore(state => state.query);
@@ -30,94 +19,40 @@ export function SearchScreen() {
   const searchQuery = useAppStore(state => state.searchQuery);
   const searchEmpty = useAppStore(state => state.searchEmpty);
   const searchError = useAppStore(state => state.searchError);
-  const current = useAppStore(state => state.current);
-  const matchHit = useAppStore(state => state.matchHit);
   const connection = useAppStore(state => state.connection);
   const runSearch = useAppStore(state => state.runSearch);
   const cancelSearch = useAppStore(state => state.cancelSearch);
   const reconnect = useAppStore(state => state.reconnect);
   const results = useAppStore(state => state.results);
-  const playHit = useAppStore(state => state.playHit);
-  const playNextSource = useAppStore(state => state.playNextSource);
-  const resultHits = React.useMemo(() => results.map(ranked => ranked.hit), [results]);
+  const deviceResults = useAppStore(state => state.deviceResults);
+  const recentSearches = useAppStore(state => state.library.recentSearches);
+  const forgetSearch = useAppStore(state => state.forgetSearch);
+  const playTrack = useAppStore(state => state.playTrack);
+  const openSheet = useAppStore(state => state.openSheet);
 
   const online = connection === 'online';
-  const activeHit = current?.hit ?? matchHit;
-  const canSearch = online && query.trim().length > 0;
+  const groups = React.useMemo(() => groupSources(results.map(ranked => ranked.hit)), [results]);
+  const bestHits = React.useMemo(() => groups.map(group => group.hits[0]), [groups]);
+  const label = `Recherche « ${query.trim() || searchQuery} »`;
+  const hasSearched = searchQuery.length > 0 || searching;
+  const best = results.length > 0 && results[0].score >= AUTO_MATCH_SCORE ? groups[0] : null;
 
-  const submit = () => {
-    if (canSearch) {
-      void runSearch();
+  const submit = (text = query) => {
+    if (text.trim()) {
+      void runSearch(text);
     }
   };
 
-  const errorActions = (actions: ErrorAction[]): CardAction[] =>
-    actions.flatMap(action => {
-      switch (action) {
-        case 'reconnect':
-          return [{ label: ACTION_LABELS.reconnect, onPress: () => void reconnect() }];
-        case 'next-source':
-          return current && results.length > 1
-            ? [{ label: ACTION_LABELS[action], onPress: () => void playNextSource() }]
-            : [];
-        case 'retry':
-        case 'relaunch-search':
-          return canSearch ? [{ label: ACTION_LABELS[action], onPress: submit }] : [];
-        default:
-          return [];
-      }
-    });
+  const contextFor = (items: SearchHit[], hit: SearchHit): PlayContext => ({
+    label,
+    items,
+    index: Math.max(0, items.indexOf(hit)),
+  });
 
-  let body: React.ReactNode;
-
-  if (!online) {
-    body = (
-      <StatusCard
-        tone="warn"
-        icon="offline"
-        title="Hors ligne"
-        body="La recherche reprendra dès que la connexion Soulseek sera rétablie."
-        actions={
-          connection === 'disconnected' || connection === 'error'
-            ? [{ label: ACTION_LABELS.reconnect, onPress: () => void reconnect() }]
-            : undefined
-        }
-      />
-    );
-  } else if (searching) {
-    body = null;
-  } else if (searchError) {
-    const described = describePlaybackError(searchError);
-    body = (
-      <StatusCard
-        tone={described.tone}
-        icon={described.icon}
-        title={matchHit ? described.title : 'Recherche impossible'}
-        body={matchHit ? described.body : searchError}
-        actions={errorActions(matchHit ? described.actions : ['retry'])}
-      />
-    );
-  } else if (searchEmpty) {
-    body = (
-      <StatusCard
-        tone="info"
-        icon="search"
-        title="Aucun MP3 convaincant"
-        body={`Rien de convaincant pour « ${query} ». Essayez « artiste titre », sans le nom de l’album, ou une autre orthographe.`}
-        actions={errorActions(['relaunch-search'])}
-      />
-    );
-  } else if (activeHit) {
-    body = <BestSource hit={activeHit} current={current} />;
-  } else {
-    body = (
-      <EmptyState
-        icon="music"
-        title="Tapez un titre pour lancer la lecture"
-        body="SoulStream choisit le MP3 qui correspond le mieux, le précharge en arrière-plan et démarre sans écran intermédiaire."
-      />
-    );
-  }
+  const playFromResults = (hit: SearchHit) => void playTrack(hit, contextFor(bestHits, hit));
+  const playFromDevice = (hit: SearchHit) => void playTrack(hit, contextFor(deviceResults, hit));
+  const showActions = (items: SearchHit[]) => (hit: SearchHit) =>
+    openSheet({ kind: 'actions', hit, context: contextFor(items, hit) });
 
   return (
     <ScrollView
@@ -137,14 +72,14 @@ export function SearchScreen() {
         <TextInput
           value={query}
           onChangeText={setQuery}
-          placeholder="Artiste, titre…"
+          placeholder="Titre, artiste…"
           placeholderTextColor={colors.searchFieldPlaceholder}
           autoCapitalize="none"
           autoCorrect={false}
           returnKeyType="search"
-          onSubmitEditing={submit}
+          onSubmitEditing={() => submit()}
           style={styles.input}
-          accessibilityLabel="Rechercher un morceau"
+          accessibilityLabel="Rechercher un titre ou un artiste"
         />
         {query.length > 0 ? (
           <Pressable
@@ -157,110 +92,200 @@ export function SearchScreen() {
         ) : null}
       </View>
 
-      <View style={styles.statusRow}>
-        <Text style={styles.statusText} numberOfLines={1}>
-          {searching
-            ? `Recherche de « ${searchQuery || formatSearchQuery(query) || query} »…`
-            : 'MP3 uniquement · démarrage quasi instantané'}
-        </Text>
-        {searching ? (
+      {searching ? (
+        <View style={styles.statusRow}>
+          <Text style={styles.statusText} numberOfLines={1}>
+            {results.length > 0
+              ? `${results.length} fichier${results.length > 1 ? 's' : ''} trouvé${results.length > 1 ? 's' : ''} · les pairs répondent encore…`
+              : `Recherche de « ${searchQuery} » sur le réseau…`}
+          </Text>
           <Pressable onPress={cancelSearch} hitSlop={8} accessibilityRole="button">
             <Text style={styles.statusAction}>Arrêter</Text>
           </Pressable>
-        ) : canSearch ? (
-          <Button label="Écouter" icon="play" size="sm" onPress={submit} />
-        ) : null}
-      </View>
-      <ScanBar active={searching} />
-
-      <View style={styles.body}>{body}</View>
-
-      {resultHits.length > 0 ? (
-        <>
-          <SectionHeader title="Morceaux" />
-          <SourcesList
-            hits={resultHits}
-            currentKey={current && current.source === 'network' ? hitKey(current.hit) : null}
-            onPick={hit => void playHit(hit)}
-          />
-        </>
+        </View>
       ) : null}
+      <View style={styles.scan}>
+        <ScanBar active={searching} />
+      </View>
+
+      {!online && !searching ? (
+        <StatusCard
+          tone="warn"
+          icon="offline"
+          title="Hors ligne"
+          body="La recherche sur le réseau reprendra dès que la connexion Soulseek sera rétablie. Les morceaux sur l’appareil restent disponibles."
+          actions={
+            connection === 'disconnected' || connection === 'error'
+              ? [{ label: ACTION_LABELS.reconnect, onPress: () => void reconnect() }]
+              : undefined
+          }
+          style={styles.card}
+        />
+      ) : null}
+
+      {online && searchError ? (
+        <StatusCard
+          tone="bad"
+          icon="info"
+          title="Recherche impossible"
+          body={searchError}
+          actions={[{ label: ACTION_LABELS.retry, onPress: () => submit(searchQuery) }]}
+          style={styles.card}
+        />
+      ) : null}
+
+      {!hasSearched || query.trim().length === 0 ? (
+        <RecentSearches
+          items={recentSearches}
+          onPick={text => {
+            setQuery(text);
+            submit(text);
+          }}
+          onForget={forgetSearch}
+        />
+      ) : (
+        <>
+          {deviceResults.length > 0 ? (
+            <>
+              <Text style={styles.sectionTitle} accessibilityRole="header">
+                Sur votre appareil
+              </Text>
+              {deviceResults.map(hit => (
+                <TrackRow
+                  key={`${hit.username}:${hit.filename}`}
+                  hit={hit}
+                  onDevice
+                  onPress={playFromDevice}
+                  onMore={showActions(deviceResults)}
+                />
+              ))}
+            </>
+          ) : null}
+
+          {best ? <BestResult hit={best.hits[0]} sources={best.hits.length} onPlay={playFromResults} /> : null}
+
+          {groups.length > 0 ? (
+            <>
+              <Text style={styles.sectionTitle} accessibilityRole="header">
+                Titres
+              </Text>
+              {groups.map(group => (
+                <TrackRow
+                  key={group.key}
+                  hit={group.hits[0]}
+                  detail={`${group.hits.length} source${group.hits.length > 1 ? 's' : ''}${group.allQueued ? ' · tous en file' : ''}`}
+                  showAvailability
+                  onPress={playFromResults}
+                  onMore={showActions(bestHits)}
+                />
+              ))}
+            </>
+          ) : null}
+
+          {searchEmpty ? (
+            <StatusCard
+              tone="info"
+              icon="search"
+              title="Aucun MP3 trouvé"
+              body={`Personne n’a répondu avec un MP3 proche de « ${searchQuery} ». Essayez « artiste titre », sans le nom de l’album, ou une autre orthographe.`}
+              actions={[{ label: ACTION_LABELS['relaunch-search'], onPress: () => submit(searchQuery) }]}
+              style={styles.card}
+            />
+          ) : null}
+        </>
+      )}
     </ScrollView>
   );
 }
 
-function BestSource({ hit, current }: { hit: SearchHit; current: CurrentPlayback | null }) {
-  const setTab = useAppStore(state => state.setTab);
-  const retryPlayback = useAppStore(state => state.retryPlayback);
-  const playNextSource = useAppStore(state => state.playNextSource);
-  const hasAlternatives = useAppStore(state => state.results.length > 1);
-  const received = useAppStore(state =>
-    state.current ? state.transfers[state.current.transferId]?.received ?? 0 : 0,
-  );
-
-  const title = displayTitle(hit.filename);
-  const artist = displayArtist(hit) ?? hit.username;
-  const seed = coverSeed(hit);
-  const phase = current?.phase ?? 'preparing';
-  const failure = phase === 'error' ? describePlaybackError(current?.error) : null;
-
-  const fromDevice = current?.source === 'cache';
-  const fallback = current?.fallback;
-  const preparing = `Préparation · ${Math.round(percent(received, current?.bufferTarget ?? 1) * 100)} %`;
-
-  const status =
-    phase === 'playing'
-      ? fromDevice
-        ? 'Lecture depuis l’appareil'
-        : `Lecture lancée · @${hit.username}`
-      : phase === 'error'
-        ? failure?.title ?? 'Lecture interrompue'
-        : fallback
-          ? `@${fallback.username} indisponible → source ${current?.attempt ?? 2} · ${preparing}`
-          : preparing;
+function BestResult({
+  hit,
+  sources,
+  onPlay,
+}: {
+  hit: SearchHit;
+  sources: number;
+  onPlay: (hit: SearchHit) => void;
+}) {
+  const info = useTrackInfo(hit);
+  const active = useIsCurrent(hit);
 
   return (
     <>
-      <SectionHeader title="Meilleure source" style={styles.sectionFirst} />
+      <Text style={styles.sectionTitle} accessibilityRole="header">
+        Meilleur résultat
+      </Text>
       <Pressable
         accessibilityRole="button"
-        accessibilityLabel={`Ouvrir le lecteur : ${title}`}
-        onPress={() => setTab('player')}
+        accessibilityLabel={`Écouter ${info.title}, ${info.artist}`}
+        onPress={() => onPlay(hit)}
         style={({ pressed }) => [styles.best, pressed && styles.pressed]}>
-        <TrackGradient seed={seed} strength={0.55} />
-        <View style={styles.bestRow}>
-          <CoverArt seed={seed} title={title} size={88} />
-          <View style={styles.bestText}>
-            <Text style={styles.bestTitle} numberOfLines={2}>
-              {title}
-            </Text>
-            <Text style={styles.bestArtist} numberOfLines={1}>
-              {artist}
-            </Text>
-            <PeerBadges hit={hit} long style={styles.bestBadges} />
-          </View>
-        </View>
-        <View style={styles.bestFooter}>
-          <Text
-            style={[styles.bestStatus, phase === 'error' && styles.bestStatusError]}
-            numberOfLines={1}>
-            {status}
-          </Text>
-          {phase === 'error' ? (
-            <Button label="Réessayer" icon="refresh" size="sm" variant="ghost" onPress={retryPlayback} />
-          ) : null}
-          {!fromDevice && hasAlternatives ? (
-            <Button
-              label="Autre source"
-              icon="swap"
-              size="sm"
-              variant="ghost"
-              onPress={() => void playNextSource()}
-            />
-          ) : null}
+        <TrackCover hit={hit} size={92} rounded="sm" style={styles.bestCover} />
+        <Text style={[styles.bestTitle, active && styles.activeText]} numberOfLines={2}>
+          {info.title}
+        </Text>
+        <Text style={styles.bestMeta} numberOfLines={1}>
+          Titre · {info.artist} · {sources} source{sources > 1 ? 's' : ''}
+          {hit.bitrate ? ` · ${hit.bitrate} kb/s` : ''}
+        </Text>
+        <View style={styles.bestPlay}>
+          <Icon name="play" size={24} filled color={colors.onAccent} />
         </View>
       </Pressable>
-      {failure ? <Text style={styles.bestHint}>{failure.body}</Text> : null}
+    </>
+  );
+}
+
+function RecentSearches({
+  items,
+  onPick,
+  onForget,
+}: {
+  items: string[];
+  onPick: (query: string) => void;
+  onForget: (query: string) => void;
+}) {
+  if (items.length === 0) {
+    return (
+      <View style={styles.hint}>
+        <Text style={styles.hintTitle}>Que voulez-vous écouter ?</Text>
+        <Text style={styles.hintBody}>
+          Tapez un artiste et un titre, puis touchez le morceau voulu dans la liste. SoulStream choisit la meilleure
+          source et passe à une autre si elle ne répond pas.
+        </Text>
+      </View>
+    );
+  }
+
+  return (
+    <>
+      <Text style={styles.sectionTitle} accessibilityRole="header">
+        Recherches récentes
+      </Text>
+      {items.map(item => (
+        <View key={item} style={styles.recentRow}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={`Rechercher ${item}`}
+            onPress={() => onPick(item)}
+            style={({ pressed }) => [styles.recentMain, pressed && styles.pressed]}>
+            <View style={styles.recentIcon}>
+              <Icon name="clock" size={20} color={colors.textMuted} />
+            </View>
+            <Text style={styles.recentLabel} numberOfLines={1}>
+              {item}
+            </Text>
+          </Pressable>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={`Retirer ${item} des recherches récentes`}
+            onPress={() => onForget(item)}
+            hitSlop={6}
+            style={styles.recentRemove}>
+            <Icon name="x" size={18} color={colors.textDim} />
+          </Pressable>
+        </View>
+      ))}
     </>
   );
 }
@@ -270,15 +295,15 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   content: {
-    paddingHorizontal: gutter,
     paddingTop: spacing.sm,
-    paddingBottom: spacing.xxxl,
+    paddingBottom: 140,
   },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingTop: spacing.sm,
+    paddingTop: spacing.md,
+    paddingHorizontal: gutter,
   },
   title: {
     ...type.title,
@@ -290,6 +315,7 @@ const styles = StyleSheet.create({
     gap: 10,
     height: 46,
     marginTop: spacing.md,
+    marginHorizontal: gutter,
     paddingHorizontal: spacing.md,
     borderRadius: radius.sm,
     backgroundColor: colors.searchField,
@@ -297,7 +323,7 @@ const styles = StyleSheet.create({
   input: {
     flex: 1,
     color: colors.searchFieldText,
-    fontSize: 15,
+    fontSize: 16,
     fontWeight: '600',
     paddingVertical: 0,
   },
@@ -305,76 +331,125 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.sm,
-    minHeight: 34,
-    marginTop: 10,
-    marginBottom: spacing.sm,
+    minHeight: 30,
+    marginTop: spacing.sm,
+    paddingHorizontal: gutter,
   },
   statusText: {
     ...type.caption,
     flex: 1,
-    color: colors.textDim,
+    color: colors.textMuted,
   },
   statusAction: {
     color: colors.text,
     fontSize: 12,
     fontWeight: '700',
   },
-  body: {
-    marginTop: spacing.lg,
+  scan: {
+    paddingHorizontal: gutter,
+    marginTop: spacing.xs,
   },
-  sectionFirst: {
-    marginTop: 0,
+  card: {
+    marginTop: spacing.lg,
+    marginHorizontal: gutter,
+  },
+  sectionTitle: {
+    ...type.heading,
+    fontSize: 18,
+    color: colors.text,
+    paddingHorizontal: gutter,
+    marginTop: spacing.xl,
+    marginBottom: spacing.sm,
   },
   pressed: {
-    opacity: 0.9,
+    opacity: 0.8,
   },
   best: {
-    borderRadius: radius.lg,
+    marginHorizontal: gutter,
     padding: spacing.lg,
+    borderRadius: radius.sm,
     backgroundColor: colors.surface,
-    overflow: 'hidden',
+    gap: 6,
   },
-  bestRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: spacing.md,
-  },
-  bestText: {
-    flex: 1,
-    minWidth: 0,
+  bestCover: {
+    marginBottom: spacing.sm,
+    shadowColor: '#000',
+    shadowOpacity: 0.5,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 8 },
+    elevation: 6,
   },
   bestTitle: {
-    ...type.heading,
-    fontSize: 19,
+    ...type.title,
     color: colors.text,
+    paddingRight: 64,
   },
-  bestArtist: {
+  activeText: {
+    color: colors.accent,
+  },
+  bestMeta: {
     ...type.bodySm,
     color: colors.textMuted,
-    marginTop: 2,
+    paddingRight: 64,
   },
-  bestBadges: {
-    marginTop: spacing.sm,
+  bestPlay: {
+    position: 'absolute',
+    right: spacing.lg,
+    bottom: spacing.lg,
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    backgroundColor: colors.accent,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  bestFooter: {
+  hint: {
+    marginTop: spacing.xxl,
+    paddingHorizontal: spacing.xxl,
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
+  hintTitle: {
+    ...type.heading,
+    color: colors.text,
+    textAlign: 'center',
+  },
+  hintBody: {
+    ...type.bodySm,
+    color: colors.textMuted,
+    textAlign: 'center',
+  },
+  recentRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingLeft: gutter,
+    paddingRight: spacing.xs,
+  },
+  recentMain: {
+    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.md,
-    marginTop: 14,
-    minHeight: 34,
+    paddingVertical: spacing.sm,
   },
-  bestStatus: {
+  recentIcon: {
+    width: 48,
+    height: 48,
+    borderRadius: 6,
+    backgroundColor: colors.surfaceAlt,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  recentLabel: {
     flex: 1,
-    color: colors.textMuted,
-    fontSize: 12.5,
+    color: colors.text,
+    fontSize: 15,
     fontWeight: '600',
   },
-  bestStatusError: {
-    color: colors.danger,
-  },
-  bestHint: {
-    ...type.caption,
-    color: colors.textDim,
-    marginTop: spacing.sm,
+  recentRemove: {
+    width: 44,
+    height: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
 });
