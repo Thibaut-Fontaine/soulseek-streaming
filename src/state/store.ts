@@ -20,6 +20,19 @@ import {
   similarity,
 } from '../core/search';
 import type { RankedHit } from '../core/search';
+import type {
+  AlbumPageData,
+  ArtistPageData,
+  BrowseData,
+  CatalogPlayContext,
+  CatalogSearchResult,
+  CatalogTrack,
+  GenrePageData,
+  Loadable,
+  Page,
+  Resolution,
+  TrackGroup,
+} from '../core/catalogTypes';
 import { displayArtist, displayTitle, hitKey, isStreamableFile } from '../core/types';
 import type { SearchHit, TrackMeta } from '../core/types';
 import type { StreamTransfer } from '../core/transfer';
@@ -124,6 +137,25 @@ interface AppState {
   current: CurrentPlayback | null;
   notice: string | null;
 
+  // ---- Online catalog (see src/core/catalog.ts) ----
+  /** Catalog answer for the last search; null when off, offline or not run. */
+  catalogResults: CatalogSearchResult | null;
+  /**
+   * The last search as unified cards: one per catalog track with its Soulseek
+   * sources, then groups of files no catalog track matched. Best first.
+   */
+  groups: TrackGroup[];
+  /** Artist/album/genre pages pushed above the current tab, last on top. */
+  pages: Page[];
+  artistPages: Record<string, Loadable<ArtistPageData>>;
+  albumPages: Record<string, Loadable<AlbumPageData>>;
+  genrePages: Record<string, Loadable<GenrePageData>>;
+  browse: Loadable<BrowseData> | null;
+  /** Soulseek sources found for catalog tracks, by `CatalogTrack.id`. */
+  resolutions: Record<string, Resolution>;
+  /** Catalog track of each Soulseek file we matched, by `hitKey`. */
+  hitTracks: Record<string, CatalogTrack>;
+
   init: () => Promise<void>;
   login: (username: string, password: string, keepSessionOnFailure?: boolean) => Promise<boolean>;
   logout: () => Promise<void>;
@@ -172,6 +204,29 @@ interface AppState {
    * folder. Resolves with a summary for the user, or null if cancelled.
    */
   importTracks: () => Promise<string | null>;
+
+  /** Pushes an artist/album/genre page and loads its data. */
+  openPage: (page: Page) => void;
+  /** Pops the top page. Returns false when there was none. */
+  closePage: () => boolean;
+  /** Pops every page (e.g. when switching tabs). */
+  closeAllPages: () => void;
+  loadArtistPage: (id: string, force?: boolean) => Promise<void>;
+  loadAlbumPage: (id: string, force?: boolean) => Promise<void>;
+  loadGenrePage: (id: string, force?: boolean) => Promise<void>;
+  loadBrowse: (force?: boolean) => Promise<void>;
+  /**
+   * Plays a catalog track: finds Soulseek sources (or uses a cached copy) and
+   * starts the best one. `context` makes next/previous walk the list, each
+   * track being resolved when it is reached.
+   */
+  playCatalogTrack: (track: CatalogTrack, context?: CatalogPlayContext) => Promise<void>;
+  /** Looks for Soulseek sources of a catalog track without playing it. */
+  resolveTrack: (track: CatalogTrack) => Promise<Resolution>;
+  /** Adds a catalog track to the queue (resolved when reached). */
+  enqueueCatalogTrack: (track: CatalogTrack, first?: boolean) => void;
+  /** Catalog track for a Soulseek file, when one was matched. */
+  trackForHit: (hit: SearchHit) => CatalogTrack | null;
 }
 
 let service: StreamingService | null = null;
@@ -800,6 +855,15 @@ export const useAppStore = create<AppState>((set, get) => {
 
     transfers: {},
     current: null,
+    catalogResults: null,
+    groups: [],
+    pages: [],
+    artistPages: {},
+    albumPages: {},
+    genrePages: {},
+    browse: null,
+    resolutions: {},
+    hitTracks: {},
     notice: null,
 
     init: async () => {
@@ -1305,6 +1369,27 @@ export const useAppStore = create<AppState>((set, get) => {
       await trackCache?.clear(imported);
       service?.updateSettings(get().settings);
     },
+
+    // ---- Catalog: navigation is final; loaders are stubs until catalog.ts lands.
+    openPage: (page: Page) => {
+      set(state => ({ pages: [...state.pages, page], playerOpen: false, sheet: null }));
+    },
+    closePage: () => {
+      if (get().pages.length === 0) {
+        return false;
+      }
+      set(state => ({ pages: state.pages.slice(0, -1) }));
+      return true;
+    },
+    closeAllPages: () => set({ pages: [] }),
+    loadArtistPage: async () => {},
+    loadAlbumPage: async () => {},
+    loadGenrePage: async () => {},
+    loadBrowse: async () => {},
+    playCatalogTrack: async () => {},
+    resolveTrack: async () => ({ status: 'none', sources: [] }),
+    enqueueCatalogTrack: () => {},
+    trackForHit: hit => get().hitTracks[hitKey(hit)] ?? null,
 
     importTracks: async () => {
       const cache = trackCache;
