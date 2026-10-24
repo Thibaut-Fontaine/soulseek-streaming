@@ -75,7 +75,9 @@ export interface PlayContext {
 export type Sheet =
   | { kind: 'actions'; hit: SearchHit; context?: PlayContext }
   | { kind: 'sources'; hits: SearchHit[]; title: string; context?: PlayContext }
-  | { kind: 'queue' };
+  | { kind: 'queue' }
+  /** Menu of a catalog track (artist/album pages, catalog search results). */
+  | { kind: 'catalogActions'; track: CatalogTrack; context?: CatalogPlayContext };
 
 export interface CurrentPlayback {
   hit: SearchHit;
