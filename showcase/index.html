@@ -233,8 +233,8 @@
 
   .screens {
     display: grid;
-    grid-template-columns: repeat(3, 1fr);
-    gap: 28px;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 24px;
     align-items: end;
     padding-bottom: 88px;
   }
@@ -250,12 +250,12 @@
     display: block;
     width: 100%;
     height: auto;
-    aspect-ratio: 9 / 16;
+    aspect-ratio: 390 / 844;
     object-fit: cover;
     border-radius: 28px;
     background: var(--surface);
   }
-  .phone:nth-child(2) { transform: translateY(-28px); }
+  .phone:nth-child(even) { transform: translateY(-28px); }
   .phone figcaption { margin-top: 18px; }
   .phone figcaption strong { display: block; font-size: 16px; }
   .phone figcaption span { color: var(--dim); font-size: 14px; }
@@ -375,7 +375,7 @@
     .topbar { padding-bottom: 28px; }
     .topbar .pill.hide-sm { display: none; }
     .screens {
-      grid-template-columns: repeat(3, 72%);
+      grid-template-columns: repeat(4, 72%);
       overflow-x: auto;
       scroll-snap-type: x mandatory;
       gap: 16px;
@@ -385,7 +385,7 @@
     }
     .screens::-webkit-scrollbar { display: none; }
     .phone { scroll-snap-align: center; }
-    .phone:nth-child(2) { transform: none; }
+    .phone:nth-child(even) { transform: none; }
     .features { grid-template-columns: 1fr; padding-bottom: 64px; }
     .flow { grid-template-columns: 1fr; padding-bottom: 64px; }
     .closing .actions { justify-content: center; }
@@ -429,9 +429,10 @@
       <p class="eyebrow">Streaming pair-à-pair</p>
       <h1>Toute la musique de Soulseek, <em>lue à la volée.</em></h1>
       <p class="lede">
-        Tapez un titre, SoulStream trouve la meilleure source sur le réseau
-        Soulseek et lance la lecture pendant que le fichier arrive du pair.
-        Pas de catalogue central, pas de serveur de streaming.
+        Tapez un titre, choisissez-le dans la liste : SoulStream prend la
+        meilleure source sur le réseau Soulseek et lance la lecture pendant que
+        le fichier arrive du pair. Une interface à la Spotify, sans catalogue
+        central ni serveur de streaming.
       </p>
       <div class="actions">
         <a class="btn primary" href="https://github.com/Thibaut-Fontaine/soulseek-streaming/raw/ccr-d310b6be-ptrhbl/releases/SoulStream.apk" data-build="apk-link">
@@ -446,7 +447,8 @@
       <div class="tags">
         <span class="pill">Android 7.0+</span>
                 <span class="pill">MP3 uniquement</span>
-        <span class="pill">Recherche en un geste</span>
+        <span class="pill">Pochettes des MP3</span>
+        <span class="pill">Titres likés &amp; historique</span>
         <span class="pill">Sans télémétrie</span>
       </div>
     </div>
@@ -461,32 +463,36 @@
       <!-- build:info -->
       <dl class="build">
         <div class="wide"><dt>Branche</dt><dd><code>ccr-d310b6be-ptrhbl</code></dd></div>
-        <div><dt>Commit</dt><dd><code>06dcdae</code></dd></div>
+        <div><dt>Commit</dt><dd><code>6b4c01a</code></dd></div>
         <div><dt>Date</dt><dd>24 oct. 2026</dd></div>
         <div><dt>Taille</dt><dd>34,5 Mo</dd></div>
         <div><dt>Android</dt><dd>7.0+</dd></div>
       </dl>
-      <p class="sha">SHA-256 <code>4574c808da19d2b33536c2460e1f5751947198cb95fc005d54dbb898e72754be</code></p>
+      <p class="sha">SHA-256 <code>212d80befb97ba6e9a4136b5db7382de4ba7580ad08573abbea3ebcfa610abf1</code></p>
       <!-- /build:info -->
     </aside>
   </section>
 
   <div class="section-head">
-    <h2>Trois écrans, zéro friction</h2>
-    <p>Connexion avec votre compte Soulseek, une recherche, et la musique démarre.</p>
+    <h2>Une interface à la Spotify</h2>
+    <p>Accueil, recherche et bibliothèque ; une barre de lecture qui s'ouvre en lecteur plein écran. Rendus des écrans de l'app avec des données d'exemple.</p>
   </div>
   <section class="screens">
     <figure class="phone">
-      <div class="frame"><img src="img/login.png" alt="Écran de connexion de SoulStream" loading="lazy"></div>
-      <figcaption><strong>Connexion</strong><span>Votre compte Soulseek, stocké dans le trousseau</span></figcaption>
+      <div class="frame"><img src="img/home.png" alt="Accueil de SoulStream : écoutes récentes, morceaux sur l'appareil, titres likés" loading="lazy"></div>
+      <figcaption><strong>Accueil</strong><span>Écoutes récentes, hors ligne, titres likés</span></figcaption>
     </figure>
     <figure class="phone">
-      <div class="frame"><img src="img/search.png" alt="Écran de recherche de SoulStream" loading="lazy"></div>
-      <figcaption><strong>Recherche</strong><span>Le meilleur résultat se lance tout seul</span></figcaption>
+      <div class="frame"><img src="img/search.png" alt="Recherche : meilleur résultat et liste des titres" loading="lazy"></div>
+      <figcaption><strong>Recherche</strong><span>Vous touchez le titre à écouter</span></figcaption>
     </figure>
     <figure class="phone">
-      <div class="frame"><img src="img/player.png" alt="Écran de lecture de SoulStream" loading="lazy"></div>
-      <figcaption><strong>Lecture</strong><span>Tampon en direct, écran verrouillé, arrière-plan</span></figcaption>
+      <div class="frame"><img src="img/player.png" alt="Lecteur plein écran avec la pochette du MP3" loading="lazy"></div>
+      <figcaption><strong>Lecteur</strong><span>Pochette du MP3, tirez vers le bas pour fermer</span></figcaption>
+    </figure>
+    <figure class="phone">
+      <div class="frame"><img src="img/library.png" alt="Bibliothèque : titres likés, historique, sur l'appareil" loading="lazy"></div>
+      <figcaption><strong>Bibliothèque</strong><span>Likés, historique, sur l'appareil</span></figcaption>
     </figure>
   </section>
 
@@ -502,8 +508,8 @@
     </div>
     <div class="feature sky">
       <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg></div>
-      <h3>Recherche en un geste</h3>
-      <p>Requête nettoyée localement, scoring Levenshtein, premier bon résultat joué automatiquement.</p>
+      <h3>Vous choisissez ce qui joue</h3>
+      <p>Les résultats arrivent au fil des réponses des pairs, le meilleur en tête ; rien ne se lance tout seul.</p>
     </div>
     <div class="feature green">
       <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12a8 8 0 0114-5.3M20 12a8 8 0 01-14 5.3"/><path d="M18 3v4h-4M6 21v-4h4"/></svg></div>
@@ -522,8 +528,8 @@
     </div>
     <div class="feature sky">
       <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="2.5" width="12" height="19" rx="3"/><path d="M10 6.5l4 2.5-4 2.5z"/></svg></div>
-      <h3>Lecture en arrière-plan</h3>
-      <p>Contrôles sur l'écran verrouillé et notification média, sur iOS comme sur Android.</p>
+      <h3>Gestes et arrière-plan</h3>
+      <p>Glissez la barre de lecture pour changer de titre ; écran verrouillé et notification média avec la pochette.</p>
     </div>
   </section>
 
@@ -533,7 +539,7 @@
   </div>
   <section class="flow">
     <div class="step"><h3>Recherche</h3><p>La requête part sur le réseau Soulseek ; les pairs répondent avec leurs MP3.</p></div>
-    <div class="step"><h3>Choix</h3><p>Bitrate, file d'attente et vitesse du pair départagent les sources.</p></div>
+    <div class="step"><h3>Choix</h3><p>Vous touchez un titre ; bitrate, file d'attente et vitesse départagent ses sources.</p></div>
     <div class="step"><h3>Transfert</h3><p>Le pair envoie le fichier, directement ou via une connexion indirecte.</p></div>
     <div class="step"><h3>Lecture</h3><p>ExoPlayer ou AVPlayer lit les octets au fur et à mesure qu'ils arrivent.</p></div>
   </section>
