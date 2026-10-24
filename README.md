@@ -53,10 +53,26 @@ commitées dans le code de l'application.
 - **MP3 uniquement** : les résultats d'autres formats sont ignorés, ce qui
   réduit fortement la taille des transferts et permet un démarrage quasi
   instantané, sur iOS comme sur Android.
-- **Recherche en un geste** : la requête est nettoyée localement, comparée aux
-  résultats par distance de Levenshtein, et le premier match suffisant est
-  lancé automatiquement. La recherche Soulseek est arrêtée dès que ce match
-  est trouvé ; la lecture se prépare en arrière-plan.
+- **Interface type Spotify** : onglets Accueil, Rechercher et Bibliothèque ;
+  une barre de lecture au-dessus des onglets ouvre le lecteur plein écran.
+  - Barre de lecture : toucher (ou glisser vers le haut) pour ouvrir,
+    glisser à gauche / à droite pour le titre suivant / précédent.
+  - Lecteur : tirer vers le bas pour le refermer, glisser la pochette pour
+    changer de titre, aléatoire, répétition, file d'attente, sources.
+  - Menu ⋮ (ou appui long) sur un titre : liker, lire ensuite, ajouter à la
+    file, voir les sources, rechercher l'artiste.
+- **Recherche sans lecture automatique** : la liste des titres se remplit à
+  mesure que les pairs répondent (meilleur résultat en tête, pastille verte
+  si un slot est libre, orange si file d'attente) ; rien ne joue tant que
+  vous n'avez pas touché un titre. Les morceaux déjà sur le téléphone
+  apparaissent en premier.
+- **Pochettes** : la pochette et les tags (titre, artiste, album) sont lus
+  dans le tag ID3 du MP3 (`src/core/id3.ts`), dès les premiers Ko reçus du
+  pair. Le lecteur affiche la pochette en grand, floutée en fond.
+- **Bibliothèque** : titres likés, historique d'écoute, morceaux sur
+  l'appareil ; recherches récentes. Enregistrés sur le téléphone.
+- Le titre suivant (file d'attente, puis la liste d'où vient le titre) se
+  lance à la fin du morceau.
 - Streaming progressif : un serveur HTTP local avec support des requêtes
   `Range` alimente le lecteur natif (ExoPlayer / AVPlayer) au fur et à mesure
   que le transfert Soulseek avance.
@@ -86,7 +102,7 @@ commitées dans le code de l'application.
 ## Aperçu de l'architecture
 
 ```
-Écrans React Native (Recherche / Lecture / Réglages)
+Écrans React Native (Accueil / Rechercher / Bibliothèque + lecteur plein écran)
         │  zustand
         ▼
 StreamingService ───────────────► SoulseekClient (TypeScript pur)

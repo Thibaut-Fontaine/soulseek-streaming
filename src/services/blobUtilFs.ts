@@ -18,5 +18,17 @@ export function createBlobUtilFs(): CacheFs {
     readText: path => fs.readFile(path, 'utf8'),
     unlink: path => fs.unlink(path),
     move: (from, to) => fs.mv(from, to).then(() => undefined),
+    // Reading a few KB of a 10 MB file: copy the slice to a temporary file
+    // and read that, instead of sending the whole file over the bridge.
+    readSliceBase64: async (path, start, end) => {
+      const temp = `${fs.dirs.CacheDir}/soulstream-slice-${Date.now()}-${Math.floor(Math.random() * 1e6)}`;
+
+      try {
+        await fs.slice(path, temp, start, end);
+        return await fs.readFile(temp, 'base64');
+      } finally {
+        await fs.unlink(temp).catch(() => {});
+      }
+    },
   };
 }

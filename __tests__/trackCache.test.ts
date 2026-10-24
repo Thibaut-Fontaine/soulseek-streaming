@@ -150,3 +150,51 @@ describe('track cache', () => {
     expect(cache.files()).toEqual([]);
   });
 });
+
+describe('covers and tags of cached tracks', () => {
+  // ID3v2.3 tag: title "Tagged", a JPEG front cover, then fake audio.
+  function taggedMp3(): Uint8Array {
+    const jpeg = [0xff, 0xd8, 0xff, 0xe0, ...new Array(40).fill(5), 0xff, 0xd9];
+    const text = (id: string, value: string) => {
+      const data = [0, ...[...value].map(c => c.charCodeAt(0))];
+      return [...[...id].map(c => c.charCodeAt(0)), 0, 0, 0, data.length, 0, 0, ...data];
+    };
+    const apicData = [0, ...[...'image/jpeg'].map(c => c.charCodeAt(0)), 0, 3, 0, ...jpeg];
+    const apic = [...[...'APIC'].map(c => c.charCodeAt(0)), 0, 0, 0, apicData.length, 0, 0, ...apicData];
+    const body = [...text('TIT2', 'Tagged'), ...text('TPE1', 'Someone'), ...apic];
+    return Uint8Array.from([0x49, 0x44, 0x33, 3, 0, 0, 0, 0, 0, body.length, ...body, ...new Array(200).fill(1)]);
+  }
+
+  test('a saved download keeps its cover file and tags', async () => {
+    const fs = memoryFs();
+    const cache = new TrackCache(fs, 10_000);
+    await cache.load();
+    const source = hit('Music\\Someone\\01 - Untitled.mp3');
+    const entry = (await cache.save(source, taggedMp3()))!;
+
+    const meta = await cache.readMeta(entry);
+    expect(meta.title).toBe('Tagged');
+    expect(meta.artist).toBe('Someone');
+    expect(meta.coverUri).toMatch(/^file:\/\/\/docs\/tracks\/.+\.cover\.jpg$/);
+    expect(fs.files.has(meta.coverUri!.replace('file://', ''))).toBe(true);
+
+    // The cached copy is recognised as the same hit as the search result.
+    expect(cache.findByHit(cache.asHit(entry))).toBe(entry);
+
+    await cache.clear();
+    expect([...fs.files.keys()].some(path => path.includes('.cover.'))).toBe(false);
+  });
+
+  test('reads the tag of an older entry from disk once', async () => {
+    const fs = memoryFs();
+    const cache = new TrackCache(fs, 10_000);
+    await cache.load();
+    const entry = (await cache.save(hit('a\\b\\c.mp3'), bytes(300)))!;
+    // Pretend it was saved before covers existed.
+    delete entry.cover;
+    fs.files.set(`/docs/tracks/${entry.file}`, Buffer.from(taggedMp3()).toString('base64'));
+
+    expect((await cache.readMeta(entry)).title).toBe('Tagged');
+    expect(entry.cover).toMatch(/\.cover\.jpg$/);
+  });
+});

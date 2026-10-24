@@ -25,7 +25,7 @@ jest.mock('../src/transport/rnTcpTransport', () => ({
   ReactNativeTransport: jest.requireActual('../src/transport/nodeTransport').NodeTransport,
 }));
 
-import { playbackTimeouts, useAppStore } from '../src/state/store';
+import { useAppStore } from '../src/state/store';
 
 jest.setTimeout(30000);
 
@@ -80,7 +80,9 @@ test('a played track is served to the player and every step is logged', async ()
   await withNetwork(
     [{ username: 'peer_ok', filename: TRACK, behavior: 'ok', avgSpeed: 50_000 }],
     async () => {
+      // Search lists the result; the user picks it.
       await useAppStore.getState().runSearch('fake artist stream me');
+      await useAppStore.getState().playTrack(useAppStore.getState().results[0].hit);
       await waitFor(() => useAppStore.getState().current?.phase === 'playing');
       const url = useAppStore.getState().current!.url;
       const got = await new Promise<{ status: number; bytes: number; headers: any }>((resolve, reject) => {

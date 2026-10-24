@@ -1,17 +1,21 @@
 import React from 'react';
-import { ActivityIndicator, AppState, StatusBar, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, AppState, BackHandler, StatusBar, StyleSheet, Text, View } from 'react-native';
 import LinearGradient from 'react-native-linear-gradient';
 import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useAppStore } from './src/state/store';
-import { CoverArt, Toast } from './src/ui/components';
+import { IconButton, Toast } from './src/ui/components';
 import { ErrorBoundary } from './src/ui/ErrorBoundary';
+import { HomeScreen } from './src/ui/HomeScreen';
+import { LibraryScreen } from './src/ui/LibraryScreen';
 import { LoginScreen } from './src/ui/LoginScreen';
 import { MiniPlayer } from './src/ui/MiniPlayer';
-import { PlayerScreen } from './src/ui/PlayerScreen';
+import { PlayerSheet } from './src/ui/PlayerScreen';
 import { SearchScreen } from './src/ui/SearchScreen';
 import { SettingsScreen } from './src/ui/SettingsScreen';
+import { SheetHost } from './src/ui/Sheets';
 import { TabBar } from './src/ui/TabBar';
+import { AppLogo } from './src/ui/track';
 import { colors, gutter, spacing, type } from './src/ui/theme';
 
 function App() {
@@ -41,6 +45,29 @@ function Root() {
     void init();
   }, [init]);
 
+  // Android back: close the sheet, then the player, then leave Réglages.
+  React.useEffect(() => {
+    const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
+      const state = useAppStore.getState();
+
+      if (state.sheet) {
+        state.closeSheet();
+        return true;
+      }
+      if (state.playerOpen) {
+        state.closePlayer();
+        return true;
+      }
+      if (state.tab === 'settings') {
+        state.setTab('home');
+        return true;
+      }
+      return false;
+    });
+
+    return () => subscription.remove();
+  }, []);
+
   React.useEffect(() => {
     const subscription = AppState.addEventListener('change', nextState => {
       if (
@@ -64,28 +91,44 @@ function Root() {
   }
 
   return (
-    <View style={[styles.root, { paddingTop: insets.top }]}>
-      <Banners />
-      <View style={styles.content}>
-        {tab === 'search' ? (
-          <SearchScreen />
-        ) : tab === 'player' ? (
-          <PlayerScreen />
-        ) : (
-          <SettingsScreen />
-        )}
+    <View style={styles.root}>
+      <View style={[styles.main, { paddingTop: insets.top }]}>
+        <Banners />
+        <View style={styles.content}>
+          {tab === 'home' ? (
+            <HomeScreen />
+          ) : tab === 'search' ? (
+            <SearchScreen />
+          ) : tab === 'library' ? (
+            <LibraryScreen />
+          ) : (
+            <>
+              <View style={styles.settingsBar}>
+                <IconButton icon="left" accessibilityLabel="Retour" onPress={() => setTab('home')} />
+                <Text style={styles.settingsTitle} accessibilityRole="header">
+                  Réglages
+                </Text>
+              </View>
+              <SettingsScreen />
+            </>
+          )}
+        </View>
+
+        <View style={styles.dock}>
+          <LinearGradient colors={DOCK_FADE} style={styles.dockFade} pointerEvents="none" />
+          {hasCurrent ? <MiniPlayer /> : null}
+          <TabBar active={tab} onChange={setTab} bottomInset={insets.bottom} />
+        </View>
       </View>
 
-      <View style={styles.dock}>
-        <LinearGradient colors={DOCK_FADE} style={styles.dockFade} pointerEvents="none" />
-        {hasCurrent && tab !== 'player' ? <MiniPlayer /> : null}
-        <TabBar active={tab} onChange={setTab} bottomInset={insets.bottom} />
-      </View>
+      <PlayerSheet />
+      <SheetHost />
     </View>
   );
 }
 
 const DOCK_FADE = ['rgba(11,10,15,0)', colors.bg];
+const NOTICE_MS = 4000;
 
 /** Connection state and network notices, shown above the current screen. */
 function Banners() {
@@ -94,6 +137,15 @@ function Banners() {
   const notice = useAppStore(state => state.notice);
   const dismissNotice = useAppStore(state => state.dismissNotice);
   const reconnect = useAppStore(state => state.reconnect);
+
+  // Notices ("Sera lu ensuite", "Fin de la liste"…) go away on their own.
+  React.useEffect(() => {
+    if (!notice) {
+      return;
+    }
+    const timer = setTimeout(dismissNotice, NOTICE_MS);
+    return () => clearTimeout(timer);
+  }, [notice, dismissNotice]);
 
   const reconnecting = connection === 'connecting' || connection === 'reconnecting';
   const offline = connection === 'disconnected' || connection === 'error';
@@ -136,7 +188,7 @@ function Banners() {
 function Splash() {
   return (
     <View style={styles.splash}>
-      <CoverArt seed="SoulStream" title="S" size={92} />
+      <AppLogo size={92} />
       <Text style={styles.splashTitle}>SoulStream</Text>
       <ActivityIndicator color={colors.accent} style={styles.splashSpinner} />
       <Text style={styles.splashText}>Initialisation du lecteur…</Text>
@@ -148,6 +200,20 @@ const styles = StyleSheet.create({
   root: {
     flex: 1,
     backgroundColor: colors.bg,
+  },
+  main: {
+    flex: 1,
+  },
+  settingsBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+    paddingHorizontal: spacing.xs,
+    paddingTop: spacing.xs,
+  },
+  settingsTitle: {
+    ...type.heading,
+    color: colors.text,
   },
   content: {
     flex: 1,
