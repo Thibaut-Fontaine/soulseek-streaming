@@ -97,6 +97,14 @@ export interface SoulseekClientOptions {
 export interface SearchOptions {
   durationMs?: number;
   onResults?: (hits: SearchHit[]) => void;
+  /**
+   * An exclusive search (the default, the one the user typed) ends the other
+   * exclusive searches. Background searches (`false`), e.g. finding sources
+   * for the next track of an album, run alongside it.
+   */
+  exclusive?: boolean;
+  /** Ends the search early; it resolves with the hits received so far. */
+  signal?: AbortSignal;
 }
 
 const DEFAULT_SERVER_HOST = 'server.slsknet.org';
@@ -250,6 +258,7 @@ interface ActiveSearch {
   onResults?: (hits: SearchHit[]) => void;
   timer: ReturnType<typeof setTimeout> | null;
   resolve: (hits: SearchHit[]) => void;
+  exclusive: boolean;
 }
 
 export class SoulseekClient extends Emitter<SoulseekClientEvents> {
@@ -281,7 +290,7 @@ export class SoulseekClient extends Emitter<SoulseekClientEvents> {
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private reconnectAttempt = 0;
 
-  private activeSearch: ActiveSearch | null = null;
+  private readonly searches = new Map<number, ActiveSearch>();
   private nextTokenValue = Math.floor(Math.random() * 0x7fffffff) + 1;
 
   private readonly peerAddressWaiters = new Map<
@@ -507,7 +516,7 @@ export class SoulseekClient extends Emitter<SoulseekClientEvents> {
       this.reconnectTimer = null;
     }
 
-    this.finishSearch();
+    this.finishSearches();
     this.uploads?.stop();
     this.failAllTransfers('Déconnecté');
     this.closePeerSessions();
@@ -594,7 +603,7 @@ export class SoulseekClient extends Emitter<SoulseekClientEvents> {
 
     this.serverFramer = null;
     this.loginResult = null;
-    this.finishSearch();
+    this.finishSearches();
     this.failAllTransfers('Connexion au serveur perdue', false);
     this.closePeerSessions();
     this.rejectPeerAddressRequests('Connexion au serveur perdue');
@@ -893,7 +902,15 @@ export class SoulseekClient extends Emitter<SoulseekClientEvents> {
       return [];
     }
 
-    this.finishSearch();
+    const exclusive = options.exclusive !== false;
+
+    if (exclusive) {
+      this.finishSearches(search => search.exclusive);
+    }
+
+    if (options.signal?.aborted) {
+      return [];
+    }
 
     const token = this.nextToken();
     const hits = new Map<string, SearchHit>();
@@ -906,25 +923,25 @@ export class SoulseekClient extends Emitter<SoulseekClientEvents> {
         onResults: options.onResults,
         timer: null,
         resolve,
+        exclusive,
       };
 
-      search.timer = setTimeout(() => {
-        // A timer callback may already be queued when a new search starts.
-        // Only finish the search this timer belongs to.
-        if (this.activeSearch === search) {
-          this.finishSearch();
-        }
-      }, options.durationMs ?? this.searchDurationMs);
+      search.timer = setTimeout(
+        () => this.finishSearch(token),
+        options.durationMs ?? this.searchDurationMs,
+      );
 
-      this.activeSearch = search;
+      this.searches.set(token, search);
+      options.signal?.addEventListener('abort', () => this.finishSearch(token));
     });
 
     try {
       this.sendServer(encodeFileSearch(token, trimmed));
     } catch (error) {
-      if (this.activeSearch?.token === token) {
-        const search = this.activeSearch;
-        this.activeSearch = null;
+      const search = this.searches.get(token);
+
+      if (search) {
+        this.searches.delete(token);
 
         if (search.timer) {
           clearTimeout(search.timer);
@@ -937,18 +954,27 @@ export class SoulseekClient extends Emitter<SoulseekClientEvents> {
     return done;
   }
 
+  /** Ends the user's (exclusive) search. Background searches continue. */
   cancelSearch(): void {
-    this.finishSearch();
+    this.finishSearches(search => search.exclusive);
   }
 
-  private finishSearch(): void {
-    const search = this.activeSearch;
+  private finishSearches(which: (search: ActiveSearch) => boolean = () => true): void {
+    for (const search of Array.from(this.searches.values())) {
+      if (which(search)) {
+        this.finishSearch(search.token);
+      }
+    }
+  }
+
+  private finishSearch(token: number): void {
+    const search = this.searches.get(token);
 
     if (!search) {
       return;
     }
 
-    this.activeSearch = null;
+    this.searches.delete(token);
 
     if (search.timer) {
       clearTimeout(search.timer);
@@ -960,9 +986,9 @@ export class SoulseekClient extends Emitter<SoulseekClientEvents> {
   }
 
   private handleSearchResponse(response: SearchResponse): void {
-    const search = this.activeSearch;
+    const search = this.searches.get(response.token);
 
-    if (!search || response.token !== search.token) {
+    if (!search) {
       return;
     }
 
@@ -1369,7 +1395,7 @@ export class SoulseekClient extends Emitter<SoulseekClientEvents> {
         // After a search is stopped (e.g. a good match was found), peers keep
         // sending late compressed responses. Do not inflate/parse them: this
         // used to block the JS thread while a track was loading.
-        if (!this.activeSearch) {
+        if (this.searches.size === 0) {
           break;
         }
 

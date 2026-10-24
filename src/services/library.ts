@@ -1,5 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
+import type { CatalogTrack } from '../core/catalogTypes';
 import { normalizeForMatch } from '../core/search';
 import { displayArtist, displayTitle } from '../core/types';
 import type { SearchHit } from '../core/types';
@@ -11,6 +12,8 @@ export interface SavedTrack {
   title: string;
   artist: string | null;
   hit: SearchHit;
+  /** The catalog track of that file, when it was matched: cover, album... */
+  catalog?: CatalogTrack;
   /** When it was liked, or last played. */
   at: number;
 }
@@ -34,12 +37,17 @@ export function trackIdentity(hit: { filename: string }): string {
   return normalizeForMatch(`${artist} ${title}`) || normalizeForMatch(hit.filename);
 }
 
-export function savedTrack(hit: SearchHit, meta?: { title?: string; artist?: string }): SavedTrack {
+export function savedTrack(
+  hit: SearchHit,
+  meta?: { title?: string; artist?: string },
+  catalog?: CatalogTrack | null,
+): SavedTrack {
   return {
     key: trackIdentity(hit),
-    title: meta?.title ?? displayTitle(hit.filename),
-    artist: meta?.artist ?? displayArtist(hit),
+    title: catalog?.title ?? meta?.title ?? displayTitle(hit.filename),
+    artist: catalog?.artist.name ?? meta?.artist ?? displayArtist(hit),
     hit,
+    ...(catalog ? { catalog } : {}),
     at: Date.now(),
   };
 }

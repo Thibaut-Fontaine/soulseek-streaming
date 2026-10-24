@@ -23,6 +23,8 @@ export interface FakePeer {
   queueLength?: number;
   avgSpeed?: number;
   bitrate?: number;
+  /** Length announced in search results, in seconds (default 200). */
+  durationSec?: number;
   /** Delay before this peer's search response, in ms. */
   delayMs?: number;
 }
@@ -58,6 +60,8 @@ export class MultiPeerNetwork {
   serverPort = 0;
   /** QueueUpload requests received, in order, by peer username. */
   readonly queueRequests: string[] = [];
+  /** Every search query the client sent, in order. */
+  readonly searches: string[] = [];
 
   constructor(private readonly peers: FakePeer[]) {}
 
@@ -116,6 +120,7 @@ export class MultiPeerNetwork {
 
       case ServerCode.FILE_SEARCH: {
         const token = readU32(payload, 0);
+        this.searches.push(readString(payload, 4).value);
 
         for (const peer of this.peers) {
           setTimeout(() => this.sendResults(peer, token), peer.delayMs ?? 20);
@@ -147,7 +152,7 @@ export class MultiPeerNetwork {
       const writer = new ByteWriter();
       writer.string(peer.username).u32(token).u32(1);
       writer.u8(1).string(peer.filename).u64(FILE_DATA.length).string('');
-      writer.u32(2).u32(0).u32(peer.bitrate ?? 320).u32(1).u32(200);
+      writer.u32(2).u32(0).u32(peer.bitrate ?? 320).u32(1).u32(peer.durationSec ?? 200);
       writer.bool(peer.slotFree ?? true).u32(peer.avgSpeed ?? 500_000).u32(peer.queueLength ?? 0);
       socket.write(encodePeerMessage(PeerCode.FILE_SEARCH_RESPONSE, deflate(writer.toBytes())));
       // Close it, so the client opens its own P connection for the request.

@@ -44,6 +44,7 @@ async function withNetwork(peers: FakePeer[], run: (network: MultiPeerNetwork) =
       shareEnabled: false,
       shareWifiOnly: true,
       cacheMb: 1024,
+      catalogEnabled: false,
     },
   });
 
