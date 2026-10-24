@@ -77,9 +77,9 @@ function seed() {
     query: 'daft punk',
     searchQuery: 'daft punk',
     results: [
-      { hit: ONE, score: 0.95 },
-      { hit: ONE_B, score: 0.95 },
-      { hit: TWO, score: 0.7 },
+      { hit: ONE, score: 0.95, rank: 3 },
+      { hit: ONE_B, score: 0.95, rank: 2 },
+      { hit: TWO, score: 0.7, rank: 1 },
     ],
     deviceResults: [TWO],
     device: [TWO],

@@ -361,7 +361,8 @@ const styles = StyleSheet.create({
   },
   panelTall: {
     top: 56,
-    maxHeight: undefined,
+    // `undefined` would not override the 85% above.
+    maxHeight: '100%',
     backgroundColor: colors.surface,
   },
   handleArea: {

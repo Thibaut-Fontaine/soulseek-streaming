@@ -32,8 +32,9 @@ export const ICONS = {
   play: [path('M7 4.5v15a1 1 0 0 0 1.5.86l12.5-7.5a1 1 0 0 0 0-1.72L8.5 3.64A1 1 0 0 0 7 4.5z')],
   pause: [rect(6, 4, 4, 16, 1.2), rect(14, 4, 4, 16, 1.2)],
   stop: [rect(6, 6, 12, 12, 2)],
-  next: [path('M5 5.5v13a1 1 0 0 0 1.6.8l9-6.5a1 1 0 0 0 0-1.6l-9-6.5A1 1 0 0 0 5 5.5zM18 5v14')],
-  prev: [path('M19 5.5v13a1 1 0 0 1-1.6.8l-9-6.5a1 1 0 0 1 0-1.6l9-6.5A1 1 0 0 1 19 5.5zM6 5v14')],
+  // The bar is a rect so it still shows when the icon is drawn filled.
+  next: [path('M5 5.5v13a1 1 0 0 0 1.6.8l9-6.5a1 1 0 0 0 0-1.6l-9-6.5A1 1 0 0 0 5 5.5z'), rect(16.6, 5, 2.4, 14, 1)],
+  prev: [path('M19 5.5v13a1 1 0 0 1-1.6.8l-9-6.5a1 1 0 0 1 0-1.6l9-6.5A1 1 0 0 1 19 5.5z'), rect(5, 5, 2.4, 14, 1)],
   back10: [path('M4 12a8 8 0 1 0 2.4-5.7M4 4v4h4')],
   fwd10: [path('M20 12a8 8 0 1 1-2.4-5.7M20 4v4h-4')],
   down: [path('m6 9 6 6 6-6')],
