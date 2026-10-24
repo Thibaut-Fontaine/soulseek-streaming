@@ -194,12 +194,13 @@ export class StreamingService {
     query: string,
     onResults?: (hits: SearchHit[]) => void,
     durationMs?: number,
+    options: { exclusive?: boolean; signal?: AbortSignal } = {},
   ): Promise<SearchHit[]> {
     if (!this.client) {
       return Promise.reject(new Error('Non connecté'));
     }
 
-    return this.client.search(query, { onResults, durationMs });
+    return this.client.search(query, { onResults, durationMs, ...options });
   }
 
   cancelSearch(): void {

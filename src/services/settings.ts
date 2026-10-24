@@ -16,6 +16,11 @@ export interface Settings {
   shareWifiOnly: boolean;
   /** Disk space for played tracks (the shared folder), in MiB. */
   cacheMb: number;
+  /**
+   * Use the online catalog (Deezer) for covers, titles, artist and album
+   * pages. Off: only Soulseek file names, nothing leaves for another service.
+   */
+  catalogEnabled: boolean;
 }
 
 export interface Credentials {
@@ -32,6 +37,7 @@ export const DEFAULT_SETTINGS: Settings = {
   shareEnabled: true,
   shareWifiOnly: true,
   cacheMb: 1024,
+  catalogEnabled: true,
 };
 
 const SETTINGS_KEY = '@soulstream/settings/v1';
@@ -69,6 +75,10 @@ export async function loadSettings(): Promise<Settings> {
         typeof parsed.cacheMb === 'number' && parsed.cacheMb >= 100 && parsed.cacheMb <= 20000
           ? Math.round(parsed.cacheMb)
           : DEFAULT_SETTINGS.cacheMb,
+      catalogEnabled:
+        typeof parsed.catalogEnabled === 'boolean'
+          ? parsed.catalogEnabled
+          : DEFAULT_SETTINGS.catalogEnabled,
     };
   } catch {
     return { ...DEFAULT_SETTINGS };
