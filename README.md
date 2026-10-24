@@ -362,3 +362,20 @@ src/
   en cours.
 - Le trafic Soulseek n'est pas chiffré (le protocole ne le prévoit pas) ; ne
   l'utilisez pas pour des données sensibles.
+
+## Licence
+
+Le code original de SoulStream est sous licence **MIT** — Copyright (c) 2026
+Thibaut Fontaine. Voir [`LICENSE`](LICENSE).
+
+SoulStream est un client indépendant du réseau Soulseek. Il n'est ni affilié,
+ni approuvé, ni soutenu par Soulseek LLC. « Soulseek » et le logo Soulseek sont
+des marques de Soulseek LLC ou de ses concédants. Le logiciel officiel Soulseek
+(client et serveur) est propriétaire, et la licence MIT ne couvre que le code
+original de ce dépôt : elle ne concède aucun droit sur le protocole, le réseau,
+les marques, le logiciel officiel ni les contenus échangés. L'utilisation du
+réseau reste soumise aux conditions et règles de Soulseek. Les dépendances
+tierces conservent leurs licences respectives.
+
+Voir aussi [`NOTICE`](NOTICE), les [conditions d'utilisation](https://www.slsknet.org/tos.html)
+et les [règles](https://www.slsknet.org/rules.html) de Soulseek.

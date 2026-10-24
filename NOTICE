@@ -1,0 +1,27 @@
+SoulStream
+Copyright (c) 2026 Thibaut Fontaine
+
+SoulStream is an independent client for the Soulseek network. It is not
+affiliated with, endorsed by, or supported by Soulseek LLC.
+
+"Soulseek" and the Soulseek logo are trademarks of Soulseek LLC or its
+licensors.
+
+The MIT license in LICENSE applies only to the original source code in this
+repository. It does not grant any license or rights to:
+
+- the official Soulseek client or server software, which is proprietary;
+- the Soulseek protocol or network;
+- the Soulseek name, logo, or other trademarks;
+- any music or other content transferred through the network.
+
+The Soulseek protocol is documented through public reverse-engineering
+efforts; this repository does not distribute or license the official Soulseek
+software. Use of the Soulseek network remains subject to Soulseek's Terms of
+Use and Rules:
+
+  https://www.slsknet.org/tos.html
+  https://www.slsknet.org/rules.html
+
+Third-party dependencies remain under their own licenses. The MIT license does
+not grant rights to any third-party code, content, or trademarks.
