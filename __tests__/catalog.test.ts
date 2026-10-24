@@ -32,11 +32,6 @@ function fixtureFetcher(calls: string[] = []): JsonFetcher {
     [/^\/artist\/27\/related/, 'artist-related'],
     [/^\/album\/302127\/tracks/, 'album-tracks'],
     [/^\/album\/302127$/, 'album'],
-    [/^\/chart\/0/, 'chart'],
-    [/^\/genre$/, 'genre'],
-    [/^\/genre\/113\/artists/, 'genre-artists'],
-    [/^\/genre\/113$/, 'genre-113'],
-    [/^\/chart\/113\/tracks/, 'genre-chart-tracks'],
   ];
 
   return async url => {
@@ -110,20 +105,16 @@ describe('Deezer catalog', () => {
     expect(page.moreByArtist.every(album => album.title !== 'Discovery')).toBe(true);
   });
 
-  test('browse and genre pages', async () => {
-    const catalog = createDeezerCatalog(fixtureFetcher());
-    const browse = await catalog.browse();
+  test('an artist with similar artists, sharing the artist page cache', async () => {
+    const calls: string[] = [];
+    const catalog = createDeezerCatalog(fixtureFetcher(calls));
+    const summary = await catalog.artistWithRelated('dz:27');
 
-    expect(browse.chartTracks.length).toBeGreaterThan(0);
-    expect(browse.chartAlbums.length).toBeGreaterThan(0);
-    expect(browse.chartArtists.length).toBeGreaterThan(0);
-    expect(browse.genres.find(genre => genre.id === 'dz:0')).toBeUndefined();
-    expect(browse.genres.find(genre => genre.name === 'Dance')).toBeDefined();
+    expect(summary.artist.name).toBe('Daft Punk');
+    expect(summary.related.map(artist => artist.name)).toContain('Justice');
 
-    const genre = await catalog.genre('dz:113');
-    expect(genre.genre.name).toBe('Dance');
-    expect(genre.artists.length).toBeGreaterThan(0);
-    expect(genre.chartTracks.length).toBeGreaterThan(0);
+    await catalog.artist('dz:27');
+    expect(calls.filter(call => call.startsWith('/artist/27/related')).length).toBe(1);
   });
 
   test('caches answers and shares requests in flight', async () => {
@@ -140,7 +131,7 @@ describe('Deezer catalog', () => {
     let quota = 1;
     const base = fixtureFetcher();
     const catalog = createDeezerCatalog(async (url, signal) => {
-      if (url.includes('/genre/113') && quota-- > 0) {
+      if (url.includes('/artist/27/top') && quota-- > 0) {
         return { error: { type: 'Exception', message: 'Quota limit exceeded', code: 4 } };
       }
       return base(url, signal);
@@ -148,7 +139,7 @@ describe('Deezer catalog', () => {
 
     await expect(catalog.album('dz:1')).rejects.toThrow('Introuvable');
     await expect(catalog.album('spotify:1')).rejects.toThrow('Identifiant');
-    await expect(catalog.genre('dz:113')).resolves.toMatchObject({ genre: { name: 'Dance' } });
+    await expect(catalog.artist('dz:27')).resolves.toMatchObject({ artist: { name: 'Daft Punk' } });
   });
 
   test('keeps one copy of a recording found on several releases', () => {

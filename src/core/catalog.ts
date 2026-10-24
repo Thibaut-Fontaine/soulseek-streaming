@@ -3,14 +3,11 @@ import type {
   AlbumPageData,
   ArtistPageData,
   Artwork,
-  BrowseData,
   CatalogAlbum,
   CatalogArtist,
   CatalogArtistRef,
-  CatalogGenre,
   CatalogSearchResult,
   CatalogTrack,
-  GenrePageData,
 } from './catalogTypes';
 import { normalizeForMatch } from './search';
 
@@ -18,7 +15,7 @@ import { normalizeForMatch } from './search';
  * Online music catalog: canonical tracks, artists, albums and covers.
  *
  * Soulseek only tells us file paths, so everything shown to the user (titles,
- * artists, albums, covers, similar artists, charts) comes from here, and the
+ * artists, albums, covers, similar artists) comes from here, and the
  * Soulseek files are matched to these entities (see `unify.ts`).
  *
  * The provider is Deezer's public API: no key, typo-tolerant search, covers up
@@ -32,8 +29,8 @@ export interface CatalogProvider {
   searchTracks(query: string, limit?: number): Promise<CatalogTrack[]>;
   artist(id: string): Promise<ArtistPageData>;
   album(id: string): Promise<AlbumPageData>;
-  genre(id: string): Promise<GenrePageData>;
-  browse(): Promise<BrowseData>;
+  /** An artist and the artists similar to it (for the home page). */
+  artistWithRelated(id: string): Promise<{ artist: CatalogArtist; related: CatalogArtist[] }>;
   /** Tracks like this artist's (an artist "radio"). */
   artistRadio(id: string): Promise<CatalogTrack[]>;
 }
@@ -56,7 +53,6 @@ const MIN_REQUEST_GAP_MS = 120;
 const MAX_PARALLEL = 4;
 const SEARCH_TTL_MS = 30 * 60 * 1000;
 const PAGE_TTL_MS = 6 * 60 * 60 * 1000;
-const BROWSE_TTL_MS = 60 * 60 * 1000;
 const CACHE_ENTRIES = 300;
 
 export function defaultFetcher(): JsonFetcher {
@@ -279,10 +275,6 @@ function versionOf(title: string, short: string): string {
   return title.length > short.length && title.startsWith(short) ? title.slice(short.length).trim() : '';
 }
 
-export function parseGenre(json: Json): CatalogGenre {
-  return { id: id(json.id), name: str(json.name), picture: artwork(json, 'picture') };
-}
-
 /** Deezer lists the same release several times (clean/explicit, regions). */
 export function dedupeAlbums(albums: CatalogAlbum[], newestFirst = true): CatalogAlbum[] {
   const seen = new Map<string, CatalogAlbum>();
@@ -469,34 +461,14 @@ export function createDeezerCatalog(fetchJson: JsonFetcher = defaultFetcher()): 
       return { album, tracks, moreByArtist };
     },
 
-    async genre(catalogId) {
+    async artistWithRelated(catalogId) {
       const raw = requireId(catalogId);
-      const [genreJson, artists, chart] = await Promise.all([
-        get(`/genre/${raw}`, PAGE_TTL_MS),
-        get(`/genre/${raw}/artists?limit=30`, PAGE_TTL_MS),
-        get(`/chart/${raw}/tracks?limit=30`, BROWSE_TTL_MS),
+      // Same URLs as the artist page, so opening it afterwards is instant.
+      const [artistJson, related] = await Promise.all([
+        get(`/artist/${raw}`, PAGE_TTL_MS),
+        get(`/artist/${raw}/related?limit=20`, PAGE_TTL_MS).catch(() => ({})),
       ]);
-
-      return {
-        genre: parseGenre(genreJson),
-        artists: list(artists).map(parseArtist),
-        chartTracks: list(chart).map(track => parseTrack(track)),
-      };
-    },
-
-    async browse() {
-      const [chart, genres] = await Promise.all([
-        get('/chart/0?limit=20', BROWSE_TTL_MS),
-        get('/genre', PAGE_TTL_MS),
-      ]);
-
-      return {
-        chartTracks: list(chart.tracks).map(track => parseTrack(track)),
-        chartAlbums: list(chart.albums).map(album => parseAlbum(album)),
-        chartArtists: list(chart.artists).map(parseArtist),
-        // Genre 0 is "All".
-        genres: list(genres).map(parseGenre).filter(genre => genre.id !== `${PREFIX}0`),
-      };
+      return { artist: parseArtist(artistJson), related: list(related).map(parseArtist) };
     },
 
     async artistRadio(catalogId) {

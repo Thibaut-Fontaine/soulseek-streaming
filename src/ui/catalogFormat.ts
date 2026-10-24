@@ -1,5 +1,5 @@
 /**
- * Pure helpers for the catalog screens (artist, album, genre, browse and the
+ * Pure helpers for the catalog screens (artist, album, home and the
  * catalog search results): labels, grouping and artwork choice. No React here
  * so they are cheap to unit test.
  */

@@ -6,13 +6,11 @@ import type {
   AlbumPageData,
   ArtistPageData,
   Artwork,
-  BrowseData,
   CatalogAlbum,
   CatalogArtist,
-  CatalogGenre,
   CatalogSearchResult,
   CatalogTrack,
-  GenrePageData,
+  HomeData,
   TrackGroup,
 } from '../src/core/catalogTypes';
 import type { SearchHit } from '../src/core/types';
@@ -158,20 +156,9 @@ export const ALBUM_PAGE: AlbumPageData = {
   moreByArtist: [RAM, ALIVE],
 };
 
-export const ELECTRO: CatalogGenre = { id: 'dz:106', name: 'Electro', picture: art('electro') };
-export const RAP: CatalogGenre = { id: 'dz:116', name: 'Rap/Hip Hop', picture: art('rap') };
-
-export const GENRE_PAGE: GenrePageData = {
-  genre: ELECTRO,
+export const HOME: HomeData = {
   artists: [DAFT_PUNK, JUSTICE],
-  chartTracks: [GET_LUCKY, ONE_MORE_TIME],
-};
-
-export const BROWSE: BrowseData = {
-  chartTracks: [GET_LUCKY, ONE_MORE_TIME],
-  chartAlbums: [RAM, DISCOVERY],
-  chartArtists: [DAFT_PUNK, JUSTICE],
-  genres: [ELECTRO, RAP],
+  similar: [{ artist: DAFT_PUNK, related: [CASSIUS] }],
 };
 
 export function soulseekHit(filename: string, username = 'peer'): SearchHit {

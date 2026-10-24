@@ -72,12 +72,11 @@ import {
 import {
   ALBUM_PAGE,
   ARTIST_PAGE,
-  BROWSE,
   DAFT_PUNK,
   DIGITAL_LOVE,
   DISCOVERY,
-  GENRE_PAGE,
   GET_LUCKY,
+  HOME,
   OMT_FILE_A,
   OMT_RADIO,
   ONE_MORE_TIME,
@@ -117,8 +116,7 @@ function press(renderer: ReactTestRenderer.ReactTestRenderer, label: string) {
 const actions = {
   loadArtistPage: jest.fn(async () => {}),
   loadAlbumPage: jest.fn(async () => {}),
-  loadGenrePage: jest.fn(async () => {}),
-  loadBrowse: jest.fn(async () => {}),
+  loadHome: jest.fn(async () => {}),
   playCatalogTrack: jest.fn(async () => {}),
   enqueueCatalogTrack: jest.fn(),
   resolveTrack: jest.fn(async () => ({ status: 'none' as const, sources: [] })),
@@ -152,8 +150,7 @@ beforeEach(() => {
     pages: [],
     artistPages: {},
     albumPages: {},
-    genrePages: {},
-    browse: null,
+    home: null,
     catalogResults: null,
     groups: [],
     resolutions: {},
@@ -319,18 +316,16 @@ describe('page host', () => {
     expect(text(render(<PageHost />))).toContain('Impossible de charger l’album');
   });
 
-  test('genre page and stacked pages (only the top one is visible)', () => {
+  test('stacked pages: only the top one is visible', () => {
     useAppStore.setState({
       pages: [
         { kind: 'artist', id: DAFT_PUNK.id, name: 'Daft Punk' },
-        { kind: 'genre', id: GENRE_PAGE.genre.id, name: 'Electro' },
+        { kind: 'album', id: DISCOVERY.id, title: 'Discovery' },
       ],
-      genrePages: { [GENRE_PAGE.genre.id]: { status: 'ready', data: GENRE_PAGE } },
+      albumPages: { [DISCOVERY.id]: { status: 'ready', data: ALBUM_PAGE } },
     });
     const out = text(render(<PageHost />));
-    expect(out).toContain('Electro');
-    expect(out).toContain('Titres du moment');
-    expect(out).toContain('Artistes');
+    expect(out).toContain('Discovery');
     expect(out).toContain('"display":"none"');
   });
 });
@@ -409,42 +404,53 @@ describe('search with the catalog', () => {
   });
 });
 
-describe('home browse', () => {
-  test('loads on mount and shows skeletons while loading', () => {
-    render(<HomeScreen />);
-    expect(actions.loadBrowse).toHaveBeenCalled();
-    act(() => {
-      useAppStore.setState({ browse: { status: 'loading' } });
-    });
-    expect(text(render(<HomeScreen />))).toContain('Chargement des nouveautés');
+describe('home from the listening history', () => {
+  const played = { ...savedTrack(OMT_FILE_A, undefined, ONE_MORE_TIME) };
+
+  test('no history: welcome only, no catalog request', () => {
+    const out = text(render(<HomeScreen />));
+    expect(out).toContain('Votre musique apparaîtra ici');
+    for (const label of ['Top titres', 'Albums du moment', 'Artistes populaires', 'Genres', 'Vos artistes']) {
+      expect(out).not.toContain(label);
+    }
   });
 
-  test('ready: charts, artists and genres', () => {
-    useAppStore.setState({ browse: { status: 'ready', data: BROWSE } });
+  test('recent artists, albums of recent tracks and similar artists', () => {
+    useAppStore.setState({
+      library: { ...EMPTY_LIBRARY, history: [played] },
+      home: { status: 'ready', data: HOME },
+    });
     const home = render(<HomeScreen />);
     const out = text(home);
-    for (const label of ['Top titres', 'Albums du moment', 'Artistes populaires', 'Genres', 'Rap/Hip Hop']) {
+    expect(actions.loadHome).toHaveBeenCalled();
+    for (const label of ['Vos artistes', 'Albums de vos écoutes', 'Parce que vous écoutez Daft Punk', 'Cassius']) {
       expect(out).toContain(label);
     }
-    expect(out).not.toContain('Votre musique apparaîtra ici');
-    press(home, 'Genre Electro');
-    expect(actions.openPage).toHaveBeenCalledWith({ kind: 'genre', id: 'dz:106', name: 'Electro' });
-    press(home, 'Écouter Get Lucky, Daft Punk');
-    expect(actions.playCatalogTrack).toHaveBeenCalledWith(GET_LUCKY, expect.objectContaining({ label: 'Top titres' }));
+    expect(out).not.toContain('Top titres');
+    press(home, 'Artiste Cassius');
+    expect(actions.openPage).toHaveBeenCalledWith({ kind: 'artist', id: 'dz:1563', name: 'Cassius' });
+    press(home, 'Album Discovery, Daft Punk');
+    expect(actions.openPage).toHaveBeenCalledWith({ kind: 'album', id: DISCOVERY.id, title: 'Discovery' });
   });
 
   test('error offers a retry', () => {
-    useAppStore.setState({ browse: { status: 'error', error: 'HTTP 503' } });
+    useAppStore.setState({
+      library: { ...EMPTY_LIBRARY, history: [played] },
+      home: { status: 'error', error: 'HTTP 503' },
+    });
     const home = render(<HomeScreen />);
-    expect(text(home)).toContain('Nouveautés indisponibles');
+    expect(text(home)).toContain('Suggestions indisponibles');
     press(home, 'Réessayer');
-    expect(actions.loadBrowse).toHaveBeenCalledWith(true);
+    expect(actions.loadHome).toHaveBeenCalledWith(true);
   });
 
-  test('catalog disabled: no browse section, no request', () => {
-    useAppStore.setState({ settings: { ...useAppStore.getState().settings, catalogEnabled: false } });
-    expect(text(render(<HomeScreen />))).not.toContain('Top titres');
-    expect(actions.loadBrowse).not.toHaveBeenCalled();
+  test('catalog disabled: no catalog sections, no request', () => {
+    useAppStore.setState({
+      settings: { ...useAppStore.getState().settings, catalogEnabled: false },
+      library: { ...EMPTY_LIBRARY, history: [played] },
+    });
+    expect(text(render(<HomeScreen />))).not.toContain('Albums de vos écoutes');
+    expect(actions.loadHome).not.toHaveBeenCalled();
     act(() => {
       useAppStore.setState({ settings: { ...useAppStore.getState().settings, catalogEnabled: true } });
     });

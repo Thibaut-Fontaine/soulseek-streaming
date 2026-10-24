@@ -22,7 +22,8 @@ jest.mock('../src/services/settings', () => ({
 }));
 // The app's TCP transport is react-native-tcp-socket; tests use node:net.
 jest.mock('../src/transport/rnTcpTransport', () => ({
-  ReactNativeTransport: jest.requireActual('../src/transport/nodeTransport').NodeTransport,
+  ReactNativeTransport: jest.requireActual('../src/transport/nodeTransport')
+    .NodeTransport,
 }));
 
 import { playbackTimeouts, useAppStore } from '../src/state/store';
@@ -34,7 +35,12 @@ jest.setTimeout(30000);
 
 const ART = { small: 's.jpg', medium: 'm.jpg', large: 'l.jpg' };
 
-function track(id: string, title: string, durationSec: number, artist = 'Fake Artist'): CatalogTrack {
+function track(
+  id: string,
+  title: string,
+  durationSec: number,
+  artist = 'Fake Artist',
+): CatalogTrack {
   return {
     id,
     title,
@@ -55,7 +61,12 @@ const SPAM = 'Music\\Someone Else\\Album\\Totally Unrelated.mp3';
 
 const fakeCatalog: CatalogProvider = {
   name: 'fake',
-  search: async query => ({ query, tracks: [STREAM_ME, MISSING], artists: [], albums: [] }),
+  search: async query => ({
+    query,
+    tracks: [STREAM_ME, MISSING],
+    artists: [],
+    albums: [],
+  }),
   searchTracks: async () => [STREAM_ME],
   artist: async () => {
     throw new Error('unused');
@@ -72,14 +83,20 @@ const fakeCatalog: CatalogProvider = {
     tracks: [STREAM_ME, MISSING],
     moreByArtist: [],
   }),
-  genre: async () => {
-    throw new Error('unused');
-  },
-  browse: async () => ({ chartTracks: [STREAM_ME], chartAlbums: [], chartArtists: [], genres: [] }),
+  artistWithRelated: async id => ({
+    artist: { id, name: 'Fake Artist', picture: ART },
+    related: [
+      { id: 'dz:2', name: 'Similar One', picture: ART },
+      { id, name: 'Fake Artist', picture: ART },
+    ],
+  }),
   artistRadio: async () => [MISSING, STREAM_ME],
 };
 
-async function withNetwork(peers: FakePeer[], run: (network: MultiPeerNetwork) => Promise<void>) {
+async function withNetwork(
+  peers: FakePeer[],
+  run: (network: MultiPeerNetwork) => Promise<void>,
+) {
   const network = new MultiPeerNetwork(peers);
   await network.start();
   setCatalogProvider(fakeCatalog);
@@ -137,7 +154,12 @@ describe('catalog search and playback', () => {
     await withNetwork(
       [
         { username: 'peer_a', filename: TRACK, behavior: 'ok' },
-        { username: 'peer_b', filename: TRACK, behavior: 'ok', avgSpeed: 10_000 },
+        {
+          username: 'peer_b',
+          filename: TRACK,
+          behavior: 'ok',
+          avgSpeed: 10_000,
+        },
         { username: 'peer_c', filename: SPAM, behavior: 'ok' },
       ],
       async network => {
@@ -146,21 +168,36 @@ describe('catalog search and playback', () => {
         const state = useAppStore.getState();
 
         expect(state.catalogResults?.tracks[0].id).toBe(STREAM_ME.id);
-        expect(network.searches).toEqual(['fake artst stream me', 'Fake Artist Stream Me']);
+        expect(network.searches).toEqual([
+          'fake artst stream me',
+          'Fake Artist Stream Me',
+        ]);
         expect(state.groups[0].track?.id).toBe(STREAM_ME.id);
-        expect(state.groups[0].sources.map(source => source.hit.username)).toEqual(['peer_a', 'peer_b']);
-        expect(state.groups.some(group => group.track?.id === MISSING.id)).toBe(true);
+        expect(
+          state.groups[0].sources.map(source => source.hit.username),
+        ).toEqual(['peer_a', 'peer_b']);
+        expect(state.groups.some(group => group.track?.id === MISSING.id)).toBe(
+          true,
+        );
 
         await useAppStore.getState().playCatalogTrack(STREAM_ME);
-        await waitFor(() => useAppStore.getState().current?.phase === 'playing');
+        await waitFor(
+          () => useAppStore.getState().current?.phase === 'playing',
+        );
 
         const current = useAppStore.getState().current!;
         // Known sources were used: no extra search.
         expect(network.searches).toHaveLength(2);
         expect(current.hit.username).toBe('peer_a');
-        expect(useAppStore.getState().trackForHit(current.hit)?.id).toBe(STREAM_ME.id);
-        expect(useAppStore.getState().library.history[0].catalog?.id).toBe(STREAM_ME.id);
-        expect(useAppStore.getState().library.history[0].title).toBe('Stream Me');
+        expect(useAppStore.getState().trackForHit(current.hit)?.id).toBe(
+          STREAM_ME.id,
+        );
+        expect(useAppStore.getState().library.history[0].catalog?.id).toBe(
+          STREAM_ME.id,
+        );
+        expect(useAppStore.getState().library.history[0].title).toBe(
+          'Stream Me',
+        );
       },
     );
   });
@@ -174,7 +211,9 @@ describe('catalog search and playback', () => {
           tracks: [MISSING, STREAM_ME],
           index: 0,
         });
-        await waitFor(() => useAppStore.getState().current?.phase === 'playing');
+        await waitFor(
+          () => useAppStore.getState().current?.phase === 'playing',
+        );
 
         const state = useAppStore.getState();
         expect(state.resolutions[MISSING.id].status).toBe('none');
@@ -189,7 +228,14 @@ describe('catalog search and playback', () => {
 
   test('a wrong length is not accepted as the track', async () => {
     await withNetwork(
-      [{ username: 'peer_a', filename: TRACK, behavior: 'ok', durationSec: 420 }],
+      [
+        {
+          username: 'peer_a',
+          filename: TRACK,
+          behavior: 'ok',
+          durationSec: 420,
+        },
+      ],
       async () => {
         const resolution = await useAppStore.getState().resolveTrack(STREAM_ME);
         expect(resolution.status).toBe('none');
@@ -197,17 +243,62 @@ describe('catalog search and playback', () => {
     );
   });
 
-  test('pages load from the catalog and the browse tab caches its data', async () => {
-    await useAppStore.getState().loadBrowse();
-    expect(useAppStore.getState().browse).toMatchObject({ status: 'ready' });
+  test('home is built from played artists only, and pages load from the catalog', async () => {
+    useAppStore.setState({
+      library: { liked: [], history: [], recentSearches: [] },
+    });
+    await useAppStore.getState().loadHome();
+    expect(useAppStore.getState().home).toBeNull();
+
+    const hit = {
+      username: 'peer_a',
+      filename: TRACK,
+      size: 1,
+      extension: 'mp3',
+      slotFree: true,
+      avgSpeed: 1,
+      queueLength: 0,
+    };
+    useAppStore.setState({
+      library: {
+        liked: [],
+        recentSearches: [],
+        history: [
+          {
+            key: 'k',
+            title: 'Stream Me',
+            artist: 'Fake Artist',
+            hit,
+            catalog: STREAM_ME,
+            at: 1,
+          },
+        ],
+      },
+    });
+    await useAppStore.getState().loadHome();
+    const home = useAppStore.getState().home;
+    expect(home?.status).toBe('ready');
+    if (home?.status === 'ready') {
+      expect(home.data.artists.map(artist => artist.name)).toEqual([
+        'Fake Artist',
+      ]);
+      // The artist itself is not suggested as similar to itself.
+      expect(home.data.similar[0].related.map(artist => artist.name)).toEqual([
+        'Similar One',
+      ]);
+    }
 
     useAppStore.getState().openPage({ kind: 'album', id: 'dz:100' });
-    await waitFor(() => useAppStore.getState().albumPages['dz:100']?.status === 'ready');
+    await waitFor(
+      () => useAppStore.getState().albumPages['dz:100']?.status === 'ready',
+    );
     expect(useAppStore.getState().pages).toHaveLength(1);
     expect(useAppStore.getState().closePage()).toBe(true);
     expect(useAppStore.getState().closePage()).toBe(false);
 
     useAppStore.getState().openPage({ kind: 'artist', id: 'dz:1' });
-    await waitFor(() => useAppStore.getState().artistPages['dz:1']?.status === 'error');
+    await waitFor(
+      () => useAppStore.getState().artistPages['dz:1']?.status === 'error',
+    );
   });
 });

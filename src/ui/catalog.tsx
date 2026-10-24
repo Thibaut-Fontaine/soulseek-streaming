@@ -1,19 +1,19 @@
 /**
- * Building blocks for catalog content (Deezer tracks, artists, albums,
- * genres): track rows, cards, shelves, play buttons and loading skeletons.
- * Shared by the pages, the catalog search results and the browse section.
+ * Building blocks for catalog content (Deezer tracks, artists, albums):
+ * track rows, cards, shelves, play buttons and loading skeletons.
+ * Shared by the pages, the catalog search results and the home page.
  */
 import React from 'react';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import type { StyleProp, ViewStyle } from 'react-native';
 
-import type { CatalogAlbum, CatalogArtist, CatalogGenre, CatalogTrack } from '../core/catalogTypes';
+import type { CatalogAlbum, CatalogArtist, CatalogTrack } from '../core/catalogTypes';
 import { useAppStore } from '../state/store';
 import { albumCardSubtitle, sourcesLabel, trackArtists } from './catalogFormat';
 import { Cover, IconButton, Skeleton } from './components';
 import { Icon } from './Icon';
 import { PlayingBars } from './track';
-import { colors, coverPalette, formatDuration, gutter, radius, spacing, type } from './theme';
+import { colors, formatDuration, gutter, radius, spacing, type } from './theme';
 
 /** Whether this catalog track is the one playing. */
 export function useIsCurrentCatalog(track: CatalogTrack): boolean {
@@ -77,7 +77,7 @@ export const CatalogTrackRow = React.memo(function CatalogTrackRow({
   track: CatalogTrack;
   onPress: (track: CatalogTrack) => void;
   onMore?: (track: CatalogTrack) => void;
-  /** Shown in place of the cover (album track number, chart position). */
+  /** Shown in place of the cover (album track number, top track rank). */
   number?: number;
   hideCover?: boolean;
   /** Replaces "artist · album". */
@@ -161,10 +161,13 @@ export const AlbumCard = React.memo(function AlbumCard({
   album,
   onPress,
   withArtist,
+  subtitle,
 }: {
   album: CatalogAlbum;
   onPress: (album: CatalogAlbum) => void;
-  /** "Artist · Album" instead of "2001 · Album" (browse, search). */
+  /** Replaces the default subtitle. */
+  subtitle?: string;
+  /** "Artist · Album" instead of "2001 · Album" (home, search). */
   withArtist?: boolean;
 }) {
   return (
@@ -186,7 +189,7 @@ export const AlbumCard = React.memo(function AlbumCard({
         {album.title}
       </Text>
       <Text style={styles.cardSubtitle} numberOfLines={1}>
-        {albumCardSubtitle(album, withArtist)}
+        {subtitle ?? albumCardSubtitle(album, withArtist)}
       </Text>
     </Pressable>
   );
@@ -215,80 +218,6 @@ export const ArtistCard = React.memo(function ArtistCard({
   );
 });
 
-/** Track as a square card (browse "Top titres"). */
-export const TrackCard = React.memo(function TrackCard({
-  track,
-  onPress,
-  onMore,
-}: {
-  track: CatalogTrack;
-  onPress: (track: CatalogTrack) => void;
-  onMore?: (track: CatalogTrack) => void;
-}) {
-  const active = useIsCurrentCatalog(track);
-
-  return (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityLabel={`Écouter ${track.title}, ${track.artist.name}`}
-      onPress={() => onPress(track)}
-      onLongPress={onMore ? () => onMore(track) : undefined}
-      style={({ pressed }) => [styles.card, pressed && styles.pressed]}
-    >
-      <Cover
-        artwork={track.album?.cover}
-        seed={track.id}
-        title={track.title}
-        size={CARD}
-        rounded="sm"
-        style={styles.cardShadow}
-      />
-      <Text style={[styles.cardTitle, active && styles.activeText]} numberOfLines={1}>
-        {track.title}
-      </Text>
-      <View style={styles.cardSubtitleRow}>
-        {track.explicit ? <ExplicitBadge /> : null}
-        <Text style={styles.cardSubtitle} numberOfLines={1}>
-          {trackArtists(track)}
-        </Text>
-      </View>
-    </Pressable>
-  );
-});
-
-/** Coloured browse tile with the genre picture tilted in the corner. */
-export const GenreTile = React.memo(function GenreTile({
-  genre,
-  onPress,
-}: {
-  genre: CatalogGenre;
-  onPress: (genre: CatalogGenre) => void;
-}) {
-  const palette = coverPalette(genre.id);
-
-  return (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityLabel={`Genre ${genre.name}`}
-      onPress={() => onPress(genre)}
-      style={({ pressed }) => [styles.genre, { backgroundColor: palette.mid }, pressed && styles.pressed]}
-    >
-      <Text style={styles.genreName} numberOfLines={2}>
-        {genre.name}
-      </Text>
-      <Cover
-        artwork={genre.picture}
-        seed={genre.id}
-        title={genre.name}
-        size={64}
-        rounded="xs"
-        style={styles.genreArt}
-      />
-    </Pressable>
-  );
-});
-
-/** Section with a heading and a horizontal row of cards. */
 export function Shelf({
   title,
   children,
@@ -546,26 +475,6 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     marginTop: spacing.sm,
     textAlign: 'center',
-  },
-  genre: {
-    flexBasis: '45%',
-    flexGrow: 1,
-    height: 96,
-    borderRadius: radius.sm,
-    padding: spacing.md,
-    overflow: 'hidden',
-  },
-  genreName: {
-    color: colors.text,
-    fontSize: 16,
-    fontWeight: '800',
-    maxWidth: '70%',
-  },
-  genreArt: {
-    position: 'absolute',
-    right: -10,
-    bottom: -4,
-    transform: [{ rotate: '25deg' }],
   },
   shelf: {
     marginTop: spacing.xl,

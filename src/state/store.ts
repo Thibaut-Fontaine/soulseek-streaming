@@ -26,11 +26,11 @@ import { soulseekQueryFor, sourcesForTrack, unifyResults } from '../core/unify';
 import type {
   AlbumPageData,
   ArtistPageData,
-  BrowseData,
+  CatalogArtistRef,
   CatalogPlayContext,
   CatalogSearchResult,
   CatalogTrack,
-  GenrePageData,
+  HomeData,
   Loadable,
   Page,
   Resolution,
@@ -150,12 +150,15 @@ interface AppState {
    * sources, then groups of files no catalog track matched. Best first.
    */
   groups: TrackGroup[];
-  /** Artist/album/genre pages pushed above the current tab, last on top. */
+  /** Artist and album pages pushed above the current tab, last on top. */
   pages: Page[];
   artistPages: Record<string, Loadable<ArtistPageData>>;
   albumPages: Record<string, Loadable<AlbumPageData>>;
-  genrePages: Record<string, Loadable<GenrePageData>>;
-  browse: Loadable<BrowseData> | null;
+  /**
+   * Home content from the listening history only (recent artists and
+   * artists like them); null when the catalog is off or nothing was played.
+   */
+  home: Loadable<HomeData> | null;
   /** Soulseek sources found for catalog tracks, by `CatalogTrack.id`. */
   resolutions: Record<string, Resolution>;
   /** Catalog track of each Soulseek file we matched, by `hitKey`. */
@@ -214,7 +217,7 @@ interface AppState {
    */
   importTracks: () => Promise<string | null>;
 
-  /** Pushes an artist/album/genre page and loads its data. */
+  /** Pushes an artist or album page and loads its data. */
   openPage: (page: Page) => void;
   /** Pops the top page. Returns false when there was none. */
   closePage: () => boolean;
@@ -222,8 +225,8 @@ interface AppState {
   closeAllPages: () => void;
   loadArtistPage: (id: string, force?: boolean) => Promise<void>;
   loadAlbumPage: (id: string, force?: boolean) => Promise<void>;
-  loadGenrePage: (id: string, force?: boolean) => Promise<void>;
-  loadBrowse: (force?: boolean) => Promise<void>;
+  /** Builds `home` from the recently played artists; no-op when unchanged. */
+  loadHome: (force?: boolean) => Promise<void>;
   /**
    * Plays a catalog track: finds Soulseek sources (or uses a cached copy) and
    * starts the best one. `context` makes next/previous walk the list, each
@@ -253,6 +256,8 @@ let catalog: CatalogProvider = createDeezerCatalog();
 /** Cancels the extra (corrected-query) search of the current search. */
 let searchAbort: AbortController | null = null;
 let catalogPlaySequence = 0;
+/** Recent artist ids the current `home` was built from. */
+let homeKey = '';
 /** Source searches in flight, by catalog track id. */
 const resolving = new Map<string, Promise<Resolution>>();
 /** When each resolution was made, by catalog track id. */
@@ -289,6 +294,10 @@ const RESOLVE_DURATION_MS = 7000;
 const RESOLVE_GRACE_MS = 1500;
 /** Sources found for a track are reused for this long. */
 const RESOLUTION_TTL_MS = 10 * 60 * 1000;
+/** Recent artists shown on the home page. */
+const HOME_ARTISTS = 8;
+/** "Parce que vous écoutez …" shelves on the home page. */
+const HOME_SIMILAR_SHELVES = 2;
 /** Catalog tracks skipped in a row when none of them has a source. */
 const MAX_SKIPPED_TRACKS = 3;
 /** "Previous" restarts the track after this many seconds of playback. */
@@ -352,6 +361,25 @@ async function requestNotificationPermission(): Promise<void> {
   } catch {
     // Playback still works without the notification.
   }
+}
+
+/** Artists of the recently played catalog tracks, most recent first. */
+export function recentArtists(library: Library, max = HOME_ARTISTS): CatalogArtistRef[] {
+  const artists: CatalogArtistRef[] = [];
+  const seen = new Set<string>();
+
+  for (const saved of library.history) {
+    const artist = saved.catalog?.artist;
+    if (artist?.id && !seen.has(artist.id)) {
+      seen.add(artist.id);
+      artists.push(artist);
+      if (artists.length >= max) {
+        break;
+      }
+    }
+  }
+
+  return artists;
 }
 
 export const useAppStore = create<AppState>((set, get) => {
@@ -987,7 +1015,7 @@ export const useAppStore = create<AppState>((set, get) => {
   }
 
   async function loadPage<T>(
-    field: 'artistPages' | 'albumPages' | 'genrePages',
+    field: 'artistPages' | 'albumPages',
     id: string,
     force: boolean,
     fetchPage: () => Promise<T>,
@@ -1115,8 +1143,7 @@ export const useAppStore = create<AppState>((set, get) => {
     pages: [],
     artistPages: {},
     albumPages: {},
-    genrePages: {},
-    browse: null,
+    home: null,
     resolutions: {},
     hitTracks: {},
     catalogContext: null,
@@ -1723,10 +1750,8 @@ export const useAppStore = create<AppState>((set, get) => {
       set(state => ({ pages: [...state.pages, page], playerOpen: false, sheet: null }));
       if (page.kind === 'artist') {
         void get().loadArtistPage(page.id);
-      } else if (page.kind === 'album') {
-        void get().loadAlbumPage(page.id);
       } else {
-        void get().loadGenrePage(page.id);
+        void get().loadAlbumPage(page.id);
       }
     },
 
@@ -1742,25 +1767,54 @@ export const useAppStore = create<AppState>((set, get) => {
 
     loadArtistPage: (id, force = false) => loadPage('artistPages', id, force, () => catalog.artist(id)),
     loadAlbumPage: (id, force = false) => loadPage('albumPages', id, force, () => catalog.album(id)),
-    loadGenrePage: (id, force = false) => loadPage('genrePages', id, force, () => catalog.genre(id)),
+    loadHome: async (force = false) => {
+      const artists = get().settings.catalogEnabled ? recentArtists(get().library) : [];
 
-    loadBrowse: async (force = false) => {
-      if (!get().settings.catalogEnabled) {
-        set({ browse: null });
+      if (artists.length === 0) {
+        homeKey = '';
+        set({ home: null });
         return;
       }
 
-      const existing = get().browse;
-      if (existing && !force && existing.status !== 'error') {
+      const key = artists.map(artist => artist.id).join(',');
+      const existing = get().home;
+      if (!force && key === homeKey && existing && existing.status !== 'error') {
         return;
       }
 
-      set({ browse: { status: 'loading' } });
-      try {
-        set({ browse: { status: 'ready', data: await catalog.browse() } });
-      } catch (error) {
-        set({ browse: { status: 'error', error: errorMessage(error) } });
+      homeKey = key;
+      // Keep showing the previous content while it refreshes.
+      if (existing?.status !== 'ready') {
+        set({ home: { status: 'loading' } });
       }
+
+      const results = await Promise.allSettled(artists.map(artist => catalog.artistWithRelated(artist.id)));
+      if (key !== homeKey) {
+        return;
+      }
+
+      const loaded = results.flatMap(result => (result.status === 'fulfilled' ? [result.value] : []));
+      if (loaded.length === 0) {
+        const failure = results.find(result => result.status === 'rejected');
+        set({
+          home: {
+            status: 'error',
+            error: failure?.status === 'rejected' ? errorMessage(failure.reason) : 'Catalogue indisponible',
+          },
+        });
+        return;
+      }
+
+      const known = new Set(loaded.map(entry => entry.artist.id));
+      const similar = loaded
+        .slice(0, HOME_SIMILAR_SHELVES)
+        .map(entry => ({
+          artist: entry.artist,
+          related: entry.related.filter(artist => !known.has(artist.id)).slice(0, 12),
+        }))
+        .filter(entry => entry.related.length > 0);
+
+      set({ home: { status: 'ready', data: { artists: loaded.map(entry => entry.artist), similar } } });
     },
 
     resolveTrack: track => {

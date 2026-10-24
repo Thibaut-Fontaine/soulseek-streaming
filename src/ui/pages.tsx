@@ -1,5 +1,5 @@
 /**
- * Artist, album and genre pages, pushed above the current tab like a
+ * Artist and album pages, pushed above the current tab like a
  * navigation stack (`state.pages`). Only the top page is visible; the ones
  * below stay mounted so their scroll position survives "back".
  */
@@ -13,7 +13,6 @@ import type {
   CatalogAlbum,
   CatalogArtist,
   CatalogTrack,
-  GenrePageData,
   Loadable,
   Page,
 } from '../core/catalogTypes';
@@ -70,14 +69,11 @@ export function PageHost() {
 }
 
 function PageView({ page }: { page: Page }) {
-  switch (page.kind) {
-    case 'artist':
-      return <ArtistPage id={page.id} name={page.name} />;
-    case 'album':
-      return <AlbumPage id={page.id} title={page.title} />;
-    default:
-      return <GenrePage id={page.id} name={page.name} />;
-  }
+  return page.kind === 'artist' ? (
+    <ArtistPage id={page.id} name={page.name} />
+  ) : (
+    <AlbumPage id={page.id} title={page.title} />
+  );
 }
 
 /** Loads a page's data once, when nothing is cached for that id. */
@@ -471,94 +467,6 @@ function albumTrackSubtitle(track: CatalogTrack): string {
   return [version, trackArtists(track)].filter(Boolean).join(' · ');
 }
 
-// ---------------------------------------------------------------------------
-// Genre
-
-export function GenrePage({ id, name }: { id: string; name?: string }) {
-  const loadGenrePage = useAppStore(state => state.loadGenrePage);
-  const genrePages = useAppStore(state => state.genrePages);
-  const { entry, retry } = usePageData(key => genrePages[key], loadGenrePage, id);
-  const heading = entry?.status === 'ready' ? entry.data.genre.name : name ?? 'Genre';
-
-  return (
-    <PageScaffold title={heading} heroHeight={180}>
-      <View style={styles.genreHero}>
-        <TrackGradient seed={id} />
-        {entry?.status === 'ready' ? (
-          <Cover
-            artwork={entry.data.genre.picture}
-            seed={id}
-            title={heading}
-            size={96}
-            rounded="sm"
-            style={styles.albumCover}
-          />
-        ) : null}
-        <Text style={styles.genreName} numberOfLines={2} accessibilityRole="header">
-          {heading}
-        </Text>
-      </View>
-      {entry?.status === 'ready' ? (
-        <GenreContent data={entry.data} />
-      ) : entry?.status === 'error' ? (
-        <PageError title="Impossible de charger ce genre" error={entry.error} onRetry={retry} />
-      ) : (
-        <>
-          <ShelfSkeleton round />
-          <TrackListSkeleton count={6} />
-        </>
-      )}
-    </PageScaffold>
-  );
-}
-
-function GenreContent({ data }: { data: GenrePageData }) {
-  const { genre, artists, chartTracks } = data;
-  const [expanded, setExpanded] = React.useState(false);
-  const { play, shuffle } = usePlayList();
-  const { openArtist, more } = useOpeners();
-  const label = genre.name;
-  const shown = expanded ? chartTracks : chartTracks.slice(0, TOP_TRACKS_EXPANDED);
-
-  return (
-    <>
-      <PlayButtons
-        label={label}
-        disabled={chartTracks.length === 0}
-        onPlay={() => play(label, chartTracks)}
-        onShuffle={() => shuffle(label, chartTracks)}
-      />
-      {artists.length > 0 ? (
-        <Shelf title="Artistes">
-          {artists.map(artist => (
-            <ArtistCard key={artist.id} artist={artist} onPress={openArtist} />
-          ))}
-        </Shelf>
-      ) : null}
-      {chartTracks.length > 0 ? (
-        <>
-          <SectionTitle title="Titres du moment" style={styles.sectionGap} />
-          {shown.map((track, index) => (
-            <CatalogTrackRow
-              key={track.id}
-              track={track}
-              number={index + 1}
-              onPress={picked => play(label, chartTracks, picked)}
-              onMore={more(label, chartTracks)}
-            />
-          ))}
-          {chartTracks.length > TOP_TRACKS_EXPANDED ? (
-            <MoreToggle expanded={expanded} onPress={() => setExpanded(value => !value)} />
-          ) : null}
-        </>
-      ) : null}
-      {artists.length === 0 && chartTracks.length === 0 ? (
-        <Text style={styles.emptyText}>Rien à afficher pour ce genre pour l’instant.</Text>
-      ) : null}
-    </>
-  );
-}
-
 const styles = StyleSheet.create({
   host: {
     backgroundColor: colors.bg,
@@ -691,18 +599,5 @@ const styles = StyleSheet.create({
   releaseLabel: {
     ...type.caption,
     color: colors.textMuted,
-  },
-  genreHero: {
-    minHeight: 180,
-    justifyContent: 'flex-end',
-    gap: spacing.md,
-    paddingTop: HEADER_HEIGHT + spacing.sm,
-    paddingHorizontal: gutter,
-    paddingBottom: spacing.md,
-    overflow: 'hidden',
-  },
-  genreName: {
-    ...type.display,
-    color: colors.text,
   },
 });
