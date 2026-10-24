@@ -27,7 +27,7 @@ import { useByteRate } from './hooks';
 import { Icon } from './Icon';
 import { QUEUE_WARN_POSITION, peerAvailability, sourceSummary } from './p2p';
 import { Scrubber, TransferSteps } from './peer';
-import { TrackCover, useIsLiked, useTrackInfo } from './track';
+import { TrackCover, largeCoverUri, useIsLiked, useTrackInfo } from './track';
 import { colors, coverSeed, percent, radius, spacing, type } from './theme';
 
 const SIDE = spacing.xl;
@@ -80,6 +80,8 @@ function PlayerContent({ translateY }: { translateY: Animated.Value }) {
     state.current ? state.transfers[state.current.transferId] : undefined,
   );
   const context = useAppStore(state => state.context);
+  const catalogContext = useAppStore(state => state.catalogContext);
+  const openPage = useAppStore(state => state.openPage);
   const queue = useAppStore(state => state.queue);
   const shuffle = useAppStore(state => state.shuffle);
   const repeat = useAppStore(state => state.repeat);
@@ -225,11 +227,13 @@ function PlayerContent({ translateY }: { translateY: Animated.Value }) {
 
   // Leave room for the controls on short screens.
   const artSize = Math.max(160, Math.min(width - SIDE * 2, height * 0.42, 420));
-  const fromLabel = context?.label ?? 'Lecture';
+  const fromLabel = catalogContext?.label ?? context?.label ?? 'Lecture';
+  const catalog = info.catalog;
+  const album = catalog?.album ?? null;
 
   return (
     <View style={[styles.root, { paddingTop: insets.top + spacing.xs, paddingBottom: insets.bottom + spacing.md }]}>
-      <Backdrop coverUri={info.coverUri} seed={coverSeed(hit)} />
+      <Backdrop coverUri={largeCoverUri(info)} seed={coverSeed(hit)} />
 
       <View {...responder.panHandlers}>
         <View style={styles.grabber} />
@@ -264,12 +268,24 @@ function PlayerContent({ translateY }: { translateY: Animated.Value }) {
 
         <View style={styles.titleRow}>
           <View style={styles.titleText}>
-            <Text style={styles.title} numberOfLines={1}>
-              {info.title}
-            </Text>
-            <Text style={styles.artist} numberOfLines={1}>
-              {info.artist}
-            </Text>
+            <Pressable
+              disabled={!album}
+              accessibilityRole={album ? 'link' : undefined}
+              accessibilityLabel={album ? `Aller à l’album ${album.title}` : undefined}
+              onPress={() => album && openPage({ kind: 'album', id: album.id, title: album.title })}>
+              <Text style={styles.title} numberOfLines={1}>
+                {info.title}
+              </Text>
+            </Pressable>
+            <Pressable
+              disabled={!catalog}
+              accessibilityRole={catalog ? 'link' : undefined}
+              accessibilityLabel={catalog ? `Aller à l’artiste ${catalog.artist.name}` : undefined}
+              onPress={() => catalog && openPage({ kind: 'artist', id: catalog.artist.id, name: catalog.artist.name })}>
+              <Text style={styles.artist} numberOfLines={1}>
+                {info.artist}
+              </Text>
+            </Pressable>
           </View>
           <IconButton
             icon="heart"

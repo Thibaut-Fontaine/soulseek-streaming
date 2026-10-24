@@ -10,6 +10,7 @@ import { HomeScreen } from './src/ui/HomeScreen';
 import { LibraryScreen } from './src/ui/LibraryScreen';
 import { LoginScreen } from './src/ui/LoginScreen';
 import { MiniPlayer } from './src/ui/MiniPlayer';
+import { PageHost } from './src/ui/pages';
 import { PlayerSheet } from './src/ui/PlayerScreen';
 import { SearchScreen } from './src/ui/SearchScreen';
 import { SettingsScreen } from './src/ui/SettingsScreen';
@@ -34,6 +35,7 @@ function Root() {
   const username = useAppStore(state => state.username);
   const tab = useAppStore(state => state.tab);
   const setTab = useAppStore(state => state.setTab);
+  const closeAllPages = useAppStore(state => state.closeAllPages);
   const connection = useAppStore(state => state.connection);
   const hasCurrent = useAppStore(state => state.current !== null);
   const init = useAppStore(state => state.init);
@@ -45,7 +47,23 @@ function Root() {
     void init();
   }, [init]);
 
-  // Android back: close the sheet, then the player, then leave Réglages.
+  // Artist/album pages belong to the tab they were opened from: switching
+  // tab (from the bar or from code, e.g. "Rechercher « artiste »") clears them.
+  React.useEffect(() => {
+    closeAllPages();
+  }, [tab, closeAllPages]);
+
+  // Tapping a tab, even the current one, goes back to its root.
+  const changeTab = React.useCallback(
+    (next: typeof tab) => {
+      closeAllPages();
+      setTab(next);
+    },
+    [closeAllPages, setTab],
+  );
+
+  // Android back: close the sheet, then the player, then the top page, then
+  // leave Réglages.
   React.useEffect(() => {
     const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
       const state = useAppStore.getState();
@@ -56,6 +74,9 @@ function Root() {
       }
       if (state.playerOpen) {
         state.closePlayer();
+        return true;
+      }
+      if (state.closePage()) {
         return true;
       }
       if (state.tab === 'settings') {
@@ -112,12 +133,13 @@ function Root() {
               <SettingsScreen />
             </>
           )}
+          <PageHost />
         </View>
 
         <View style={styles.dock}>
           <LinearGradient colors={DOCK_FADE} style={styles.dockFade} pointerEvents="none" />
           {hasCurrent ? <MiniPlayer /> : null}
-          <TabBar active={tab} onChange={setTab} bottomInset={insets.bottom} />
+          <TabBar active={tab} onChange={changeTab} bottomInset={insets.bottom} />
         </View>
       </View>
 

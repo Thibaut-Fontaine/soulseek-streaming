@@ -3,41 +3,97 @@
  * has one), title/artist from its tag, and the standard list row.
  */
 import React from 'react';
-import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 import type { StyleProp, ViewStyle } from 'react-native';
 import Svg, { Circle, Path, Rect } from 'react-native-svg';
 
+import type { Artwork, CatalogTrack } from '../core/catalogTypes';
 import { displayArtist, displayTitle, hitKey } from '../core/types';
 import type { SearchHit } from '../core/types';
 import { trackIdentity } from '../services/library';
+import type { Library } from '../services/library';
 import { useAppStore } from '../state/store';
-import { CoverArt, Dot } from './components';
+import { pickArtwork, trackArtists } from './catalogFormat';
+import { Cover, Dot } from './components';
 import type { DotTone } from './components';
 import { Icon } from './Icon';
 import { peerAvailability } from './p2p';
-import { colors, coverSeed, radius, spacing } from './theme';
+import { colors, coverSeed, spacing } from './theme';
 
 export interface TrackInfo {
   title: string;
   artist: string;
   album?: string;
+  /** The MP3's own cover (ID3), when it has one. */
   coverUri: string | null;
+  /** Catalog cover of the matched track; preferred over `coverUri`. */
+  artwork: Artwork | null;
+  /** The catalog track this file was matched to, if any. */
+  catalog: CatalogTrack | null;
 }
 
-/** Title, artist and cover of a hit: the tag when known, else the file name. */
+let savedCatalogs: { library: Library | null; byKey: Map<string, CatalogTrack> } = {
+  library: null,
+  byKey: new Map(),
+};
+
+/** Catalog tracks stored on liked/history entries, by song identity. */
+function savedCatalogMap(library: Library): Map<string, CatalogTrack> {
+  if (savedCatalogs.library !== library) {
+    const byKey = new Map<string, CatalogTrack>();
+    for (const saved of [...library.history, ...library.liked]) {
+      if (saved.catalog) {
+        byKey.set(saved.key, saved.catalog);
+      }
+    }
+    savedCatalogs = { library, byKey };
+  }
+  return savedCatalogs.byKey;
+}
+
+/**
+ * Catalog track matched to a Soulseek file, when the catalog knows it: the
+ * live match first, else the one saved with a liked/history entry.
+ */
+export function useCatalogTrack(hit: SearchHit | null | undefined): CatalogTrack | null {
+  const identity = React.useMemo(() => (hit ? trackIdentity(hit) : null), [hit]);
+  return useAppStore(state => {
+    if (!hit) {
+      return null;
+    }
+    return state.trackForHit(hit) ?? (identity ? savedCatalogMap(state.library).get(identity) : null) ?? null;
+  });
+}
+
+/**
+ * Title, artist and cover of a hit: the catalog track it was matched to,
+ * else its tag, else the file name.
+ */
 export function useTrackInfo(hit: SearchHit | null | undefined): TrackInfo {
   const meta = useAppStore(state => (hit ? state.meta[hitKey(hit)] : undefined));
+  const catalog = useCatalogTrack(hit);
 
   if (!hit) {
-    return { title: '', artist: '', coverUri: null };
+    return { title: '', artist: '', coverUri: null, artwork: null, catalog: null };
   }
 
   return {
-    title: meta?.title || displayTitle(hit.filename),
-    artist: meta?.artist || displayArtist(hit) || (hit.username ? `@${hit.username}` : 'Sur l’appareil'),
-    album: meta?.album,
+    title: catalog?.title || meta?.title || displayTitle(hit.filename),
+    artist:
+      (catalog ? trackArtists(catalog) : '') ||
+      meta?.artist ||
+      displayArtist(hit) ||
+      (hit.username ? `@${hit.username}` : 'Sur l’appareil'),
+    album: catalog?.album?.title || meta?.album,
     coverUri: meta?.coverUri ?? null,
+    artwork: catalog?.album?.cover ?? null,
+    catalog,
   };
+}
+
+/** Best cover URL for big surfaces (player backdrop). */
+export function largeCoverUri(info: TrackInfo): string | null {
+  return pickArtwork(info.artwork, 1000) ?? info.coverUri;
 }
 
 /** Whether the store holds this hit's song in the liked tracks. */
@@ -77,18 +133,15 @@ export const TrackCover = React.memo(function TrackCover({
     loadMeta(hit);
   }, [hit, loadMeta]);
 
-  if (!info.coverUri) {
-    return <CoverArt seed={coverSeed(hit)} title={info.title} size={size} rounded={rounded} style={style} />;
-  }
-
-  const borderRadius = rounded === 'xs' ? 4 : rounded === 'sm' ? radius.sm : Math.max(radius.sm, size * 0.06);
-
   return (
-    <Image
-      source={{ uri: info.coverUri }}
-      style={[{ width: size, height: size, borderRadius }, styles.coverImage, style as object]}
-      resizeMode="cover"
-      accessibilityIgnoresInvertColors
+    <Cover
+      artwork={info.artwork}
+      fallbackUri={info.coverUri}
+      seed={coverSeed(hit)}
+      title={info.title}
+      size={size}
+      rounded={rounded}
+      style={style}
     />
   );
 });
@@ -208,9 +261,6 @@ export function AppLogo({ size, round }: { size: number; round?: boolean }) {
 }
 
 const styles = StyleSheet.create({
-  coverImage: {
-    backgroundColor: colors.surfaceAlt,
-  },
   row: {
     flexDirection: 'row',
     alignItems: 'center',

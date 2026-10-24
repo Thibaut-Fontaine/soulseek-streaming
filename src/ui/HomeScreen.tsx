@@ -5,6 +5,7 @@ import LinearGradient from 'react-native-linear-gradient';
 import type { SearchHit } from '../core/types';
 import { useAppStore } from '../state/store';
 import type { PlayContext } from '../state/store';
+import { BrowseSections } from './Browse';
 import { Button, EmptyState } from './components';
 import { Icon } from './Icon';
 import { AppLogo, DeviceMark, TrackCover, useIsCurrent, useTrackInfo } from './track';
@@ -23,6 +24,7 @@ export function HomeScreen() {
   const playTrack = useAppStore(state => state.playTrack);
   const runSearch = useAppStore(state => state.runSearch);
   const openSheet = useAppStore(state => state.openSheet);
+  const browseReady = useAppStore(state => state.browse?.status === 'ready');
 
   const recent = React.useMemo(() => history.slice(0, QUICK_COUNT).map(t => t.hit), [history]);
   const likedHits = React.useMemo(() => liked.slice(0, SHELF_COUNT).map(t => t.hit), [liked]);
@@ -52,7 +54,7 @@ export function HomeScreen() {
         </Text>
       </View>
 
-      {nothingYet ? (
+      {nothingYet && !browseReady ? (
         <View style={styles.welcome}>
           <AppLogo size={72} />
           <EmptyState
@@ -119,6 +121,8 @@ export function HomeScreen() {
           </View>
         </>
       ) : null}
+
+      <BrowseSections />
     </ScrollView>
   );
 }

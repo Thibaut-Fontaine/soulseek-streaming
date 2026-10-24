@@ -229,6 +229,24 @@ function MainSettings({
         </View>
       </View>
 
+      <Text style={styles.groupTitle}>Catalogue</Text>
+      <View style={styles.group}>
+        <ListRow
+          icon="disc"
+          title="Catalogue en ligne"
+          subtitle="Pochettes, titres, artistes et suggestions via Deezer. Désactivé : uniquement les noms de fichiers Soulseek."
+          last
+          right={
+            <Switch
+              value={settings.catalogEnabled}
+              onValueChange={value => toggle({ catalogEnabled: value })}
+              trackColor={{ true: colors.accent, false: colors.surfaceHigh }}
+              accessibilityLabel="Catalogue en ligne"
+            />
+          }
+        />
+      </View>
+
       <Text style={styles.groupTitle}>Partage</Text>
       <View style={styles.group}>
         <ListRow
