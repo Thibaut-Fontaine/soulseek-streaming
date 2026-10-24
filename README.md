@@ -6,11 +6,11 @@ réseau pair-à-pair **Soulseek**. Dépôt :
 et écoutez-le pendant que les octets arrivent du pair — sans serveur central de
 streaming.
 
-> **Usage responsable** — SoulStream ne fournit aucun catalogue ni aucun
-> fichier. Le réseau Soulseek est alimenté par ses utilisateurs. N'écoutez et ne
-> partagez que des œuvres que vous avez le droit d'utiliser. Le partage ou le
-> téléchargement d'œuvres protégées sans autorisation peut être illégal dans
-> votre pays.
+> **Usage responsable** — SoulStream ne fournit aucun fichier ni catalogue de
+> téléchargement. Les métadonnées et pochettes viennent du catalogue public
+> Deezer, les fichiers des utilisateurs du réseau. N'écoutez et ne partagez que
+> des œuvres que vous avez le droit d'utiliser. Le partage ou le téléchargement
+> d'œuvres protégées sans autorisation peut être illégal dans votre pays.
 
 ---
 
@@ -24,9 +24,9 @@ La page fournit l'APK, son empreinte SHA-256, les captures d'écran et l'archive
 du code source. L'APK est signé avec une clé de développement : il s'installe
 manuellement et n'est pas destiné à une publication sur le Play Store.
 
-### Build actuelle (1.2.0)
+### Build actuelle (1.3.0)
 
-La version 1.2.0 publiée sur la page est construite depuis `main` et signée avec
+La version 1.3.0 publiée sur la page est construite depuis `main` et signée avec
 la clé de développement. Elle inclut les architectures ARM (téléphones) et x86_64
 (émulateurs), et son APK est aussi conservé dans
 [`releases/SoulStream.apk`](releases/SoulStream.apk) pour les tests locaux.
@@ -55,6 +55,11 @@ le code de l'application.
 - **MP3 uniquement** : les résultats d'autres formats sont ignorés, ce qui
   réduit fortement la taille des transferts et permet un démarrage quasi
   instantané, sur iOS comme sur Android.
+- **Catalogue et pochettes** : les résultats sont regroupés par titre, artiste
+  et album à partir de l'API publique Deezer (sans clé), avec pochettes. Les
+  fichiers eux-mêmes viennent toujours de Soulseek. Le catalogue est activé par
+  défaut et désactivable dans **Réglages → Catalogue** ; désactivé, aucune
+  recherche n'est envoyée à Deezer.
 - **Interface type Spotify** : onglets Accueil, Rechercher et Bibliothèque ;
   une barre de lecture au-dessus des onglets ouvre le lecteur plein écran.
   - Barre de lecture : toucher (ou glisser vers le haut) pour ouvrir,
@@ -68,9 +73,9 @@ le code de l'application.
   si un slot est libre, orange si file d'attente) ; rien ne joue tant que
   vous n'avez pas touché un titre. Les morceaux déjà sur le téléphone
   apparaissent en premier.
-- **Pochettes** : la pochette et les tags (titre, artiste, album) sont lus
-  dans le tag ID3 du MP3 (`src/core/id3.ts`), dès les premiers Ko reçus du
-  pair. Le lecteur affiche la pochette en grand, floutée en fond.
+- **Pochettes** : celles du catalogue Deezer quand un titre est reconnu, sinon
+  la pochette et les tags ID3 du MP3 (`src/core/id3.ts`), lus dès les premiers
+  Ko reçus du pair. Le lecteur affiche la pochette en grand, floutée en fond.
 - **Bibliothèque** : titres likés, historique d'écoute, morceaux sur
   l'appareil ; recherches récentes. Enregistrés sur le téléphone.
 - Le titre suivant (file d'attente, puis la liste d'où vient le titre) se
@@ -357,7 +362,9 @@ src/
 
 - Les identifiants sont stockés via `react-native-keychain` (Keychain sur iOS,
   Keystore sur Android).
-- Aucune télémétrie, aucun service tiers, aucun compte supplémentaire.
+- Pas de télémétrie applicative. Le catalogue en ligne interroge l'API
+  publique Deezer (sans clé, sans donnée de compte) ; il est activé par défaut
+  et désactivable dans **Réglages → Catalogue**.
 - Le proxy HTTP n'écoute que sur `127.0.0.1` et sert uniquement les transferts
   en cours.
 - Le trafic Soulseek n'est pas chiffré (le protocole ne le prévoit pas) ; ne
@@ -376,6 +383,10 @@ original de ce dépôt : elle ne concède aucun droit sur le protocole, le rése
 les marques, le logiciel officiel ni les contenus échangés. L'utilisation du
 réseau reste soumise aux conditions et règles de Soulseek. Les dépendances
 tierces conservent leurs licences respectives.
+
+Le catalogue en ligne utilise l'API publique Deezer ; les métadonnées et
+pochettes restent soumises aux [conditions d'utilisation de Deezer](https://developers.deezer.com/termsofuse)
+(usage non commercial). SoulStream n'est pas affilié à Deezer.
 
 Voir aussi [`NOTICE`](NOTICE), les [conditions d'utilisation](https://www.slsknet.org/tos.html)
 et les [règles](https://www.slsknet.org/rules.html) de Soulseek.

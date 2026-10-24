@@ -283,6 +283,24 @@ function MainSettings({
         />
       </View>
 
+      <Text style={styles.groupTitle}>Catalogue</Text>
+      <View style={styles.group}>
+        <ListRow
+          icon="search"
+          title="Catalogue en ligne (Deezer)"
+          subtitle="Titres, artistes, albums et pochettes via l’API publique Deezer. Désactivez pour n’envoyer aucune recherche à un service tiers."
+          right={
+            <Switch
+              value={settings.catalogEnabled}
+              onValueChange={value => toggle({ catalogEnabled: value })}
+              trackColor={{ true: colors.accent, false: colors.surfaceHigh }}
+              accessibilityLabel="Catalogue en ligne Deezer"
+            />
+          }
+          last
+        />
+      </View>
+
       <Text style={styles.groupTitle}>Réseau</Text>
       <View style={styles.group}>
         <ListRow
@@ -312,8 +330,10 @@ function MainSettings({
       <Text style={styles.groupTitle}>À propos</Text>
       <View style={[styles.group, styles.about]}>
         <Text style={styles.aboutText}>
-          SoulStream est un client Soulseek expérimental. Il ne fournit aucun catalogue ni
-          aucun fichier : tout provient des utilisateurs du réseau.
+          SoulStream est un client Soulseek expérimental. Il ne fournit aucun fichier ni
+          catalogue de téléchargement : les métadonnées et pochettes viennent du catalogue
+          public Deezer, les fichiers des utilisateurs du réseau. Le catalogue est
+          désactivable dans Réglages → Catalogue.
         </Text>
         <Text style={styles.aboutText}>
           N’écoutez et ne partagez que des œuvres que vous avez le droit d’utiliser. Le

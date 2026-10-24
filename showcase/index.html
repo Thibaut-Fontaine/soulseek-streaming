@@ -360,6 +360,7 @@
     justify-content: space-between;
   }
   .note p { margin: 0; max-width: 60em; }
+  .note p.small { flex-basis: 100%; margin-top: 4px; font-size: 12.5px; }
 
   /* Responsive */
   @media (max-width: 900px) {
@@ -423,8 +424,9 @@
       <p class="lede">
         Tapez un titre, choisissez-le dans la liste : SoulStream prend la
         meilleure source sur le réseau Soulseek et lance la lecture pendant que
-        le fichier arrive du pair. Une interface à la Spotify, sans catalogue
-        central ni serveur de streaming.
+        le fichier arrive du pair. Une interface à la Spotify, sans catalogue de
+        fichiers : les métadonnées viennent d’un catalogue public, la musique du
+        réseau.
       </p>
       <div class="actions">
         <a class="btn primary" href="https://thibautfontaine.space/streaming/SoulStream.apk?v=1.2-f7845fbd" data-build="apk-link">
@@ -437,12 +439,12 @@
         </a>
       </div>
       <div class="tags">
-        <span class="pill">v1.2.0</span>
+        <span class="pill">v1.3.0</span>
         <span class="pill">Android 7.0+</span>
-                <span class="pill">MP3 uniquement</span>
-        <span class="pill">Pochettes des MP3</span>
+        <span class="pill">MP3 uniquement</span>
+        <span class="pill">Pochettes &amp; métadonnées</span>
         <span class="pill">Titres likés &amp; historique</span>
-        <span class="pill">Sans télémétrie</span>
+        <span class="pill">Catalogue Deezer</span>
       </div>
     </div>
 
@@ -502,7 +504,7 @@
     <div class="feature sky">
       <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg></div>
       <h3>Vous choisissez ce qui joue</h3>
-      <p>Les résultats arrivent au fil des réponses des pairs, le meilleur en tête ; rien ne se lance tout seul.</p>
+      <p>Les résultats arrivent au fil des réponses des pairs, les titres sont regroupés grâce au catalogue Deezer ; rien ne se lance tout seul.</p>
     </div>
     <div class="feature green">
       <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12a8 8 0 0114-5.3M20 12a8 8 0 01-14 5.3"/><path d="M18 3v4h-4M6 21v-4h4"/></svg></div>
@@ -550,11 +552,13 @@
 
   <footer class="note">
     <p>
-      <strong>Usage responsable.</strong> SoulStream ne fournit aucun catalogue ni
-      aucun fichier : le réseau Soulseek est alimenté par ses utilisateurs.
-      N'écoutez et ne partagez que des œuvres que vous avez le droit d'utiliser.
+      <strong>Usage responsable.</strong> SoulStream ne fournit aucun fichier ni
+      catalogue de téléchargement : les métadonnées et pochettes viennent de
+      Deezer, les fichiers des utilisateurs du réseau. N'écoutez et ne partagez
+      que des œuvres que vous avez le droit d'utiliser.
     </p>
     <a href="https://thibautfontaine.space/">thibautfontaine.space</a> · <a href="SoulStream-source.zip">code source</a>
+    <p class="small">Catalogue et pochettes : Deezer. Projet indépendant, non affilié à Deezer.</p>
   </footer>
 </div>
 </body>

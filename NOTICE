@@ -23,5 +23,12 @@ Use and Rules:
   https://www.slsknet.org/tos.html
   https://www.slsknet.org/rules.html
 
+Catalog metadata and artwork are fetched from Deezer's public API. They remain
+subject to Deezer's terms of use (non-commercial use) and SoulStream is not
+affiliated with, endorsed by, or supported by Deezer. "Deezer" and related
+marks are trademarks of their respective owners.
+
+  https://developers.deezer.com/termsofuse
+
 Third-party dependencies remain under their own licenses. The MIT license does
 not grant rights to any third-party code, content, or trademarks.
