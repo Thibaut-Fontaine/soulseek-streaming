@@ -26,7 +26,7 @@ manuellement et n'est pas destiné à une publication sur le Play Store.
 
 ### Build de la branche
 
-La branche `ccr-b56e6780-ko4xxa` contient un APK construit à partir de son code,
+La branche `ccr-d310b6be-ptrhbl` contient un APK construit à partir de son code,
 dans [`releases/SoulStream.apk`](releases/SoulStream.apk) (build actuelle : ARM uniquement,
 signé avec la clé de debug). Le dépôt étant privé, le téléchargement demande
 d'être connecté à GitHub avec un compte qui a accès au dépôt.
