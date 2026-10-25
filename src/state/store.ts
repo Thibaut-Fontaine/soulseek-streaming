@@ -172,6 +172,8 @@ interface AppState {
   login: (username: string, password: string, keepSessionOnFailure?: boolean) => Promise<boolean>;
   logout: () => Promise<void>;
   reconnect: () => Promise<void>;
+  /** Verifies the server connection still works (after the app slept). */
+  checkConnection: () => Promise<void>;
   applySettings: (settings: Settings) => Promise<void>;
   setTab: (tab: Tab) => void;
   setQuery: (query: string) => void;
@@ -286,10 +288,10 @@ const SEARCH_DURATION_MS = 10000;
 const LIST_SCORE = 0.55;
 /** Stop listening for results once this many sources came in. */
 const ENOUGH_RESULTS = 300;
-/** A tag bigger than this is not waited for (it would delay nothing, but costs memory). */
-const MAX_STREAM_TAG_BYTES = 4 * 1024 * 1024;
 /** Embedded covers above this are not decoded (JS-thread base64 cost). */
 const MAX_COVER_BYTES = 1024 * 1024;
+/** A tag bigger than this is not waited for (it would delay nothing, but costs memory). */
+const MAX_STREAM_TAG_BYTES = 4 * 1024 * 1024;
 /** Background search for one catalog track's sources. */
 const RESOLVE_DURATION_MS = 7000;
 /** Stop a source search this long after the first good source arrived. */
@@ -428,14 +430,14 @@ export const useAppStore = create<AppState>((set, get) => {
       }
 
       const tags = parseId3(buffer.read(0, size));
-      setMeta(key, {
-        title: tags?.title,
       // Base64-encoding a cover runs on the JS thread: skip it when the
       // catalog already gives a cover, and for unusually large pictures.
       const picture =
         tags?.picture && !get().trackForHit(hit)?.album?.cover.large && tags.picture.data.length <= MAX_COVER_BYTES
           ? tags.picture
           : null;
+      setMeta(key, {
+        title: tags?.title,
         artist: tags?.artist,
         album: tags?.album,
         coverUri: picture ? `data:${picture.mime};base64,${Buffer.from(picture.data).toString('base64')}` : null,
@@ -1326,6 +1328,13 @@ export const useAppStore = create<AppState>((set, get) => {
       }
     },
 
+    checkConnection: async () => {
+      if (service && get().connection === 'online') {
+        const alive = await service.checkConnection();
+        debugLog('net', alive ? 'connexion au serveur vérifiée' : 'connexion au serveur perdue, reconnexion');
+      }
+    },
+
     applySettings: async (settings: Settings) => {
       const previous = get().settings;
       await saveSettings(settings);
@@ -1399,6 +1408,8 @@ export const useAppStore = create<AppState>((set, get) => {
       const collected: SearchHit[] = [];
       const collectedKeys = new Set<string>();
       let catalogTracks: CatalogTrack[] = [];
+      // File/track scores of this search: each regroup only scores new files.
+      const unifyScores = new Map<string, number>();
       let rankTimer: ReturnType<typeof setTimeout> | null = null;
       let extraSearch: Promise<unknown> | null = null;
 
@@ -1408,8 +1419,6 @@ export const useAppStore = create<AppState>((set, get) => {
         }
         const unified = unifyResults(networkQuery, collected, catalogTracks, LIST_SCORE, unifyScores);
         set(state => ({ groups: unified.groups, hitTracks: { ...state.hitTracks, ...unified.hitTracks } }));
-      // File/track scores of this search: each regroup only scores new files.
-      const unifyScores = new Map<string, number>();
       };
 
       const onBatch = (batch: SearchHit[]) => {

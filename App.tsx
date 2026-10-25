@@ -19,6 +19,9 @@ import { TabBar } from './src/ui/TabBar';
 import { AppLogo } from './src/ui/track';
 import { colors, gutter, spacing, type } from './src/ui/theme';
 
+/** After this long in the background, check the server connection on return. */
+const CHECK_AFTER_BACKGROUND_MS = 60_000;
+
 function App() {
   return (
     <SafeAreaProvider>
@@ -42,6 +45,7 @@ function Root() {
   const reconnect = useAppStore(state => state.reconnect);
 
   const insets = useSafeAreaInsets();
+  const backgroundSince = React.useRef<number | null>(null);
 
   React.useEffect(() => {
     void init();
@@ -91,12 +95,22 @@ function Root() {
 
   React.useEffect(() => {
     const subscription = AppState.addEventListener('change', nextState => {
+      if (nextState !== 'active') {
+        backgroundSince.current ??= Date.now();
+        return;
+      }
+
+      const away = backgroundSince.current ? Date.now() - backgroundSince.current : 0;
+      backgroundSince.current = null;
+
       if (
-        nextState === 'active' &&
         username &&
         (connection === 'disconnected' || connection === 'error' || connection === 'reconnecting')
       ) {
         void reconnect();
+      } else if (username && connection === 'online' && away > CHECK_AFTER_BACKGROUND_MS) {
+        // The phone may have slept: make sure "online" is still true.
+        void useAppStore.getState().checkConnection();
       }
     });
 

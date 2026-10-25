@@ -291,6 +291,9 @@ export class SoulseekClient extends Emitter<SoulseekClientEvents> {
   private reconnectAttempt = 0;
 
   private readonly searches = new Map<number, ActiveSearch>();
+  /** Called on the next frame from the server (see `checkConnection`). */
+  private readonly serverFrameWaiters = new Set<() => void>();
+  private connectionCheck: Promise<boolean> | null = null;
   private nextTokenValue = Math.floor(Math.random() * 0x7fffffff) + 1;
 
   private readonly peerAddressWaiters = new Map<
@@ -673,6 +676,53 @@ export class SoulseekClient extends Emitter<SoulseekClientEvents> {
     this.connect().catch(() => {});
   }
 
+  /**
+   * Proves the server connection is alive. After the phone slept or changed
+   * network, the socket can be dead while the state still says "online": the
+   * keep-alive ping gets no answer either way, so it cannot tell. Asking the
+   * server for our own address always gets a reply; without one, the socket
+   * is dropped and the usual reconnection starts.
+   */
+  checkConnection(timeoutMs = 8000): Promise<boolean> {
+    const socket = this.serverSocket;
+
+    if (this.stateValue !== 'online' || !socket) {
+      return Promise.resolve(false);
+    }
+
+    if (this.connectionCheck) {
+      return this.connectionCheck;
+    }
+
+    this.connectionCheck = new Promise<boolean>(resolve => {
+      const finish = (alive: boolean) => {
+        clearTimeout(timer);
+        this.serverFrameWaiters.delete(onFrame);
+        resolve(alive);
+      };
+      const onFrame = () => finish(true);
+      const timer = setTimeout(() => finish(false), timeoutMs);
+      this.serverFrameWaiters.add(onFrame);
+
+      try {
+        this.sendServer(encodeGetPeerAddress(this.username));
+      } catch {
+        finish(false);
+      }
+    }).then(alive => {
+      this.connectionCheck = null;
+
+      if (!alive && this.serverSocket === socket) {
+        this.log('Le serveur ne répond plus : reconnexion');
+        this.handleServerClose(socket);
+      }
+
+      return alive;
+    });
+
+    return this.connectionCheck;
+  }
+
   private setState(state: ConnectionState, error?: string): void {
     this.stateValue = state;
     this.emit('state', { state, error });
@@ -748,6 +798,12 @@ export class SoulseekClient extends Emitter<SoulseekClientEvents> {
       this.log(`Trame serveur invalide: ${(error as Error).message}`);
       this.handleServerClose(this.serverSocket ?? undefined);
       return;
+    }
+
+    if (frames.length > 0 && this.serverFrameWaiters.size > 0) {
+      for (const waiter of Array.from(this.serverFrameWaiters)) {
+        waiter();
+      }
     }
 
     for (const frame of frames) {
