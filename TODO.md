@@ -19,7 +19,23 @@ catalog request priority, dead-connection detection after sleep. Left:
 - If a stutter shows when the catalog answers late, split the first
   regroup in chunks (see the audit's "Still open").
 
-## 2. Check behaviour on older, low-RAM devices (last)
+## 2. Optional pre-download of the next track (setting, off by default)
+
+Not implemented. Today, when an album/radio/top-tracks list plays, only the
+next track's *sources* are looked up in advance (one Soulseek search,
+`playCatalog` in `src/state/store.ts`); nothing is downloaded ahead.
+
+- Add a setting in Réglages (e.g. "Précharger le titre suivant", off by
+  default; maybe "Wi-Fi uniquement" like sharing) — not automatic.
+- When on: once the current track is fully downloaded, download the next one
+  in the list (queue first, then the play context) into the track cache
+  (`trackCache.ts`), so it starts instantly and gaplessly.
+- Respect the existing limits: one transfer at a time per peer, cache size,
+  Wi-Fi-only option, cancel the pre-download when the user skips elsewhere.
+- Decide whether the automatic source lookup for the next track should also
+  move behind this setting.
+
+## 3. Check behaviour on older, low-RAM devices (last)
 
 - Test on an older / low-RAM Android device or emulator profile (2–3 GB RAM,
   older Android version; minSdk is 24).
