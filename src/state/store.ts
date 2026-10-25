@@ -46,6 +46,7 @@ import type { Credentials, Settings } from '../services/settings';
 import { StreamingService } from '../services/streaming';
 import { debugLog } from '../services/debugLog';
 import { takeLastCrash } from '../services/crashReport';
+import { reportPreviousExits } from '../services/exitInfo';
 import {
   EMPTY_LIBRARY,
   addRecentSearch,
@@ -1411,6 +1412,12 @@ export const useAppStore = create<AppState>((set, get) => {
           set({
             notice: 'SoulStream s’est fermé après une erreur. Détails dans Réglages → Journal de débogage.',
           });
+        }
+
+        // Low-memory kills and native crashes leave no JavaScript trace.
+        const exitNotice = await reportPreviousExits();
+        if (exitNotice && !lastCrash) {
+          set({ notice: exitNotice });
         }
 
         const settings = await loadSettings();
