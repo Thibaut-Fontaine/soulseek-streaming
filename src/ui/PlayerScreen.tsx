@@ -44,6 +44,8 @@ export function PlayerSheet() {
   const { height } = useWindowDimensions();
   const translateY = React.useRef(new Animated.Value(height)).current;
   const [mounted, setMounted] = React.useState(open);
+  const openRef = React.useRef(open);
+  openRef.current = open;
 
   React.useEffect(() => {
     if (open) {
@@ -55,9 +57,13 @@ export function PlayerSheet() {
         speed: 18,
       }).start();
     } else {
-      Animated.timing(translateY, { toValue: height, duration: 240, useNativeDriver: true }).start(
-        ({ finished }) => finished && setMounted(false),
-      );
+      // Unmount even when the slide was interrupted (`finished` false), as
+      // long as the player is still meant to be closed.
+      Animated.timing(translateY, { toValue: height, duration: 240, useNativeDriver: true }).start(() => {
+        if (!openRef.current) {
+          setMounted(false);
+        }
+      });
     }
   }, [open, height, translateY]);
 
@@ -68,6 +74,8 @@ export function PlayerSheet() {
   return (
     <Animated.View
       style={[StyleSheet.absoluteFill, styles.sheet, { transform: [{ translateY }] }]}
+      // A closing player never catches touches meant for the app below.
+      pointerEvents={open ? 'auto' : 'none'}
       accessibilityViewIsModal>
       <PlayerContent translateY={translateY} />
     </Animated.View>
