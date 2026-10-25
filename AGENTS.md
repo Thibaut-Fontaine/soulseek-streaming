@@ -61,7 +61,8 @@ src/player/          track-player setup and background service
 src/transport/       TCP transport: react-native-tcp-socket (app), node:net (tests)
 __tests__/           jest suites; fixtures/deezer/ holds recorded Deezer answers
 test-utils/          fake Soulseek server + peers (multiPeerNetwork), UI fixtures
-tools/               fake-network.ts (dev server), showcase.mjs, gradle/ (cloud mirror)
+tools/               fake-network.ts (dev server), showcase.mjs, icon/ (app icon source
+                     + generator), gradle/ (cloud mirror)
 docs/                design notes (catalog research, catalog UI spec)
 showcase/, releases/ public landing page, QR code, published APK
 ```
@@ -105,6 +106,12 @@ fallback to the next ones.
 
 ## Conventions
 
+- **Brand colour is amber** (`#FFB627`, `colors.accent` in `src/ui/theme.ts`,
+  `app_accent` in `android/app/src/main/res/values/colors.xml`, the icon in
+  `tools/icon/icon.mjs`); warnings use orange, not amber. The app icon is
+  generated: edit `tools/icon/icon.mjs`, run `node tools/icon/generate.mjs`,
+  never hand-edit the generated drawables/PNGs.
+
 - TypeScript strict; small pure functions in `src/core`, side effects in
   services and the store. Prefer extending existing modules over new layers.
 - Comments explain *why*, briefly, in plain English.
@@ -136,6 +143,7 @@ fallback to the next ones.
 | File | Purpose |
 | --- | --- |
 | `AGENTS.md` | This file: rules and map for every agent |
+| `TODO.md` | Prioritised to-do list (highest first), shared with the owner |
 | `CLAUDE.md` | Imports `AGENTS.md`; Claude-only notes |
 | `after-compact.md` | Operator handoff: workstation, emulator, VPS deploy, history |
 | `README.md` | French user/developer documentation |

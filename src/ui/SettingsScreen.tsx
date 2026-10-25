@@ -348,7 +348,7 @@ function MainSettings({
   );
 }
 
-const PROFILE_FADE = ['rgba(169,112,255,0.35)', 'rgba(169,112,255,0)'];
+const PROFILE_FADE = ['rgba(255,182,39,0.28)', 'rgba(255,182,39,0)'];
 
 function NetworkSettings({ onBack }: { onBack: () => void }) {
   const settings = useAppStore(state => state.settings);

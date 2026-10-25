@@ -5,7 +5,7 @@
 import React from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import type { StyleProp, ViewStyle } from 'react-native';
-import Svg, { Circle, Path, Rect } from 'react-native-svg';
+import Svg, { Circle, G, Path, Rect } from 'react-native-svg';
 
 import type { Artwork, CatalogTrack } from '../core/catalogTypes';
 import { displayArtist, displayTitle, hitKey } from '../core/types';
@@ -252,10 +252,13 @@ export function AppLogo({ size, round }: { size: number; round?: boolean }) {
       ) : (
         <Rect width={100} height={100} rx={23} fill={colors.accent} />
       )}
-      <Path d="M37 29 L37 71 L73 50 Z" fill="none" stroke={colors.bg} strokeWidth={6.5} strokeLinejoin="round" />
-      <Circle cx={37} cy={29} r={8.5} fill={colors.bg} />
-      <Circle cx={37} cy={71} r={8.5} fill={colors.bg} />
-      <Circle cx={73} cy={50} r={8.5} fill={colors.bg} />
+      {/* Same glyph and optical centring as the app icon (tools/icon/generate.mjs). */}
+      <G transform="translate(1.4869 1.6671) scale(0.9667)">
+        <Path d="M37 29 L37 71 L73 50 Z" fill="none" stroke={colors.bg} strokeWidth={7} strokeLinejoin="round" />
+        <Circle cx={37} cy={29} r={9} fill={colors.bg} />
+        <Circle cx={37} cy={71} r={9} fill={colors.bg} />
+        <Circle cx={73} cy={50} r={9} fill={colors.bg} />
+      </G>
     </Svg>
   );
 }

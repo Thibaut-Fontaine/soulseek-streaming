@@ -36,7 +36,7 @@ jest.mock('react-native-svg', () => {
   const { View } = require('react-native');
   const { createElement } = require('react');
   const Svg = (props: object) => createElement(View, props);
-  return { __esModule: true, default: Svg, Circle: Svg, Path: Svg, Rect: Svg };
+  return { __esModule: true, default: Svg, Circle: Svg, G: Svg, Path: Svg, Rect: Svg };
 });
 jest.mock('react-native-safe-area-context', () => ({
   useSafeAreaInsets: () => ({ top: 24, bottom: 16, left: 0, right: 0 }),

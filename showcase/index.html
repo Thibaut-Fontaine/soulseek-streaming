@@ -18,9 +18,9 @@
     --text: #FFFFFF;
     --muted: #B9B4C4;
     --dim: #7D778A;
-    --accent: #A970FF;
-    --accent-press: #9255F7;
-    --accent-soft: rgba(169, 112, 255, 0.16);
+    --accent: #FFB627;
+    --accent-press: #F09D0E;
+    --accent-soft: rgba(255, 182, 39, 0.16);
     --green: #3DDC84;
     --sky: #5CC8FF;
     --amber: #FFB547;
@@ -32,7 +32,7 @@
 
   body {
     background:
-      radial-gradient(900px 620px at 85% -10%, rgba(169, 112, 255, 0.22), transparent 65%),
+      radial-gradient(900px 620px at 85% -10%, rgba(255, 182, 39, 0.22), transparent 65%),
       radial-gradient(700px 520px at -5% 30%, rgba(92, 200, 255, 0.08), transparent 60%),
       var(--bg);
     color: var(--text);
@@ -100,7 +100,7 @@
   }
   h1 em {
     font-style: normal;
-    background: linear-gradient(90deg, #C9A6FF, var(--accent) 45%, var(--sky));
+    background: linear-gradient(90deg, #FFE29A, var(--accent) 45%, #FF8A3D);
     -webkit-background-clip: text;
     background-clip: text;
     color: transparent;
@@ -140,7 +140,7 @@
     border-radius: 28px;
     background: linear-gradient(180deg, rgba(29, 26, 36, 0.96), rgba(20, 18, 25, 0.96));
     border: 1px solid var(--border);
-    box-shadow: 0 40px 100px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(169, 112, 255, 0.08) inset;
+    box-shadow: 0 40px 100px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(255, 182, 39, 0.08) inset;
     text-align: center;
   }
   .qr-card::before {
@@ -149,7 +149,7 @@
     inset: -1px;
     border-radius: 28px;
     padding: 1px;
-    background: linear-gradient(160deg, rgba(169, 112, 255, 0.7), transparent 40%, transparent 60%, rgba(92, 200, 255, 0.45));
+    background: linear-gradient(160deg, rgba(255, 182, 39, 0.7), transparent 40%, transparent 60%, rgba(255, 138, 61, 0.45));
     -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
     -webkit-mask-composite: xor;
     mask-composite: exclude;
@@ -309,7 +309,7 @@
     margin: 0 auto 14px;
     border-radius: 50%;
     background: var(--surface-alt);
-    border: 1px solid rgba(169, 112, 255, 0.45);
+    border: 1px solid rgba(255, 182, 39, 0.45);
     color: var(--accent);
     font-weight: 700;
     position: relative;
@@ -322,7 +322,7 @@
     left: calc(50% + 30px);
     right: calc(-50% + 30px);
     height: 1px;
-    background: linear-gradient(90deg, rgba(169, 112, 255, 0.5), rgba(169, 112, 255, 0.1));
+    background: linear-gradient(90deg, rgba(255, 182, 39, 0.5), rgba(255, 182, 39, 0.1));
   }
   .step h3 { margin: 0 0 6px; font-size: 16px; }
   .step p { margin: 0; color: var(--muted); font-size: 14px; }
@@ -335,7 +335,7 @@
     align-items: center;
     padding: 28px;
     border-radius: 26px;
-    background: linear-gradient(120deg, rgba(169, 112, 255, 0.16), rgba(20, 18, 25, 0.9) 55%);
+    background: linear-gradient(120deg, rgba(255, 182, 39, 0.16), rgba(20, 18, 25, 0.9) 55%);
     border: 1px solid var(--border);
     margin-bottom: 40px;
   }

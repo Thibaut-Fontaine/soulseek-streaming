@@ -3,6 +3,6 @@
     <!-- Keep in sync with colors.accent in src/ui/theme.ts. Native widgets
          (text cursor, selection handles, ripples, switches) use it instead of
          the AppCompat default teal. -->
-    <color name="app_accent">#A970FF</color>
+    <color name="app_accent">#FFB627</color>
     <color name="app_background">#0B0A0F</color>
 </resources>

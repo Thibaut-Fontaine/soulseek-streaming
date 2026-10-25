@@ -237,7 +237,7 @@ const ShelfCard = React.memo(function ShelfCard({
   );
 });
 
-const HEADER_FADE = ['rgba(169,112,255,0.28)', 'rgba(11,10,15,0)'];
+const HEADER_FADE = ['rgba(255,182,39,0.2)', 'rgba(11,10,15,0)'];
 
 const styles = StyleSheet.create({
   container: {
