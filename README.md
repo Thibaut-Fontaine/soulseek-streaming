@@ -47,6 +47,27 @@ Le script copie l'APK dans `releases/`, régénère le QR code et les informatio
 de build. Il refuse de tourner s'il reste des modifications non commitées dans
 le code de l'application.
 
+### Construire l'APK depuis une session Claude Code (cloud)
+
+Le hook [`.claude/hooks/session-start.sh`](.claude/hooks/session-start.sh)
+prépare chaque session cloud : `npm install`, SDK Android dans
+`/opt/android-sdk` (plateforme 36, build-tools 36.0.0, NDK 27.1, CMake 3.22.1),
+`android/local.properties` et `ANDROID_HOME`. Environ 2 minutes au premier
+démarrage, instantané ensuite. Il ne fait rien en dehors du cloud.
+
+Depuis le bac à sable, Maven Central (`repo.maven.apache.org`,
+`repo1.maven.org`) limite le débit : Gradle reçoit des 429 et des 404 au hasard
+(« Could not find gson-2.11.0.jar ») et la build échoue sur un artefact
+différent à chaque fois. Réessayer ou ajouter `repo1.maven.org` ne suffit pas.
+Le hook installe donc [`tools/gradle/google-central.gradle`](tools/gradle/google-central.gradle)
+dans `~/.gradle/init.d`, qui redirige Maven Central vers le miroir de Google
+(`maven-central.storage-download.googleapis.com`), y compris pour le plugin
+Gradle de React Native. Les builds locales ne sont pas concernées.
+
+```bash
+cd android && ./gradlew assembleRelease --no-daemon && cd ..
+```
+
 ## Fonctionnalités
 
 - Connexion au serveur Soulseek avec votre compte (`server.slsknet.org:2242`).
