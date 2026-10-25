@@ -44,6 +44,7 @@ import { clearCredentials, loadCredentials, loadSettings, saveCredentials, saveS
 import type { Credentials, Settings } from '../services/settings';
 import { StreamingService } from '../services/streaming';
 import { debugLog } from '../services/debugLog';
+import { takeLastCrash } from '../services/crashReport';
 import {
   EMPTY_LIBRARY,
   addRecentSearch,
@@ -1076,17 +1077,17 @@ export const useAppStore = create<AppState>((set, get) => {
     return context.index + 1 < context.tracks.length ? context.index + 1 : null;
   }
 
-  async function playCatalog(
   /**
    * `byUser`: the user tapped this track (search it again even if it had no
    * source a moment ago). Moving on through a list (end of track, next,
    * skipping a missing track) reuses recent answers.
    */
+  async function playCatalog(
     track: CatalogTrack,
     context: CatalogPlayContext | undefined,
     skipped: number,
-  ): Promise<void> {
     byUser: boolean,
+  ): Promise<void> {
     const sequence = ++catalogPlaySequence;
     set({
       catalogPending: track,
@@ -1191,6 +1192,20 @@ export const useAppStore = create<AppState>((set, get) => {
       initStarted = true;
 
       try {
+        const lastCrash = await takeLastCrash();
+        if (lastCrash) {
+          debugLog('app', `— plantage du ${new Date(lastCrash.at).toLocaleString('fr-FR')} : ${lastCrash.message}`);
+          for (const line of lastCrash.log) {
+            debugLog('app', `  | ${line}`);
+          }
+          if (lastCrash.stack) {
+            debugLog('app', `  pile : ${lastCrash.stack.split('\n').slice(0, 8).join(' ← ')}`);
+          }
+          set({
+            notice: 'SoulStream s’est fermé après une erreur. Détails dans Réglages → Journal de débogage.',
+          });
+        }
+
         const settings = await loadSettings();
         const library = await loadLibrary();
         const hitTracks: Record<string, CatalogTrack> = {};
