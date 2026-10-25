@@ -1,4 +1,7 @@
 /* global jest */
+// Keep debug logs silent in tests; a late transfer log otherwise runs after
+// Jest teardown and makes the process exit with code 1.
+global.__DEV__ = false;
 // Native modules have no implementation under Jest.
 jest.mock('@react-native-community/netinfo', () =>
   require('@react-native-community/netinfo/jest/netinfo-mock.js'),
