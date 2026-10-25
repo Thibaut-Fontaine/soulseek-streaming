@@ -5,18 +5,19 @@ Ordered by priority, highest first. When an item is done, remove it in the
 commit that finishes it (git history keeps the record); add new items where
 they belong in the order, with enough context to start without asking.
 
-## 1. Audit asynchronous behaviour and responsiveness
+## 1. Audit asynchronous behaviour and responsiveness: device checks
 
-- Check that nothing blocks the JS thread: Soulseek connection and
-  reconnection, searches (including the parallel catalog-corrected search),
-  peer connections, transfers, uploads, ID3 parsing, cache I/O.
-- Check the Soulseek connection keeps working in the background (screen off,
-  app in background) and recovers when the app returns.
-- Check Deezer catalog fetches never delay the UI or playback: timeouts,
-  throttling, cancellation of stale requests, cache hits, behaviour when
-  offline or when Deezer is slow.
-- Measure on a device (JS frame drops, time to first sound) and add
-  regression tests where possible.
+Code audit and fixes done (`docs/performance-audit.md`): search scoring
+(534 ms → 5.5 ms per update), chunked download writes, cover decoding,
+catalog request priority, dead-connection detection after sleep. Left:
+
+- Measure on a real phone/emulator: frame drops during a search and when a
+  download finishes (`adb shell dumpsys gfxinfo com.soulstream.app`), time
+  to first sound.
+- Background: screen off 5+ minutes without playback, then search; Wi-Fi →
+  mobile data while playing. Check the app reconnects on its own.
+- If a stutter shows when the catalog answers late, split the first
+  regroup in chunks (see the audit's "Still open").
 
 ## 2. Check behaviour on older, low-RAM devices (last)
 
