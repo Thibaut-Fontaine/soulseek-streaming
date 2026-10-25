@@ -142,8 +142,10 @@ an accent-free copy when they have accents.
   npm dependencies, the Android SDK in `/opt/android-sdk` and a Gradle init
   script (`tools/gradle/google-central.gradle`). Maven Central rate-limits that
   sandbox (random 429/404 in Gradle); the init script sends those downloads to
-  Google's mirror. The VPS is not reachable from there: publish APKs on the
-  branch (`releases/`, `showcase/`) and let the owner deploy.
+  Google's mirror. The VPS is not reachable from there, and it is run by a
+  friend of the owner: do not count on a build being deployed there. Publish
+  APKs on the branch (`releases/`, `showcase/`) and also hand the APK file
+  itself to the user in the conversation.
 
 ## Documentation map
 

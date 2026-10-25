@@ -10,5 +10,9 @@
   Maven mirror are ready, so `cd android && ./gradlew assembleRelease` works
   directly. If Gradle still reports "Could not find …" for a Maven Central
   artifact, check that `~/.gradle/init.d/google-central.gradle` exists.
+- Cloud sessions started from the Claude mobile app: after every APK build,
+  send the APK to the user with `SendUserFile` (`releases/SoulStream.apk`,
+  `display: "attach"`), so they can install it from the phone. Do not ask
+  them to deploy it to the VPS (a friend's server, not theirs to manage).
 - Personal overrides go in `CLAUDE.local.md` or `.claude/settings.local.json`
   (both git-ignored).
