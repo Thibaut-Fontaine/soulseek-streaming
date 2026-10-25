@@ -3,6 +3,7 @@ import { ActivityIndicator, AppState, BackHandler, StatusBar, StyleSheet, Text, 
 import LinearGradient from 'react-native-linear-gradient';
 import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { debugLog } from './src/services/debugLog';
 import { useAppStore } from './src/state/store';
 import { IconButton, Toast } from './src/ui/components';
 import { ErrorBoundary } from './src/ui/ErrorBoundary';
@@ -18,6 +19,36 @@ import { SheetHost } from './src/ui/Sheets';
 import { TabBar } from './src/ui/TabBar';
 import { AppLogo } from './src/ui/track';
 import { colors, gutter, spacing, type } from './src/ui/theme';
+
+/** A JS-thread gap longer than this is written to the journal. */
+const STALL_LOG_MS = 1000;
+const STALL_TICK_MS = 250;
+
+/**
+ * Journal lines to tell a dead UI apart (taps that do nothing): a tap that
+ * reaches JS is logged, and so is any long stall of the JS thread. No tap
+ * logged means something native caught it or JS was busy.
+ */
+function logTouch(event: { nativeEvent: { pageX: number; pageY: number } }): boolean {
+  debugLog('app', `toucher ${Math.round(event.nativeEvent.pageX)},${Math.round(event.nativeEvent.pageY)}`);
+  return false;
+}
+
+function useStallWatchdog(): void {
+  React.useEffect(() => {
+    let last = Date.now();
+    const timer = setInterval(() => {
+      const now = Date.now();
+      const gap = now - last - STALL_TICK_MS;
+      last = now;
+      // A gap while in the background is the OS pausing timers, not a stall.
+      if (gap > STALL_LOG_MS && AppState.currentState === 'active') {
+        debugLog('app', `fil JS bloqué ${gap} ms`);
+      }
+    }, STALL_TICK_MS);
+    return () => clearInterval(timer);
+  }, []);
+}
 
 /** After this long in the background, check the server connection on return. */
 const CHECK_AFTER_BACKGROUND_MS = 60_000;
@@ -45,6 +76,7 @@ function Root() {
   const reconnect = useAppStore(state => state.reconnect);
 
   const insets = useSafeAreaInsets();
+  useStallWatchdog();
   const backgroundSince = React.useRef<number | null>(null);
 
   React.useEffect(() => {
@@ -126,7 +158,7 @@ function Root() {
   }
 
   return (
-    <View style={styles.root}>
+    <View style={styles.root} onStartShouldSetResponderCapture={logTouch}>
       <View style={[styles.main, { paddingTop: insets.top }]}>
         <Banners />
         <View style={styles.content}>

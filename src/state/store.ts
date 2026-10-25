@@ -1794,6 +1794,7 @@ export const useAppStore = create<AppState>((set, get) => {
     },
 
     stopPlayback: async () => {
+      debugLog('play', `arrêt demandé (${get().current?.phase ?? 'rien en cours'})`);
       playSequence++;
       await resetPlayer();
       service?.cancelActive();
