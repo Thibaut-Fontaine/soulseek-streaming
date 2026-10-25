@@ -16,10 +16,11 @@ catalog request priority, dead-connection detection after sleep. Left:
   to first sound.
 - Background: screen off 5+ minutes without playback, then search; Wi-Fi →
   mobile data while playing. Check the app reconnects on its own.
-- Done since: search scoring runs in 8 ms slices (first-search freeze on a
-  modest phone). Still open, see the audit: audio bytes as base64 through
-  JS (~2.6 s CPU per 10 MB track without JIT), memory peaks at the end of a
-  download, and reading Android's exit reasons to diagnose silent closes.
+- Done since: search scoring in 8 ms slices, catalog-only search (Soulseek
+  searched on play), native base64 for audio bytes, 64 MB stream cap and
+  copy-free cache writes, exit-reason diagnostics. After a crash or freeze,
+  read Réglages → Journal de débogage. If tracks still stutter when they
+  start on modest phones: native (Kotlin) data path (see the audit).
 
 ## 2. Optional pre-download of the next track (setting, off by default)
 
