@@ -288,6 +288,8 @@ const LIST_SCORE = 0.55;
 const ENOUGH_RESULTS = 300;
 /** A tag bigger than this is not waited for (it would delay nothing, but costs memory). */
 const MAX_STREAM_TAG_BYTES = 4 * 1024 * 1024;
+/** Embedded covers above this are not decoded (JS-thread base64 cost). */
+const MAX_COVER_BYTES = 1024 * 1024;
 /** Background search for one catalog track's sources. */
 const RESOLVE_DURATION_MS = 7000;
 /** Stop a source search this long after the first good source arrived. */
@@ -428,11 +430,15 @@ export const useAppStore = create<AppState>((set, get) => {
       const tags = parseId3(buffer.read(0, size));
       setMeta(key, {
         title: tags?.title,
+      // Base64-encoding a cover runs on the JS thread: skip it when the
+      // catalog already gives a cover, and for unusually large pictures.
+      const picture =
+        tags?.picture && !get().trackForHit(hit)?.album?.cover.large && tags.picture.data.length <= MAX_COVER_BYTES
+          ? tags.picture
+          : null;
         artist: tags?.artist,
         album: tags?.album,
-        coverUri: tags?.picture
-          ? `data:${tags.picture.mime};base64,${Buffer.from(tags.picture.data).toString('base64')}`
-          : null,
+        coverUri: picture ? `data:${picture.mime};base64,${Buffer.from(picture.data).toString('base64')}` : null,
       });
     } catch {
       // The transfer ended or failed first: no cover for this one.
@@ -1400,8 +1406,10 @@ export const useAppStore = create<AppState>((set, get) => {
         if (sequence !== searchSequence) {
           return;
         }
-        const unified = unifyResults(networkQuery, collected, catalogTracks, LIST_SCORE);
+        const unified = unifyResults(networkQuery, collected, catalogTracks, LIST_SCORE, unifyScores);
         set(state => ({ groups: unified.groups, hitTracks: { ...state.hitTracks, ...unified.hitTracks } }));
+      // File/track scores of this search: each regroup only scores new files.
+      const unifyScores = new Map<string, number>();
       };
 
       const onBatch = (batch: SearchHit[]) => {

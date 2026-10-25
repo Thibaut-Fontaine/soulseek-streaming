@@ -237,3 +237,30 @@ describe('matching Soulseek files to catalog tracks', () => {
     expect(soulseekQueryFor(edit)).toBe('Daft Punk One More Time');
   });
 });
+
+describe('catalog request priority', () => {
+  test('a search goes before queued home suggestions', async () => {
+    const order: string[] = [];
+    let release: () => void = () => {};
+    const gate = new Promise<void>(resolve => (release = resolve));
+    const base = fixtureFetcher();
+    const catalog = createDeezerCatalog(async (url, signal) => {
+      order.push(url.replace('https://api.deezer.com', '').split('?')[0]);
+      await gate;
+      return base(url, signal);
+    });
+
+    // Home suggestions for several artists fill the queue first...
+    const home = ['27', '28', '29', '30', '31', '32'].map(id => catalog.artistWithRelated(`dz:${id}`).catch(() => null));
+    await new Promise(resolve => setTimeout(resolve, 50));
+    // ...then the user searches.
+    const search = catalog.search('daft punk');
+    release();
+    await Promise.all([search, ...home]);
+
+    const firstSearch = order.findIndex(path => path.startsWith('/search'));
+    const lastHome = order.map(path => path.startsWith('/artist')).lastIndexOf(true);
+    expect(firstSearch).toBeGreaterThan(-1);
+    expect(firstSearch).toBeLessThan(lastHome);
+  });
+});

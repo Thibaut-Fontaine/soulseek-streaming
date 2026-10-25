@@ -182,18 +182,109 @@ function isNumeric(token: string): boolean {
   return /^\d+$/.test(token);
 }
 
+/** One way of reading a file path (title, artist + title, folder + title...). */
+interface CandidateText {
+  tokens: string[];
+  /** Same, without track numbers / years (used when the query has no number). */
+  tokensNoNumbers: string[];
+  sorted: string;
+  sortedNoNumbers: string;
+}
+
+/** Everything `matchScore` needs from a hit, computed once per hit. */
+interface HitFeatures {
+  candidates: CandidateText[];
+  /** Words of the file name, for the version-marker penalty. */
+  fileWords: Set<string>;
+  /** Whole path, normalised: a cheap "does it mention this word" check. */
+  haystack: string;
+}
+
+interface QueryFeatures {
+  tokens: string[];
+  sorted: string;
+  words: Set<string>;
+  hasNumber: boolean;
+}
+
+// Searches score the same hits against the same queries many times while
+// results arrive (and once per catalog track): keep the parsed forms around.
+const hitFeatureCache = new WeakMap<SearchHit, HitFeatures>();
+const queryFeatureCache = new Map<string, QueryFeatures | null>();
+/** Scores already computed, per hit then per query. */
+const scoreCache = new WeakMap<SearchHit, Map<string, number>>();
+const QUERY_CACHE_SIZE = 64;
+
+function candidateText(normalized: string): CandidateText {
+  const tokens = normalized.split(' ').filter(token => token.length > 0);
+  const tokensNoNumbers = tokens.filter(token => !isNumeric(token));
+  return {
+    tokens,
+    tokensNoNumbers,
+    sorted: [...tokens].sort().join(' '),
+    sortedNoNumbers: [...tokensNoNumbers].sort().join(' '),
+  };
+}
+
+export function hitFeatures(hit: SearchHit): HitFeatures {
+  const cached = hitFeatureCache.get(hit);
+  if (cached) {
+    return cached;
+  }
+
+  const { artist, title } = parseTrackName(hit.filename);
+  // The artist is often only in a folder name ("Artist/Album/01 Title.mp3",
+  // "Artist - Album (2001)/01 Title.mp3"), so the two parent folders are
+  // tried with the title too.
+  const folders = hit.filename.replace(/\\/g, '/').split('/').filter(Boolean).slice(-3, -1);
+  const variants = new Set(
+    [
+      normalizeForMatch(title),
+      artist ? normalizeForMatch(`${artist} ${title}`) : '',
+      normalizeForMatch(baseName(hit.filename).replace(/\.[^.]+$/, '')),
+      ...folders.map(folder => normalizeForMatch(`${folder} ${title}`)),
+    ].filter(Boolean),
+  );
+
+  const features: HitFeatures = {
+    candidates: Array.from(variants, candidateText),
+    fileWords: new Set(normalizeForMatch(baseName(hit.filename)).split(' ').filter(Boolean)),
+    haystack: ` ${normalizeForMatch(hit.filename)} `,
+  };
+  hitFeatureCache.set(hit, features);
+  return features;
+}
+
+function queryFeatures(query: string): QueryFeatures | null {
+  if (queryFeatureCache.has(query)) {
+    return queryFeatureCache.get(query) ?? null;
+  }
+
+  const normalized = normalizeForMatch(query);
+  const tokens = normalized.split(' ').filter(Boolean);
+  const features = tokens.length
+    ? { tokens, sorted: sortTokens(normalized), words: new Set(tokens), hasNumber: tokens.some(isNumeric) }
+    : null;
+
+  if (queryFeatureCache.size >= QUERY_CACHE_SIZE) {
+    const oldest = queryFeatureCache.keys().next().value;
+    if (oldest !== undefined) {
+      queryFeatureCache.delete(oldest);
+    }
+  }
+  queryFeatureCache.set(query, features);
+  return features;
+}
+
 /**
  * Text match between the query and one candidate string, in [0, 1].
  * Combines how much of the query is found (coverage), how much of the
  * candidate is explained by the query (precision, so extra words cost), and an
  * order-insensitive Levenshtein similarity for typos.
  */
-function matchCandidate(queryTokens: string[], sortedQuery: string, candidate: string): number {
-  const queryHasNumber = queryTokens.some(isNumeric);
+function matchCandidate(query: QueryFeatures, candidate: CandidateText): number {
   // Track numbers and years the user did not type are noise, not extra words.
-  const candidateTokens = candidate
-    .split(' ')
-    .filter(token => token.length > 0 && (queryHasNumber || !isNumeric(token)));
+  const candidateTokens = query.hasNumber ? candidate.tokens : candidate.tokensNoNumbers;
 
   if (candidateTokens.length === 0) {
     return 0;
@@ -202,7 +293,7 @@ function matchCandidate(queryTokens: string[], sortedQuery: string, candidate: s
   const used = new Array<boolean>(candidateTokens.length).fill(false);
   let matched = 0;
 
-  for (const token of queryTokens) {
+  for (const token of query.tokens) {
     const index = candidateTokens.findIndex(
       (candidateToken, i) => !used[i] && tokensMatch(token, candidateToken),
     );
@@ -213,11 +304,17 @@ function matchCandidate(queryTokens: string[], sortedQuery: string, candidate: s
     }
   }
 
-  const coverage = matched / queryTokens.length;
-  const precision = used.filter(Boolean).length / candidateTokens.length;
-  const sortedCandidate = sortTokens(candidateTokens.join(' '));
-  const maxLength = Math.max(sortedQuery.length, sortedCandidate.length);
-  const fuzzy = maxLength > 0 ? 1 - levenshtein(sortedQuery, sortedCandidate) / maxLength : 0;
+  const coverage = matched / query.tokens.length;
+  const precision = matched / candidateTokens.length;
+
+  // Nothing in common: the typo term (weight 0.15) cannot make it a match.
+  if (matched === 0) {
+    return 0;
+  }
+
+  const sortedCandidate = query.hasNumber ? candidate.sorted : candidate.sortedNoNumbers;
+  const maxLength = Math.max(query.sorted.length, sortedCandidate.length);
+  const fuzzy = maxLength > 0 ? 1 - levenshtein(query.sorted, sortedCandidate) / maxLength : 0;
 
   return 0.6 * coverage + 0.25 * precision + 0.15 * fuzzy;
 }
@@ -227,44 +324,40 @@ function matchCandidate(queryTokens: string[], sortedQuery: string, candidate: s
  * are handled separately by `rankHits`.
  */
 export function matchScore(query: string, hit: SearchHit): number {
-  const normalizedQuery = normalizeForMatch(query);
+  let scores = scoreCache.get(hit);
+  const cached = scores?.get(query);
+  if (cached !== undefined) {
+    return cached;
+  }
 
-  if (!normalizedQuery) {
+  const score = computeMatchScore(query, hit);
+  if (!scores) {
+    scores = new Map();
+    scoreCache.set(hit, scores);
+  }
+  scores.set(query, score);
+  return score;
+}
+
+function computeMatchScore(query: string, hit: SearchHit): number {
+  const q = queryFeatures(query);
+
+  if (!q) {
     return 0;
   }
 
-  const queryTokens = normalizedQuery.split(' ').filter(Boolean);
-  const sortedQuery = sortTokens(normalizedQuery);
-  const { artist, title } = parseTrackName(hit.filename);
-  const normalizedTitle = normalizeForMatch(title);
-  // The artist is often only in a folder name ("Artist/Album/01 Title.mp3",
-  // "Artist - Album (2001)/01 Title.mp3"), so the two parent folders are
-  // tried with the title too.
-  const folders = hit.filename.replace(/\\/g, '/').split('/').filter(Boolean).slice(-3, -1);
-  const variants = new Set(
-    [
-      normalizedTitle,
-      artist ? normalizeForMatch(`${artist} ${title}`) : '',
-      normalizeForMatch(baseName(hit.filename).replace(/\.[^.]+$/, '')),
-      ...folders.map(folder => normalizeForMatch(`${folder} ${title}`)),
-    ].filter(Boolean),
-  );
-
+  const features = hitFeatures(hit);
   let best = 0;
 
-  for (const candidate of variants) {
-    best = Math.max(best, matchCandidate(queryTokens, sortedQuery, candidate));
+  for (const candidate of features.candidates) {
+    best = Math.max(best, matchCandidate(q, candidate));
   }
 
   // Penalise version markers found in the file name but not in the query.
-  const queryWords = new Set(queryTokens);
-  const fileWords = new Set(
-    normalizeForMatch(baseName(hit.filename)).split(' ').filter(Boolean),
-  );
   let penalty = 0;
 
-  for (const word of fileWords) {
-    if (VERSION_WORDS.has(word) && !queryWords.has(word)) {
+  for (const word of features.fileWords) {
+    if (VERSION_WORDS.has(word) && !q.words.has(word)) {
       penalty += VERSION_PENALTY;
     }
   }

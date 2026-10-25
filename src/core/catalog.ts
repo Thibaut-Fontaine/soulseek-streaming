@@ -127,25 +127,31 @@ class TtlCache<T> {
 }
 
 /** Spaces requests out and caps how many run at once. */
+/**
+ * What the user is waiting for (search, a page they opened) goes first;
+ * background work (home suggestions) waits behind it.
+ */
+export type Priority = 'high' | 'low';
+
 class Throttle {
   private running = 0;
   private lastStart = 0;
-  private readonly waiting: Array<() => void> = [];
+  private readonly waiting: Record<Priority, Array<() => void>> = { high: [], low: [] };
 
-  async run<T>(task: () => Promise<T>): Promise<T> {
-    await this.acquire();
+  async run<T>(task: () => Promise<T>, priority: Priority = 'high'): Promise<T> {
+    await this.acquire(priority);
 
     try {
       return await task();
     } finally {
       this.running--;
-      this.waiting.shift()?.();
+      (this.waiting.high.shift() ?? this.waiting.low.shift())?.();
     }
   }
 
-  private async acquire(): Promise<void> {
-    if (this.running >= MAX_PARALLEL) {
-      await new Promise<void>(resolve => this.waiting.push(resolve));
+  private async acquire(priority: Priority): Promise<void> {
+    if (this.running >= MAX_PARALLEL || (priority === 'low' && this.waiting.high.length > 0)) {
+      await new Promise<void>(resolve => this.waiting[priority].push(resolve));
     }
 
     this.running++;
@@ -329,7 +335,7 @@ export function createDeezerCatalog(fetchJson: JsonFetcher = defaultFetcher()): 
   const pending = new Map<string, Promise<unknown>>();
   const throttle = new Throttle();
 
-  async function get(path: string, ttlMs: number, attempt = 0): Promise<Json> {
+  async function get(path: string, ttlMs: number, priority: Priority = 'high', attempt = 0): Promise<Json> {
     const url = `${DEEZER_API}${path}`;
     const cached = cache.get(url);
 
@@ -342,7 +348,7 @@ export function createDeezerCatalog(fetchJson: JsonFetcher = defaultFetcher()): 
       return obj(await inFlight);
     }
 
-    const request = throttle.run(() => fetchJson(url));
+    const request = throttle.run(() => fetchJson(url), priority);
     pending.set(url, request);
 
     let json: Json;
@@ -359,7 +365,7 @@ export function createDeezerCatalog(fetchJson: JsonFetcher = defaultFetcher()): 
       // 4 = quota exceeded: wait and try again once or twice.
       if (code === 4 && attempt < 2) {
         await new Promise(resolve => setTimeout(resolve, 1500 * (attempt + 1)));
-        return get(path, ttlMs, attempt + 1);
+        return get(path, ttlMs, priority, attempt + 1);
       }
 
       // 800 = no data (unknown id).
@@ -465,8 +471,8 @@ export function createDeezerCatalog(fetchJson: JsonFetcher = defaultFetcher()): 
       const raw = requireId(catalogId);
       // Same URLs as the artist page, so opening it afterwards is instant.
       const [artistJson, related] = await Promise.all([
-        get(`/artist/${raw}`, PAGE_TTL_MS),
-        get(`/artist/${raw}/related?limit=20`, PAGE_TTL_MS).catch(() => ({})),
+        get(`/artist/${raw}`, PAGE_TTL_MS, 'low'),
+        get(`/artist/${raw}/related?limit=20`, PAGE_TTL_MS, 'low').catch(() => ({})),
       ]);
       return { artist: parseArtist(artistJson), related: list(related).map(parseArtist) };
     },

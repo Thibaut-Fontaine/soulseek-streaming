@@ -22,6 +22,29 @@ export interface CacheFs {
   move(from: string, to: string): Promise<void>;
   /** Bytes `start`..`end` of a file, base64. Used to read tags cheaply. */
   readSliceBase64?(path: string, start: number, end: number): Promise<string>;
+  /** Appends base64 data; lets big files be written in pieces. */
+  appendBase64?(path: string, data: string): Promise<void>;
+}
+
+/**
+ * Piece size when writing a track: base64-encoding a whole 10 MB MP3 in one
+ * go froze the JS thread for seconds on phones. A multiple of 3 bytes, so the
+ * base64 pieces join without padding in the middle.
+ */
+export const WRITE_CHUNK_BYTES = 192 * 1024;
+
+/** Writes bytes to `path` piece by piece, giving the UI a turn between pieces. */
+export async function writeBytesInChunks(fs: CacheFs, path: string, bytes: Uint8Array): Promise<void> {
+  if (!fs.appendBase64 || bytes.length <= WRITE_CHUNK_BYTES) {
+    await fs.writeBase64(path, Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength).toString('base64'));
+    return;
+  }
+
+  for (let offset = 0; offset < bytes.length; offset += WRITE_CHUNK_BYTES) {
+    const piece = bytes.subarray(offset, Math.min(bytes.length, offset + WRITE_CHUNK_BYTES));
+    const data = Buffer.from(piece.buffer, piece.byteOffset, piece.byteLength).toString('base64');
+    await (offset === 0 ? fs.writeBase64(path, data) : fs.appendBase64(path, data));
+  }
 }
 
 export interface CacheEntry {
@@ -81,6 +104,7 @@ export class TrackCache implements ShareLibrary {
   private loaded = false;
   private writing: Promise<void> = Promise.resolve();
   private readonly listeners = new Set<() => void>();
+  private readonly hits = new WeakMap<CacheEntry, SearchHit>();
 
   constructor(
     private readonly fs: CacheFs,
@@ -281,13 +305,22 @@ export class TrackCache implements ShareLibrary {
     return best?.entry ?? null;
   }
 
-  /** A SearchHit describing a cached entry, for display and matching. */
+  /**
+   * A SearchHit describing a cached entry, for display and matching. The same
+   * object is returned for an entry each time, so search scoring caches and
+   * memoised rows can reuse their work.
+   */
   asHit(entry: CacheEntry): SearchHit {
+    const known = this.hits.get(entry);
+    if (known) {
+      return known;
+    }
+
     // Downloads keep the peer's name (`sourceKey` is its hitKey), so the hit
     // matches the one in search results, likes and history.
     const separator = entry.sourceKey.indexOf('\u0000');
 
-    return {
+    const hit: SearchHit = {
       username: !entry.imported && separator > 0 ? entry.sourceKey.slice(0, separator) : '',
       filename: entry.sourceFilename,
       size: entry.size,
@@ -298,6 +331,8 @@ export class TrackCache implements ShareLibrary {
       queueLength: 0,
       extension: 'mp3',
     };
+    this.hits.set(entry, hit);
+    return hit;
   }
 
   markPlayed(entry: CacheEntry): void {
@@ -328,7 +363,11 @@ export class TrackCache implements ShareLibrary {
       }
 
       const file = `${Date.now().toString(36)}-${Math.floor(Math.random() * 1e6).toString(36)}.mp3`;
-      await this.fs.writeBase64(`${this.fs.dir}/${file}`, Buffer.from(bytes).toString('base64'));
+      // Written under a temporary name: an interrupted write never leaves a
+      // truncated track that looks complete.
+      const partial = `${this.fs.dir}/${file}.part`;
+      await writeBytesInChunks(this.fs, partial, bytes);
+      await this.fs.move(partial, `${this.fs.dir}/${file}`);
 
       const entry: CacheEntry = {
         sharedPath,

@@ -13,6 +13,7 @@ export function createBlobUtilFs(): CacheFs {
     exists: path => fs.exists(path),
     mkdir: path => fs.mkdir(path),
     writeBase64: (path, data) => fs.writeFile(path, data, 'base64'),
+    appendBase64: (path, data) => fs.appendFile(path, data, 'base64').then(() => undefined),
     readBase64: path => fs.readFile(path, 'base64'),
     writeText: (path, data) => fs.writeFile(path, data, 'utf8'),
     readText: path => fs.readFile(path, 'utf8'),

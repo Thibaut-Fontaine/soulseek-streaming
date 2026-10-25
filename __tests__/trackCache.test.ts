@@ -1,4 +1,6 @@
-import { TrackCache } from '../src/services/trackCache';
+import { Buffer } from 'buffer';
+
+import { TrackCache, WRITE_CHUNK_BYTES, writeBytesInChunks } from '../src/services/trackCache';
 import type { CacheFs } from '../src/services/trackCache';
 import type { SearchHit } from '../src/core/types';
 
@@ -196,5 +198,39 @@ describe('covers and tags of cached tracks', () => {
 
     expect((await cache.readMeta(entry)).title).toBe('Tagged');
     expect(entry.cover).toMatch(/\.cover\.jpg$/);
+  });
+});
+
+describe('writing big tracks', () => {
+  test('a track written in pieces reads back byte for byte', async () => {
+    const fs = memoryFs();
+    let appends = 0;
+    fs.appendBase64 = async (path, data) => {
+      appends++;
+      fs.files.set(path, (fs.files.get(path) ?? '') + data);
+    };
+    // Not a multiple of the piece size, so the last piece is short.
+    const bytes = Uint8Array.from({ length: WRITE_CHUNK_BYTES * 3 + 1234 }, (_, i) => (i * 7 + 3) % 256);
+
+    await writeBytesInChunks(fs, '/docs/tracks/a.mp3', bytes);
+
+    expect(appends).toBe(3);
+    const back = Buffer.from(fs.files.get('/docs/tracks/a.mp3') ?? '', 'base64');
+    expect(back.equals(Buffer.from(bytes))).toBe(true);
+  });
+
+  test('a saved download leaves no partial file behind', async () => {
+    const fs = memoryFs();
+    fs.appendBase64 = async (path, data) => void fs.files.set(path, (fs.files.get(path) ?? '') + data);
+    const cache = new TrackCache(fs, 100 * 1024 * 1024);
+    await cache.load();
+
+    const bytes = Uint8Array.from({ length: WRITE_CHUNK_BYTES * 2 + 5 }, (_, i) => i % 256);
+    const entry = await cache.save(hit('Music\\Artist\\Song.mp3'), bytes);
+
+    expect(entry).not.toBeNull();
+    expect([...fs.files.keys()].some(path => path.endsWith('.part'))).toBe(false);
+    const stored = Buffer.from(fs.files.get(`/docs/tracks/${entry!.file}`) ?? '', 'base64');
+    expect(stored.equals(Buffer.from(bytes))).toBe(true);
   });
 });
