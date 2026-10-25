@@ -117,6 +117,7 @@ const actions = {
   loadArtistPage: jest.fn(async () => {}),
   loadAlbumPage: jest.fn(async () => {}),
   loadHome: jest.fn(async () => {}),
+  searchFilesToo: jest.fn(async () => {}),
   playCatalogTrack: jest.fn(async () => {}),
   enqueueCatalogTrack: jest.fn(),
   resolveTrack: jest.fn(async () => ({ status: 'none' as const, sources: [] })),
@@ -151,6 +152,7 @@ beforeEach(() => {
     artistPages: {},
     albumPages: {},
     home: null,
+    fileSearch: 'idle',
     catalogResults: null,
     groups: [],
     resolutions: {},
@@ -340,6 +342,8 @@ describe('search with the catalog', () => {
       catalogResults: SEARCH_RESULT,
       groups: SEARCH_GROUPS,
       results: SEARCH_GROUPS.flatMap(group => group.sources),
+      // The user also asked for the files.
+      fileSearch: 'done',
     });
   }
 
@@ -380,11 +384,27 @@ describe('search with the catalog', () => {
     expect(actions.openPage).toHaveBeenCalledWith({ kind: 'artist', id: DAFT_PUNK.id, name: 'Daft Punk' });
   });
 
-  test('catalog answered before Soulseek: catalog tracks with no sources yet', () => {
+  test('catalog only: no source counts, files searched on demand', () => {
+    useAppStore.setState({
+      query: 'led zeppelin',
+      searchQuery: 'led zeppelin',
+      fileSearch: 'idle',
+      catalogResults: { ...SEARCH_RESULT, tracks: [GET_LUCKY] },
+    });
+    const screen = render(<SearchScreen />);
+    const out = text(screen);
+    expect(out).toContain('Get Lucky');
+    expect(out).not.toMatch(/Aucune source|\d+ sources?\b|recherche des sources/);
+    press(screen, 'Chercher les fichiers sur Soulseek');
+    expect(actions.searchFilesToo).toHaveBeenCalled();
+  });
+
+  test('file search running after the catalog: catalog tracks with no sources yet', () => {
     useAppStore.setState({
       query: 'get lucky',
       searchQuery: 'get lucky',
       searching: true,
+      fileSearch: 'running',
       catalogResults: { ...SEARCH_RESULT, tracks: [GET_LUCKY] },
     });
     const out = text(render(<SearchScreen />));

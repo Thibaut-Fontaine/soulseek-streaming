@@ -37,7 +37,14 @@ next track's *sources* are looked up in advance (one Soulseek search,
 - Decide whether the automatic source lookup for the next track should also
   move behind this setting.
 
-## 3. Check behaviour on older, low-RAM devices (last)
+## 3. One Soulseek search per album
+
+When an album starts playing, search "artist album" once and match the
+files to every track of the album (`sourcesForTrack` per track): albums are
+shared as folders, so one request usually covers them, from the same peer and
+quality. Only tracks still without a source get their own search on play.
+
+## 4. Check behaviour on older, low-RAM devices (last)
 
 - Test on an older / low-RAM Android device or emulator profile (2–3 GB RAM,
   older Android version; minSdk is 24).

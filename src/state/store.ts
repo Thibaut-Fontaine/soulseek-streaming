@@ -122,6 +122,11 @@ interface AppState {
   searchQuery: string;
   searchEmpty: boolean;
   searchError: string | null;
+  /**
+   * Soulseek file search for the current query. With the catalog on, a
+   * search only asks the catalog ('idle') unless the user asks for files.
+   */
+  fileSearch: 'idle' | 'running' | 'done';
   /** Ranked sources for the last search, best first. Includes weaker matches. */
   results: RankedHit[];
   /** Tracks already on the device that match the last search. */
@@ -180,6 +185,8 @@ interface AppState {
   setTab: (tab: Tab) => void;
   setQuery: (query: string) => void;
   runSearch: (query?: string) => Promise<void>;
+  /** Also searches Soulseek files for the current query (catalog results shown). */
+  searchFilesToo: () => Promise<void>;
   cancelSearch: () => void;
   /** Plays a source; on failure falls back to other sources of the same track. */
   playHit: (hit: SearchHit) => Promise<void>;
@@ -915,6 +922,189 @@ export const useAppStore = create<AppState>((set, get) => {
   }
 
 
+  /**
+   * Soulseek file search for a query: results are matched to the catalog
+   * tracks already known (if any) and scored in small slices.
+   */
+  async function searchFiles(
+    sequence: number,
+    rawQuery: string,
+    networkQuery: string,
+    catalogTracks: CatalogTrack[],
+    deviceResults: SearchHit[],
+  ): Promise<void> {
+    const searchService = service;
+    const online = !!searchService && get().connection === 'online';
+
+    if (!searchService || !online) {
+      set({
+        searching: false,
+        fileSearch: 'idle',
+        searchError:
+          deviceResults.length > 0 || get().catalogResults ? null : 'Non connecté au réseau Soulseek',
+      });
+      return;
+    }
+
+    searchAbort?.abort();
+    const abort = new AbortController();
+    searchAbort = abort;
+    const collected: SearchHit[] = [];
+    const collectedKeys = new Set<string>();
+    // File/track scores of this search: each regroup only scores new files.
+    const unifyScores = new Map<string, number>();
+    /**
+     * Files scored so far (against the query and the catalog tracks).
+     * Scoring runs in slices of SCORE_SLICE_MS so slow phones keep a
+     * responsive UI; results only show files already scored.
+     */
+    let scored = 0;
+    let pumpTimer: ReturnType<typeof setTimeout> | null = null;
+    let lastPublish = 0;
+    let drained: (() => void) | null = null;
+    // Accent-free spelling and the catalog's spelling run alongside.
+    const extraSearches: Promise<unknown>[] = [];
+    const [mainSpelling, ...otherSpellings] = soulseekSpellings(networkQuery);
+
+    const regroup = () => {
+      if (sequence !== searchSequence) {
+        return;
+      }
+      const ready = collected.slice(0, scored);
+      const unified = unifyResults(networkQuery, ready, catalogTracks, LIST_SCORE, unifyScores);
+      set(state => ({
+        results: rankHits(networkQuery, ready, LIST_SCORE),
+        groups: unified.groups,
+        hitTracks: { ...state.hitTracks, ...unified.hitTracks },
+      }));
+    };
+
+    const pump = () => {
+      pumpTimer = null;
+      if (sequence !== searchSequence) {
+        drained?.();
+        drained = null;
+        return;
+      }
+
+      const deadline = Date.now() + SCORE_SLICE_MS;
+      while (scored < collected.length && Date.now() < deadline) {
+        primeHitScores(networkQuery, collected[scored], catalogTracks, unifyScores);
+        scored++;
+      }
+
+      const done = scored >= collected.length;
+      if (done || Date.now() - lastPublish >= PUBLISH_EVERY_MS) {
+        lastPublish = Date.now();
+        regroup();
+      }
+
+      if (!done) {
+        // Give touches and rendering a turn before the next slice.
+        pumpTimer = setTimeout(pump, 0);
+      } else if (drained) {
+        const resolve = drained;
+        drained = null;
+        resolve();
+      }
+    };
+
+    const schedulePump = () => {
+      if (!pumpTimer) {
+        pumpTimer = setTimeout(pump, 0);
+      }
+    };
+
+    const onBatch = (batch: SearchHit[]) => {
+      if (sequence !== searchSequence) {
+        return;
+      }
+
+      for (const found of batch) {
+        const key = hitKey(found);
+        if (!collectedKeys.has(key)) {
+          collectedKeys.add(key);
+          collected.push(found);
+        }
+      }
+
+      schedulePump();
+
+      if (collected.length >= ENOUGH_RESULTS) {
+        searchService.cancelSearch();
+        abort.abort();
+      }
+    };
+
+    debugLog('play', `recherche de fichiers « ${networkQuery} » (saisie : « ${rawQuery} »)`);
+    set({ searching: true, fileSearch: 'running', searchEmpty: false, searchError: null });
+
+    // "daft pnk one mor time" finds nothing on Soulseek, where every word
+    // must be in the path: search the catalog's spelling too.
+    const top = catalogTracks[0];
+    const corrected = top ? soulseekQueryFor(top) : '';
+    const sameWords = (a: string, b: string) =>
+      normalizeForMatch(a).split(' ').sort().join(' ') === normalizeForMatch(b).split(' ').sort().join(' ');
+    const spellings = [
+      ...otherSpellings,
+      ...(corrected && !sameWords(corrected, networkQuery) ? soulseekSpellings(corrected) : []),
+    ];
+
+    try {
+      for (const spelling of spellings) {
+        debugLog('play', `recherche aussi « ${spelling} »`);
+        extraSearches.push(
+          searchService
+            .search(spelling, onBatch, SEARCH_DURATION_MS, { exclusive: false, signal: abort.signal })
+            .catch(() => {}),
+        );
+      }
+
+      await searchService.search(mainSpelling, onBatch, SEARCH_DURATION_MS);
+      await Promise.all(extraSearches);
+
+      if (sequence !== searchSequence) {
+        return;
+      }
+
+      // Let the last slices finish (still without blocking the UI).
+      if (scored < collected.length || pumpTimer) {
+        await new Promise<void>(resolve => {
+          drained = resolve;
+          schedulePump();
+        });
+      }
+
+      if (sequence !== searchSequence) {
+        return;
+      }
+
+      regroup();
+      const best = rankHits(networkQuery, collected, 0).slice(0, 5);
+      debugLog(
+        'play',
+        best.length > 0
+          ? `meilleurs candidats : ${best.map(r => `${r.score.toFixed(2)} ${r.hit.filename}`).join(' | ')}`
+          : 'aucun MP3 reçu des pairs',
+      );
+      debugLog('play', `recherche terminée : ${collected.length} MP3 reçus, ${get().results.length} retenus`);
+      set({
+        searching: false,
+        fileSearch: 'done',
+        searchEmpty: get().groups.length === 0 && deviceResults.length === 0,
+      });
+    } catch (error) {
+      debugLog('play', `recherche en erreur : ${errorMessage(error)}`);
+      if (sequence === searchSequence) {
+        set({ searching: false, fileSearch: 'done', searchError: errorMessage(error) });
+      }
+    } finally {
+      if (pumpTimer && sequence !== searchSequence) {
+        clearTimeout(pumpTimer);
+      }
+    }
+  }
+
   /* ---------------------------------------------------------------------- */
   /* Online catalog                                                          */
   /* ---------------------------------------------------------------------- */
@@ -1175,6 +1365,7 @@ export const useAppStore = create<AppState>((set, get) => {
     searchQuery: '',
     searchEmpty: false,
     searchError: null,
+    fileSearch: 'idle',
     results: [],
     deviceResults: [],
 
@@ -1450,170 +1641,19 @@ export const useAppStore = create<AppState>((set, get) => {
 
       updateLibrary(library => addRecentSearch(library, rawQuery));
 
-      const searchService = service;
-      const online = !!searchService && get().connection === 'online';
-
-      if (online && get().searching && get().searchQuery === networkQuery) {
+      if (get().searching && get().query === rawQuery) {
         return;
       }
 
       const sequence = ++searchSequence;
       searchAbort?.abort();
-      const abort = new AbortController();
-      searchAbort = abort;
-      const collected: SearchHit[] = [];
-      const collectedKeys = new Set<string>();
-      let catalogTracks: CatalogTrack[] = [];
-      // File/track scores of this search: each regroup only scores new files.
-      const unifyScores = new Map<string, number>();
-      /**
-       * Files scored so far (against the query and the current catalog
-       * tracks). Scoring runs in slices of SCORE_SLICE_MS so slow phones keep
-       * a responsive UI; results only show files already scored.
-       */
-      let scored = 0;
-      /** Files scored against the query: the flat result list. Survives a new catalog answer. */
-      let textScored = 0;
-      let pumpTimer: ReturnType<typeof setTimeout> | null = null;
-      let lastPublish = 0;
-      let drained: (() => void) | null = null;
-      // Accent-free spelling and the catalog's spelling run alongside.
-      const extraSearches: Promise<unknown>[] = [];
-      const [mainSpelling, ...otherSpellings] = soulseekSpellings(networkQuery);
-
-      const regroup = () => {
-        if (sequence !== searchSequence) {
-          return;
-        }
-        const ready = collected.slice(0, scored);
-        const unified = unifyResults(networkQuery, ready, catalogTracks, LIST_SCORE, unifyScores);
-        set(state => ({
-          results: rankHits(networkQuery, collected.slice(0, Math.max(scored, textScored)), LIST_SCORE),
-          groups: unified.groups,
-          hitTracks: { ...state.hitTracks, ...unified.hitTracks },
-        }));
-      };
-
-      const pump = () => {
-        pumpTimer = null;
-        if (sequence !== searchSequence) {
-          drained?.();
-          drained = null;
-          return;
-        }
-
-        const deadline = Date.now() + SCORE_SLICE_MS;
-        while (scored < collected.length && Date.now() < deadline) {
-          primeHitScores(networkQuery, collected[scored], catalogTracks, unifyScores);
-          scored++;
-          textScored = Math.max(textScored, scored);
-        }
-
-        const done = scored >= collected.length;
-        if (done || Date.now() - lastPublish >= PUBLISH_EVERY_MS) {
-          lastPublish = Date.now();
-          regroup();
-        }
-
-        if (!done) {
-          // Give touches and rendering a turn before the next slice.
-          pumpTimer = setTimeout(pump, 0);
-        } else if (drained) {
-          const resolve = drained;
-          drained = null;
-          resolve();
-        }
-      };
-
-      const schedulePump = () => {
-        if (!pumpTimer) {
-          pumpTimer = setTimeout(pump, 0);
-        }
-      };
-
-      const onBatch = (batch: SearchHit[]) => {
-        if (sequence !== searchSequence) {
-          return;
-        }
-
-        for (const found of batch) {
-          const key = hitKey(found);
-          if (!collectedKeys.has(key)) {
-            collectedKeys.add(key);
-            collected.push(found);
-          }
-        }
-
-        schedulePump();
-
-        if (collected.length >= ENOUGH_RESULTS) {
-          searchService?.cancelSearch();
-          abort.abort();
-        }
-      };
-
-      // The catalog answers in a fraction of a second: covers, proper titles,
-      // artists and albums, and the spelling Soulseek files are likely to use.
-      if (get().settings.catalogEnabled) {
-        const startedAt = Date.now();
-        catalog
-          .search(rawQuery)
-          .then(result => {
-            if (sequence !== searchSequence) {
-              return;
-            }
-
-            catalogTracks = result.tracks;
-            set({ catalogResults: result });
-            // Files are scored again against the catalog tracks, in slices
-            // (text scores are cached, only the track matching is new).
-            scored = 0;
-            regroup();
-            schedulePump();
-
-            // "daft pnk one mor time" finds nothing on Soulseek, where every
-            // word must be in the path. Search the catalog's spelling too.
-            const top = result.tracks[0];
-            const corrected = top ? soulseekQueryFor(top) : '';
-            const remaining = SEARCH_DURATION_MS - (Date.now() - startedAt);
-            const sameWords = (a: string, b: string) =>
-              normalizeForMatch(a).split(' ').sort().join(' ') === normalizeForMatch(b).split(' ').sort().join(' ');
-
-            if (corrected && online && get().searching && remaining > 2000 && !sameWords(corrected, networkQuery)) {
-              for (const spelling of soulseekSpellings(corrected)) {
-                debugLog('play', `recherche corrigée « ${spelling} »`);
-                extraSearches.push(
-                  searchService
-                    .search(spelling, onBatch, remaining, { exclusive: false, signal: abort.signal })
-                    .catch(() => {}),
-                );
-              }
-            }
-          })
-          .catch(error => {
-            debugLog('app', `catalogue : ${errorMessage(error)}`);
-          });
-      }
-
-      if (!searchService || !online) {
-        set({
-          query: rawQuery,
-          searchQuery: networkQuery,
-          deviceResults,
-          results: [],
-          groups: [],
-          catalogResults: null,
-          searchError: deviceResults.length > 0 || get().settings.catalogEnabled ? null : 'Non connecté au réseau Soulseek',
-        });
-        return;
-      }
-
-      debugLog('play', `recherche « ${networkQuery} » (saisie : « ${rawQuery} »)`);
+      searchAbort = null;
 
       set({
         query: rawQuery,
-        searching: true,
         searchQuery: networkQuery,
+        searching: true,
+        fileSearch: 'idle',
         searchEmpty: false,
         searchError: null,
         results: [],
@@ -1622,72 +1662,59 @@ export const useAppStore = create<AppState>((set, get) => {
         deviceResults,
       });
 
-      // Nothing plays until the user picks a result: the list fills in as
-      // peers answer, ranked by match then availability.
+      // With the catalog on, a search only asks the catalog: Soulseek is
+      // searched for a title when it is played (`resolveTrack`), so a broad
+      // search such as an artist name costs no Soulseek request at all.
+      if (get().settings.catalogEnabled) {
+        let result: CatalogSearchResult | null = null;
 
-      try {
-        for (const spelling of otherSpellings) {
-          debugLog('play', `recherche aussi « ${spelling} »`);
-          extraSearches.push(
-            searchService
-              .search(spelling, onBatch, SEARCH_DURATION_MS, { exclusive: false, signal: abort.signal })
-              .catch(() => {}),
-          );
-        }
-
-        await searchService.search(mainSpelling, onBatch, SEARCH_DURATION_MS);
-
-        // The catalog may add one while we wait: drain until none is left.
-        while (extraSearches.length > 0) {
-          await Promise.all(extraSearches.splice(0));
+        try {
+          result = await catalog.search(rawQuery);
+        } catch (error) {
+          debugLog('app', `catalogue : ${errorMessage(error)}`);
         }
 
         if (sequence !== searchSequence) {
           return;
         }
 
-        // Let the last slices finish (still without blocking the UI).
-        if (scored < collected.length || pumpTimer) {
-          await new Promise<void>(resolve => {
-            drained = resolve;
-            schedulePump();
+        const found = result && (result.tracks.length > 0 || result.artists.length > 0 || result.albums.length > 0);
+        if (result && found) {
+          set({
+            catalogResults: result,
+            groups: unifyResults(networkQuery, [], result.tracks, LIST_SCORE).groups,
+            searching: false,
           });
-        }
-
-        if (sequence !== searchSequence) {
           return;
         }
 
-        regroup();
-        const top = rankHits(networkQuery, collected, 0).slice(0, 5);
-        debugLog(
-          'play',
-          top.length > 0
-            ? `meilleurs candidats : ${top.map(r => `${r.score.toFixed(2)} ${r.hit.filename}`).join(' | ')}`
-            : 'aucun MP3 reçu des pairs',
-        );
-        debugLog('play', `recherche terminée : ${collected.length} MP3 reçus, ${get().results.length} retenus`);
-        set({
-          searching: false,
-          searchEmpty: get().groups.length === 0 && deviceResults.length === 0,
-        });
-      } catch (error) {
-        debugLog('play', `recherche en erreur : ${errorMessage(error)}`);
-        if (sequence === searchSequence) {
-          set({ searching: false, searchError: errorMessage(error) });
-        }
-      } finally {
-        if (pumpTimer && sequence !== searchSequence) {
-          clearTimeout(pumpTimer);
-        }
+        // Nothing in the catalog, or it is unreachable: search the files.
+        debugLog('play', 'rien dans le catalogue : recherche des fichiers sur Soulseek');
       }
+
+      await searchFiles(sequence, rawQuery, networkQuery, [], deviceResults);
+    },
+
+    searchFilesToo: async () => {
+      const { searchQuery, query, catalogResults, deviceResults, fileSearch } = get();
+      if (!searchQuery || fileSearch === 'running') {
+        return;
+      }
+
+      const sequence = ++searchSequence;
+      set({ searching: true });
+      await searchFiles(sequence, query, searchQuery, catalogResults?.tracks ?? [], deviceResults);
     },
 
     cancelSearch: () => {
       searchSequence++;
       searchAbort?.abort();
       service?.cancelSearch();
-      set({ searching: false, searchEmpty: false });
+      set(state => ({
+        searching: false,
+        searchEmpty: false,
+        fileSearch: state.fileSearch === 'running' ? 'done' : state.fileSearch,
+      }));
     },
 
     playHit: async hit => {

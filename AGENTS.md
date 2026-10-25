@@ -67,12 +67,15 @@ docs/                design notes (catalog research, catalog UI spec)
 showcase/, releases/ public landing page, QR code, published APK
 ```
 
-Data flow of a search: the query goes to the catalog and to Soulseek in
-parallel; the catalog's spelling is also searched on Soulseek (fixes typos);
-`unify.ts` groups incoming files under catalog tracks (`state.groups`). Playing
-a catalog track (`playCatalogTrack`) reuses known sources or runs a background
-Soulseek search (`resolveTrack`), then plays the best source with automatic
-fallback to the next ones.
+Data flow of a search: with the catalog on, a typed search only asks the
+catalog (no Soulseek request). Soulseek is searched for a title when it is
+played (`playCatalogTrack` → `resolveTrack`), which then plays the best source
+with automatic fallback to the next ones. A Soulseek file search for the query
+runs only when the catalog is off, finds nothing or is unreachable, or when
+the user taps "Chercher les fichiers sur Soulseek" (`searchFilesToo`); then
+the catalog's spelling is searched too (fixes typos) and `unify.ts` groups the
+files under catalog tracks (`state.groups`). Queries go out in lowercase, plus
+an accent-free copy when they have accents.
 
 ## Rules that must not regress
 
@@ -82,8 +85,9 @@ fallback to the next ones.
   zlib inflation; search caps (512 KiB compressed, 4 MiB inflated, 500 files,
   200 hits); the HTTP proxy yields every 2 × 64 KiB. Tabs must stay usable
   while a track loads.
-- **Minimise Soulseek requests**: one search per query (plus the catalog-
-  corrected one), peer address cache, queue polling at most once a minute, no
+- **Minimise Soulseek requests**: no Soulseek search while browsing the
+  catalog; one search per played title (plus the accent-free spelling);
+  peer address cache, queue polling at most once a minute, no
   distributed search tree, no chat or user watching.
 - Nothing plays until the user taps a result. Short files (< 45 s) are
   previews and are penalised.

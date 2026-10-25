@@ -163,15 +163,20 @@ describe('catalog search and playback', () => {
         { username: 'peer_c', filename: SPAM, behavior: 'ok' },
       ],
       async network => {
-        // A typo: the catalog's spelling is searched on Soulseek as well.
+        // A catalog search alone sends nothing to Soulseek.
         await useAppStore.getState().runSearch('fake artst stream me');
+        expect(network.searches).toEqual([]);
+        expect(useAppStore.getState().fileSearch).toBe('idle');
+        expect(useAppStore.getState().groups[0].track?.id).toBe(STREAM_ME.id);
+
+        // The user asks for the files too. A typo: the catalog's spelling is
+        // searched on Soulseek as well.
+        await useAppStore.getState().searchFilesToo();
         const state = useAppStore.getState();
 
+        expect(state.fileSearch).toBe('done');
         expect(state.catalogResults?.tracks[0].id).toBe(STREAM_ME.id);
-        expect(network.searches).toEqual([
-          'fake artst stream me',
-          'fake artist stream me',
-        ]);
+        expect([...network.searches].sort()).toEqual(['fake artist stream me', 'fake artst stream me']);
         expect(state.groups[0].track?.id).toBe(STREAM_ME.id);
         expect(
           state.groups[0].sources.map(source => source.hit.username),
@@ -295,6 +300,22 @@ describe('catalog search and playback', () => {
         expect(resolution.status).toBe('found');
       },
     );
+  });
+
+  test('a search the catalog cannot answer searches the files', async () => {
+    setCatalogProvider({
+      ...fakeCatalog,
+      search: async query => ({ query, tracks: [], artists: [], albums: [] }),
+    });
+    await withNetwork([{ username: 'peer_a', filename: TRACK, behavior: 'ok' }], async network => {
+      setCatalogProvider({
+        ...fakeCatalog,
+        search: async query => ({ query, tracks: [], artists: [], albums: [] }),
+      });
+      await useAppStore.getState().runSearch('stream me bootleg');
+      expect(network.searches).toEqual(['stream me bootleg']);
+      expect(useAppStore.getState().fileSearch).toBe('done');
+    });
   });
 
   test('a wrong length is not accepted as the track', async () => {

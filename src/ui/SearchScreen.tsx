@@ -16,7 +16,7 @@ import {
   sourcesLabel,
   trackArtists,
 } from './catalogFormat';
-import { ConnectionPill, Cover, ScanBar, StatusCard } from './components';
+import { Button, ConnectionPill, Cover, ScanBar, StatusCard } from './components';
 import { ACTION_LABELS } from './errors';
 import { Icon } from './Icon';
 import { groupSources } from './p2p';
@@ -41,6 +41,7 @@ export function SearchScreen() {
   const playTrack = useAppStore(state => state.playTrack);
   const openSheet = useAppStore(state => state.openSheet);
   const catalogResults = useAppStore(state => state.catalogResults);
+  const fileSearch = useAppStore(state => state.fileSearch);
 
   const online = connection === 'online';
   const groups = React.useMemo(() => groupSources(results.map(ranked => ranked.hit)), [results]);
@@ -111,7 +112,9 @@ export function SearchScreen() {
       {searching ? (
         <View style={styles.statusRow}>
           <Text style={styles.statusText} numberOfLines={1}>
-            {results.length > 0
+            {fileSearch !== 'running'
+              ? `Recherche de « ${searchQuery} » dans le catalogue…`
+              : results.length > 0
               ? `${results.length} fichier${results.length > 1 ? 's' : ''} trouvé${results.length > 1 ? 's' : ''} · les pairs répondent encore…`
               : `Recherche de « ${searchQuery} » sur le réseau…`}
           </Text>
@@ -241,6 +244,9 @@ function CatalogResults({ label }: { label: string }) {
   const groups = useAppStore(state => state.groups);
   const searchQuery = useAppStore(state => state.searchQuery);
   const searching = useAppStore(state => state.searching);
+  const fileSearch = useAppStore(state => state.fileSearch);
+  const searchFilesToo = useAppStore(state => state.searchFilesToo);
+  const online = useAppStore(state => state.connection === 'online');
   const playCatalogTrack = useAppStore(state => state.playCatalogTrack);
   const playTrack = useAppStore(state => state.playTrack);
   const openSheet = useAppStore(state => state.openSheet);
@@ -274,7 +280,12 @@ function CatalogResults({ label }: { label: string }) {
       {best?.kind === 'artist' ? (
         <BestArtist artist={best.artist} onPress={openArtist} />
       ) : best?.kind === 'track' ? (
-        <BestTrack track={best.track} sources={best.group?.sources.length ?? 0} searching={searching} onPlay={play} />
+        <BestTrack
+          track={best.track}
+          sources={fileSearch === 'idle' ? null : best.group?.sources.length ?? 0}
+          searching={searching}
+          onPlay={play}
+        />
       ) : null}
 
       {shown.length > 0 ? (
@@ -287,7 +298,8 @@ function CatalogResults({ label }: { label: string }) {
               <CatalogTrackRow
                 key={group.id}
                 track={group.track}
-                sources={group.sources.length}
+                // Before a file search, sources are only looked up on play.
+                sources={fileSearch === 'idle' ? undefined : group.sources.length}
                 onSources={() => showSources(group)}
                 onPress={play}
                 onMore={more}
@@ -337,6 +349,20 @@ function CatalogResults({ label }: { label: string }) {
           ) : null}
         </>
       ) : null}
+
+      {fileSearch === 'idle' && online ? (
+        <View style={styles.filesSearch}>
+          <Button
+            label="Chercher les fichiers sur Soulseek"
+            icon="search"
+            variant="ghost"
+            onPress={() => void searchFilesToo()}
+          />
+          <Text style={styles.filesSearchHint}>
+            Pour un titre absent du catalogue (remix, live, bootleg…). Sinon, les sources d’un titre sont cherchées quand vous l’écoutez.
+          </Text>
+        </View>
+      ) : null}
     </>
   );
 }
@@ -381,12 +407,20 @@ function BestTrack({
   onPlay,
 }: {
   track: CatalogTrack;
-  sources: number;
+  /** Null before any file search: sources are found when the track plays. */
+  sources: number | null;
   searching: boolean;
   onPlay: (track: CatalogTrack) => void;
 }) {
   const active = useIsCurrentCatalog(track);
-  const sourceText = sources > 0 ? sourcesLabel(sources) : searching ? 'recherche des sources…' : 'aucune source';
+  const sourceText =
+    sources === null
+      ? track.album?.title ?? ''
+      : sources > 0
+      ? sourcesLabel(sources)
+      : searching
+      ? 'recherche des sources…'
+      : 'aucune source';
 
   return (
     <>
@@ -410,7 +444,7 @@ function BestTrack({
           {track.title}
         </Text>
         <Text style={styles.bestMeta} numberOfLines={1}>
-          Titre · {trackArtists(track)} · {sourceText}
+          {['Titre', trackArtists(track), sourceText].filter(Boolean).join(' · ')}
         </Text>
         <View style={styles.bestPlay}>
           <Icon name="play" size={24} filled color={colors.onAccent} />
@@ -585,6 +619,15 @@ const styles = StyleSheet.create({
   },
   pressed: {
     opacity: 0.8,
+  },
+  filesSearch: {
+    paddingHorizontal: gutter,
+    marginTop: spacing.xl,
+    gap: spacing.sm,
+  },
+  filesSearchHint: {
+    ...type.caption,
+    color: colors.textDim,
   },
   sectionHint: {
     ...type.caption,
