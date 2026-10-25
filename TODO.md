@@ -5,7 +5,22 @@ Ordered by priority, highest first. When an item is done, remove it in the
 commit that finishes it (git history keeps the record); add new items where
 they belong in the order, with enough context to start without asking.
 
-## 1. Audit asynchronous behaviour and responsiveness: device checks
+## 1. Better Soulseek queries for played titles
+
+Research done: `docs/peer-search-research.md`. Peers match whole words, all
+required, over the full path. Fix, in this order:
+
+- `meaningfulVersion` judges each part of a version (`Live 1972; Remaster`
+  currently counts as neutral, so `live` is ignored when matching).
+- Clean titles: versions after ` - ` (`- Remastered 2011` sends `2011`),
+  years, quotes, words with apostrophes (`don't` → `don`), at most ~4
+  distinctive words; per-part version handling. Table of tests from real
+  Deezer titles.
+- Query ladder within the 9 s budget: artist + title → title only → artist +
+  album; very short titles go straight to artist + album; exclusions
+  (`-live -karaoke…`) for studio versions.
+
+## 2. Audit asynchronous behaviour and responsiveness: device checks
 
 Code audit and fixes done (`docs/performance-audit.md`): search scoring
 (534 ms → 5.5 ms per update), chunked download writes, cover decoding,
@@ -22,7 +37,7 @@ catalog request priority, dead-connection detection after sleep. Left:
   read Réglages → Journal de débogage. If tracks still stutter when they
   start on modest phones: native (Kotlin) data path (see the audit).
 
-## 2. Optional pre-download of the next track (setting, off by default)
+## 3. Optional pre-download of the next track (setting, off by default)
 
 Not implemented. Today, when an album/radio/top-tracks list plays, only the
 next track's *sources* are looked up in advance (one Soulseek search,
@@ -38,14 +53,14 @@ next track's *sources* are looked up in advance (one Soulseek search,
 - Decide whether the automatic source lookup for the next track should also
   move behind this setting.
 
-## 3. One Soulseek search per album
+## 4. One Soulseek search per album
 
 When an album starts playing, search "artist album" once and match the
 files to every track of the album (`sourcesForTrack` per track): albums are
 shared as folders, so one request usually covers them, from the same peer and
 quality. Only tracks still without a source get their own search on play.
 
-## 4. Check behaviour on older, low-RAM devices (last)
+## 5. Check behaviour on older, low-RAM devices (last)
 
 - Test on an older / low-RAM Android device or emulator profile (2–3 GB RAM,
   older Android version; minSdk is 24).

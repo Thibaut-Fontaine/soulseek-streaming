@@ -154,4 +154,5 @@ an accent-free copy when they have accents.
 | `docs/unified-catalog-research.md` | Why and how the catalog works (sources, matching) |
 | `docs/catalog-ui-design.md` | Catalog screens, components and states |
 | `docs/performance-audit.md` | Responsiveness audit: measurements, fixes, open checks |
+| `docs/peer-search-research.md` | How peers match queries; query problems and the planned ladder |
 | `docs/library-import-research.md` | Importing a library from other music apps (parked) |
