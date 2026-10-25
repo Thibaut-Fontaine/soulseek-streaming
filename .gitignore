@@ -76,3 +76,7 @@ yarn-error.log
 
 # Local agent worktrees
 .claude/worktrees/
+
+# Personal agent settings (not shared)
+CLAUDE.local.md
+.claude/settings.local.json

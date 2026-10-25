@@ -89,7 +89,14 @@ cd android && ./gradlew assembleRelease --no-daemon && cd ..
   si un slot est libre, orange si file d'attente) ; rien ne joue tant que
   vous n'avez pas touché un titre. Les morceaux déjà sur le téléphone
   apparaissent en premier.
-- **Pochettes** : la pochette et les tags (titre, artiste, album) sont lus
+- **Catalogue en ligne** (Deezer, désactivable) : un seul résultat par
+  morceau avec sa pochette, son titre et son album, et le nombre de sources
+  Soulseek ; pages artiste (titres populaires, discographie, artistes
+  similaires, radio) et album ; l'orthographe du catalogue est aussi cherchée
+  sur Soulseek, ce qui corrige les fautes de frappe. La durée distingue la
+  version album, l'edit radio ou le live. L'accueil ne montre que du contenu
+  lié à vos écoutes (vos artistes, leurs albums, artistes similaires).
+- **Pochettes sans catalogue** : la pochette et les tags (titre, artiste, album) sont lus
   dans le tag ID3 du MP3 (`src/core/id3.ts`), dès les premiers Ko reçus du
   pair. Le lecteur affiche la pochette en grand, floutée en fond.
 - **Bibliothèque** : titres likés, historique d'écoute, morceaux sur
@@ -350,6 +357,9 @@ src/
     soulseekClient.ts   serveur + pairs + transferts + reconnexion
     chunkBuffer.ts      tampon en mémoire avec attente progressive
     transfer.ts         état d'un téléchargement / flux
+    search.ts           nettoyage des requêtes, score Levenshtein, classement
+    catalog.ts          catalogue en ligne (Deezer) derrière CatalogProvider
+    unify.ts            association fichiers Soulseek ↔ morceaux du catalogue
   transport/
     rnTcpTransport.ts   sockets TCP React Native
     nodeTransport.ts    sockets TCP Node (tests)
@@ -378,7 +388,11 @@ src/
 
 - Les identifiants sont stockés via `react-native-keychain` (Keychain sur iOS,
   Keystore sur Android).
-- Aucune télémétrie, aucun service tiers, aucun compte supplémentaire.
+- Aucune télémétrie, aucun compte supplémentaire.
+- Seul service tiers : le catalogue en ligne Deezer (API publique, sans
+  compte), qui reçoit le texte des recherches et les identifiants d'artistes ou
+  d'albums consultés. Il se désactive dans **Réglages → Catalogue en ligne** ;
+  l'application n'utilise alors que les noms de fichiers Soulseek.
 - Le proxy HTTP n'écoute que sur `127.0.0.1` et sert uniquement les transferts
   en cours.
 - Le trafic Soulseek n'est pas chiffré (le protocole ne le prévoit pas) ; ne
