@@ -16,8 +16,10 @@ catalog request priority, dead-connection detection after sleep. Left:
   to first sound.
 - Background: screen off 5+ minutes without playback, then search; Wi-Fi →
   mobile data while playing. Check the app reconnects on its own.
-- If a stutter shows when the catalog answers late, split the first
-  regroup in chunks (see the audit's "Still open").
+- Done since: search scoring runs in 8 ms slices (first-search freeze on a
+  modest phone). Still open, see the audit: audio bytes as base64 through
+  JS (~2.6 s CPU per 10 MB track without JIT), memory peaks at the end of a
+  download, and reading Android's exit reasons to diagnose silent closes.
 
 ## 2. Optional pre-download of the next track (setting, off by default)
 
