@@ -7,22 +7,21 @@ they belong in the order, with enough context to start without asking.
 
 ## 1. Import a music library from a streaming app, selectively
 
-Let the user bring their existing library (liked tracks, playlists, albums,
-followed artists) from a music streaming service into SoulStream, choosing
-what to import rather than everything.
+Research done: `docs/library-import-research.md`. Conclusion: account linking
+is closed or impractical (Spotify dev mode = 5 users, Deezer app registration
+closed, Apple needs a server, no YouTube Music API), so import **files**:
+Spotify "Download your data", Exportify / TuneMyMusic / Soundiiz CSV, Google
+Takeout (YouTube Music), Apple Music text/M3U exports. Match to the Deezer
+catalog by ISRC (`track/isrc:…`, verified) or by search + existing matcher.
 
-- Research which services allow it and how: official APIs (Spotify, Deezer,
-  Apple Music, YouTube Music...), their auth requirements for a mobile app
-  without a server secret (PKCE), rate limits and terms; and export files
-  (CSV/JSON from the service or from tools such as Exportify, TuneMyMusic).
-- Selective import UI: pick playlists / albums / liked tracks, preview, then
-  import into the library (likes, playlists).
-- Match imported tracks to catalog tracks (`src/core/catalog.ts`, by ISRC
-  when available, else artist + title + duration); Soulseek sources are found
-  later, on play (`resolveTrack`), never in bulk (keep Soulseek requests low).
-- Needs a decision from the owner: a new external service and account link
-  (see `AGENTS.md`, "No other external service ... without an explicit
-  decision").
+Waiting on the owner:
+- confirm file import only (TIDAL account linking maybe later);
+- real sample exports (their own Spotify data zip, ideally a Takeout and a
+  TuneMyMusic CSV) to build the parsers; personal data stays out of the repo.
+
+Then, in order: importers in `src/core/importers/` with tests; library model
+change (saved tracks without a Soulseek hit, playlists, scalable storage);
+background matching with progress; selective import screen.
 
 ## 2. Audit asynchronous behaviour and responsiveness
 

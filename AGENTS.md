@@ -149,3 +149,4 @@ fallback to the next ones.
 | `README.md` | French user/developer documentation |
 | `docs/unified-catalog-research.md` | Why and how the catalog works (sources, matching) |
 | `docs/catalog-ui-design.md` | Catalog screens, components and states |
+| `docs/library-import-research.md` | Importing a library from other music apps (TODO 1) |
