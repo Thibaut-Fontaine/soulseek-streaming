@@ -27,6 +27,21 @@ export interface FakePeer {
   durationSec?: number;
   /** Delay before this peer's search response, in ms. */
   delayMs?: number;
+  /**
+   * Answer only searches that match the path like real peers do (default:
+   * answer every search): every word as a whole word, none of the `-words`.
+   */
+  matchQuery?: boolean;
+}
+
+/** Nicotine+-style matching: lowercase, punctuation as spaces, whole words. */
+export function peerMatches(query: string, path: string): boolean {
+  const words = (value: string) => value.toLowerCase().replace(/[^\p{L}\p{N}-]+/gu, ' ').split(' ').filter(Boolean);
+  const indexed = new Set(words(path.replace(/-/g, ' ')));
+  const terms = words(query);
+  const required = terms.filter(term => !term.startsWith('-'));
+  const excluded = terms.filter(term => term.startsWith('-')).map(term => term.slice(1));
+  return required.length > 0 && required.every(term => indexed.has(term)) && !excluded.some(term => indexed.has(term));
 }
 
 export const FILE_DATA = Uint8Array.from({ length: 300_000 }, (_, i) => (i * 31 + 7) % 251);
@@ -120,9 +135,10 @@ export class MultiPeerNetwork {
 
       case ServerCode.FILE_SEARCH: {
         const token = readU32(payload, 0);
-        this.searches.push(readString(payload, 4).value);
+        const query = readString(payload, 4).value;
+        this.searches.push(query);
 
-        for (const peer of this.peers) {
+        for (const peer of this.peers.filter(candidate => !candidate.matchQuery || peerMatches(query, candidate.filename))) {
           setTimeout(() => this.sendResults(peer, token), peer.delayMs ?? 20);
         }
 

@@ -22,7 +22,7 @@ import {
 import type { RankedHit } from '../core/search';
 import { createDeezerCatalog } from '../core/catalog';
 import type { CatalogProvider } from '../core/catalog';
-import { primeHitScores, soulseekQueryFor, sourcesForTrack, unifyResults } from '../core/unify';
+import { primeHitScores, soulseekLadder, soulseekQueryFor, sourcesForTrack, unifyResults } from '../core/unify';
 import type {
   AlbumPageData,
   ArtistPageData,
@@ -312,12 +312,14 @@ const MAX_STREAM_TAG_BYTES = 4 * 1024 * 1024;
 /** First Soulseek search for one catalog track's sources. */
 const RESOLVE_DURATION_MS = 6000;
 /**
- * Whole source lookup, title-only retry included. It used to reach 14 s
+ * Whole source lookup, every step of the query ladder included. It used to reach 14 s
  * with the music stopped and a spinner when a track had no source at all.
  */
 const RESOLVE_BUDGET_MS = 9000;
-/** A retry shorter than this would not find anything useful. */
+/** Time kept for each later step of the query ladder. */
 const MIN_RETRY_MS = 2000;
+/** A step shorter than this would not find anything useful. */
+const MIN_STEP_MS = 1500;
 /** "No source" is remembered this long, so moving on through a list does not search again. */
 const MISSING_TTL_MS = 5 * 60 * 1000;
 /** Stop a source search this long after the first good source arrived. */
@@ -1213,21 +1215,33 @@ export const useAppStore = create<AppState>((set, get) => {
       return { status: 'error', sources: [] };
     }
 
-    const query = soulseekQueryFor(track);
-    debugLog('play', `sources pour « ${track.artist.name} – ${track.title} » : recherche « ${query} »`);
+    // Query ladder (artist + title, title only, artist + album), stopping at
+    // the first step that finds a source, all inside one time budget.
+    const steps = soulseekLadder(track);
+    debugLog('play', `sources pour « ${track.artist.name} – ${track.title} » : ${steps.length} requête(s) possibles`);
     const startedAt = Date.now();
-    let sources = sourcesForTrack(track, await searchSources(track, query, RESOLVE_DURATION_MS));
+    let sources: RankedHit[] = [];
 
-    // Files often carry only the title; the length then confirms the match.
-    const titleOnly = formatSearchQuery(track.titleShort);
-    const remaining = RESOLVE_BUDGET_MS - (Date.now() - startedAt);
-    if (
-      sources.length === 0 &&
-      remaining >= MIN_RETRY_MS &&
-      normalizeForMatch(titleOnly).length >= 6 &&
-      titleOnly !== query
-    ) {
-      sources = sourcesForTrack(track, await searchSources(track, titleOnly, remaining));
+    for (const [index, step] of steps.entries()) {
+      const remaining = RESOLVE_BUDGET_MS - (Date.now() - startedAt);
+      const left = steps.length - index;
+      // The first step gets most of the time; later ones share what is left.
+      const duration =
+        index === 0
+          ? Math.min(RESOLVE_DURATION_MS, remaining - MIN_RETRY_MS * (left - 1))
+          : Math.floor(remaining / left);
+      if (duration < MIN_STEP_MS) {
+        break;
+      }
+      const hits = await searchSources(track, step.query, duration);
+      sources = sourcesForTrack(track, hits);
+      debugLog(
+        'play',
+        `étape ${index + 1}/${steps.length} (${step.kind}) « ${step.query} » : ${hits.length} fichier(s), ${sources.length} source(s)`,
+      );
+      if (sources.length > 0 || get().connection !== 'online') {
+        break;
+      }
     }
 
     debugLog('play', `${sources.length} source(s) pour « ${track.title} »`);

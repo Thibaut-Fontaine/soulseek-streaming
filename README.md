@@ -166,6 +166,14 @@ normalisation de la requête, suppression du bruit (« official video », bitrat
 etc.), puis scoring Levenshtein (ordre des mots, accents, petites fautes). Aucun
 service LLM externe n'est appelé avant l'envoi à Soulseek.
 
+Pour un titre du catalogue joué, les pairs ne renvoient un fichier que si chaque
+mot de la requête est un mot entier de son chemin. La requête garde donc
+l'artiste (sans « The ») et au plus quatre mots distinctifs du titre, sans
+versions neutres (« - Remastered 2011 », « Mono »), sans mots à apostrophe
+(« Don't »), et exclut `-live -karaoke -instrumental -remix` sauf si le titre en
+est un. Si rien ne correspond, l'app essaie le titre seul, puis artiste +
+album (`soulseekLadder` dans `src/core/unify.ts`), le tout en 9 s au plus.
+
 ### Flux d'un morceau
 
 1. `FileSearch` (code serveur 26) → les pairs qui possèdent le fichier se

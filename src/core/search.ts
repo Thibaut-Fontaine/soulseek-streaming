@@ -46,6 +46,22 @@ export function normalizeForMatch(value: string): string {
 }
 
 /**
+ * Peers split words on punctuation, so "Don't" is indexed as "don" + "t" and
+ * "Dont" as "dont": no single spelling finds both. Such words are dropped
+ * (the other words are enough), except French elisions ("l'amour"), whose
+ * second half is a word of its own.
+ */
+function apostropheWord(word: string): string {
+  const pieces = word.split(/['’`ʼ]/).filter(piece => piece.length > 0);
+  if (pieces.length <= 1) {
+    // "'Til", "'69", "N'": nothing is lost by dropping the apostrophe.
+    return pieces[0] ?? '';
+  }
+  const last = pieces[pieces.length - 1];
+  return pieces.length === 2 && pieces[0].length <= 2 && last.length >= 3 ? last : '';
+}
+
+/**
  * Formats a raw user query before it is sent to the Soulseek network.
  *
  * Peers return a file only if every word of the query appears in its path,
@@ -55,7 +71,8 @@ export function normalizeForMatch(value: string): string {
  * - dashes: a word starting with "-" means "exclude" on Soulseek, and a lone
  *   "-" can exclude every file on some clients;
  * - "feat." / "ft." / "featuring", written differently by each uploader;
- * - apostrophes and one-letter leftovers ("l'amour" → "amour").
+ * - words with an apostrophe ("don't"; "l'amour" → "amour") and one-letter
+ *   leftovers.
  * Accents are kept: file names usually carry them.
  */
 export function formatSearchQuery(raw: string): string {
@@ -69,8 +86,8 @@ export function formatSearchQuery(raw: string): string {
 
   const words = value
     .replace(/[_/|\\,;:!?"“”«»&+]+/g, ' ')
-    .replace(/['’`]/g, ' ')
     .split(/\s+/)
+    .map(apostropheWord)
     .map(word => word.replace(/^[-–—.]+|[-–—.]+$/g, ''))
     .filter(word => word.length > 0)
     .filter(word => !/^(feat|ft|featuring)$/i.test(word))
