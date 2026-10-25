@@ -15,6 +15,14 @@ export interface SearchHit extends FileInfo {
  */
 export const STREAMABLE_EXTENSIONS = new Set(['mp3']);
 
+/**
+ * Largest file the app streams. The whole file is held in memory while it
+ * plays (and copied in pieces to the cache): hour-long mixes of 100+ MB got
+ * the app killed on phones with little RAM. Bigger files are left out of
+ * search results.
+ */
+export const MAX_STREAM_BYTES = 64 * 1024 * 1024;
+
 export function extensionOf(filename: string): string {
   const base = filename.replace(/\\/g, '/').split('/').pop() ?? '';
   const dot = base.lastIndexOf('.');

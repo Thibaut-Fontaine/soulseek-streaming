@@ -33,16 +33,42 @@ export interface CacheFs {
  */
 export const WRITE_CHUNK_BYTES = 192 * 1024;
 
+/**
+ * Bytes to store, read piece by piece. A finished download is read straight
+ * from its stream buffer: copying a whole 10 MB file first doubled the
+ * memory needed at the end of every download.
+ */
+export interface ByteSource {
+  readonly length: number;
+  read(offset: number, length: number): Uint8Array;
+}
+
+export function bytesSource(bytes: Uint8Array): ByteSource {
+  return {
+    length: bytes.length,
+    read: (offset, length) => bytes.subarray(offset, Math.min(bytes.length, offset + length)),
+  };
+}
+
+function base64(piece: Uint8Array): string {
+  return Buffer.from(piece.buffer, piece.byteOffset, piece.byteLength).toString('base64');
+}
+
 /** Writes bytes to `path` piece by piece, giving the UI a turn between pieces. */
-export async function writeBytesInChunks(fs: CacheFs, path: string, bytes: Uint8Array): Promise<void> {
-  if (!fs.appendBase64 || bytes.length <= WRITE_CHUNK_BYTES) {
-    await fs.writeBase64(path, Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength).toString('base64'));
+export async function writeBytesInChunks(
+  fs: CacheFs,
+  path: string,
+  input: Uint8Array | ByteSource,
+): Promise<void> {
+  const source = input instanceof Uint8Array ? bytesSource(input) : input;
+
+  if (!fs.appendBase64 || source.length <= WRITE_CHUNK_BYTES) {
+    await fs.writeBase64(path, base64(source.read(0, source.length)));
     return;
   }
 
-  for (let offset = 0; offset < bytes.length; offset += WRITE_CHUNK_BYTES) {
-    const piece = bytes.subarray(offset, Math.min(bytes.length, offset + WRITE_CHUNK_BYTES));
-    const data = Buffer.from(piece.buffer, piece.byteOffset, piece.byteLength).toString('base64');
+  for (let offset = 0; offset < source.length; offset += WRITE_CHUNK_BYTES) {
+    const data = base64(source.read(offset, WRITE_CHUNK_BYTES));
     await (offset === 0 ? fs.writeBase64(path, data) : fs.appendBase64(path, data));
   }
 }
@@ -341,7 +367,8 @@ export class TrackCache implements ShareLibrary {
   }
 
   /** Stores a completed download. */
-  save(hit: SearchHit, bytes: Uint8Array): Promise<CacheEntry | null> {
+  save(hit: SearchHit, input: Uint8Array | ByteSource): Promise<CacheEntry | null> {
+    const bytes = input instanceof Uint8Array ? bytesSource(input) : input;
     return this.serialize(async () => {
       if (bytes.length === 0 || bytes.length > MAX_FILE_BYTES) {
         return null;
@@ -381,8 +408,8 @@ export class TrackCache implements ShareLibrary {
         lastPlayedAt: Date.now(),
       };
 
-      const size = id3TagSize(bytes);
-      await this.applyTags(entry, size > 0 ? parseId3(bytes.subarray(0, Math.min(bytes.length, size))) : null);
+      const size = id3TagSize(bytes.read(0, 10));
+      await this.applyTags(entry, size > 0 && size <= MAX_TAG_BYTES ? parseId3(bytes.read(0, size)) : null);
 
       this.entries.push(entry);
       await this.evict();

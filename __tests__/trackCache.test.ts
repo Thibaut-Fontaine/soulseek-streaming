@@ -233,4 +233,27 @@ describe('writing big tracks', () => {
     const stored = Buffer.from(fs.files.get(`/docs/tracks/${entry!.file}`) ?? '', 'base64');
     expect(stored.equals(Buffer.from(bytes))).toBe(true);
   });
+
+  test('a download is saved from its buffer in pieces, never copied whole', async () => {
+    const fs = memoryFs();
+    fs.appendBase64 = async (path, data) => void fs.files.set(path, (fs.files.get(path) ?? '') + data);
+    const cache = new TrackCache(fs, 100 * 1024 * 1024);
+    await cache.load();
+
+    const bytes = Uint8Array.from({ length: WRITE_CHUNK_BYTES * 4 + 7 }, (_, i) => (i * 13) % 256);
+    let largestRead = 0;
+    const source = {
+      length: bytes.length,
+      read: (offset: number, length: number) => {
+        largestRead = Math.max(largestRead, length);
+        return bytes.slice(offset, offset + length);
+      },
+    };
+
+    const entry = await cache.save(hit('Music\\Artist\\Piecewise.mp3'), source);
+
+    expect(largestRead).toBeLessThanOrEqual(WRITE_CHUNK_BYTES);
+    const stored = Buffer.from(fs.files.get(`/docs/tracks/${entry!.file}`) ?? '', 'base64');
+    expect(stored.equals(Buffer.from(bytes))).toBe(true);
+  });
 });

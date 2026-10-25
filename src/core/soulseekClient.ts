@@ -54,7 +54,7 @@ import { StreamTransfer } from './transfer';
 import { UploadManager } from './uploads';
 import type { ShareLibrary, UploadStatus } from './uploads';
 import type { TransferSnapshot } from './transfer';
-import { extensionOf, hitKey, isStreamableFile } from './types';
+import { MAX_STREAM_BYTES, extensionOf, hitKey, isStreamableFile } from './types';
 import type { SearchHit } from './types';
 import type { ListenerLike, SocketLike, Transport } from '../transport/types';
 
@@ -1055,7 +1055,7 @@ export class SoulseekClient extends Emitter<SoulseekClientEvents> {
         break;
       }
 
-      if (!isStreamableFile(file.filename)) {
+      if (!isStreamableFile(file.filename) || file.size > MAX_STREAM_BYTES) {
         continue;
       }
 

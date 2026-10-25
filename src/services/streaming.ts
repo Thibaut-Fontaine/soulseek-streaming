@@ -158,7 +158,10 @@ export class StreamingService {
 
       if (transfer) {
         void this.cache
-          .save(transfer.hit, transfer.buffer.read(0, transfer.buffer.total))
+          .save(transfer.hit, {
+            length: transfer.buffer.total,
+            read: (offset, length) => transfer.buffer.read(offset, length),
+          })
           .then(() => this.client?.refreshShares())
           .catch(() => {});
       }
