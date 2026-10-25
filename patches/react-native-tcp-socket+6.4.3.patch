@@ -1,0 +1,65 @@
+diff --git a/node_modules/react-native-tcp-socket/src/Socket.js b/node_modules/react-native-tcp-socket/src/Socket.js
+index 9913e5a..7262b91 100644
+--- a/node_modules/react-native-tcp-socket/src/Socket.js
++++ b/node_modules/react-native-tcp-socket/src/Socket.js
+@@ -5,6 +5,33 @@ import EventEmitter from 'eventemitter3';
+ import { Buffer } from 'buffer';
+ import { nativeEventEmitter, getNextId } from './Globals';
+ 
++// SoulStream patch: socket data crosses the bridge as base64. The JS Buffer
++// polyfill took seconds of JS-thread time per 10 MB on modest phones; use the
++// native (JSI) codec of react-native-quick-base64 when it is installed.
++let quickBase64 = null;
++try {
++    quickBase64 = require('react-native-quick-base64');
++} catch (e) {
++    quickBase64 = null;
++}
++
++/** @param {string} data */
++function decodeBase64(data) {
++    if (quickBase64 && typeof global.base64ToArrayBuffer === 'function') {
++        const bytes = quickBase64.toByteArray(data);
++        return Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength);
++    }
++    return Buffer.from(data, 'base64');
++}
++
++/** @param {Buffer} buffer */
++function encodeBase64(buffer) {
++    if (quickBase64 && typeof global.base64FromArrayBuffer === 'function') {
++        return quickBase64.fromByteArray(buffer);
++    }
++    return buffer.toString('base64');
++}
++
+ /**
+  * @typedef {"ascii" | "utf8" | "utf-8" | "utf16le" | "ucs2" | "ucs-2" | "base64" | "latin1" | "binary" | "hex"} BufferEncoding
+  *
+@@ -364,7 +391,7 @@ export default class Socket extends EventEmitter {
+         if (!ok) this.writableNeedDrain = true;
+         this._lastSentMsgId = currentMsgId;
+         this._bytesWritten += generatedBuffer.byteLength;
+-        NativeModules.TcpSockets.write(this._id, generatedBuffer.toString('base64'), currentMsgId);
++        NativeModules.TcpSockets.write(this._id, encodeBase64(generatedBuffer), currentMsgId);
+         return ok;
+     }
+ 
+@@ -409,7 +436,7 @@ export default class Socket extends EventEmitter {
+             let readBytes = 0;
+             let i = 0;
+             for (; i < this._pausedDataEvents.length; i++) {
+-                const evtData = Buffer.from(this._pausedDataEvents[i].data, 'base64');
++                const evtData = decodeBase64(this._pausedDataEvents[i].data);
+                 readBytes += evtData.byteLength;
+                 if (readBytes <= this.readableHighWaterMark) {
+                     buffArray.push(evtData);
+@@ -444,7 +471,7 @@ export default class Socket extends EventEmitter {
+         if (evt.id !== this._id) return;
+         this._resetTimeout();
+         if (!this._paused) {
+-            const bufferData = Buffer.from(evt.data, 'base64');
++            const bufferData = decodeBase64(evt.data);
+             this._bytesRead += bufferData.byteLength;
+             const finalData = this._encoding ? bufferData.toString(this._encoding) : bufferData;
+             this.emit('data', finalData);

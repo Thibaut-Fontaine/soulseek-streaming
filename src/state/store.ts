@@ -1,4 +1,3 @@
-import { Buffer } from 'buffer';
 import { PermissionsAndroid, Platform } from 'react-native';
 import TrackPlayer, { Event } from 'react-native-track-player';
 import { create } from 'zustand';
@@ -47,6 +46,7 @@ import { StreamingService } from '../services/streaming';
 import { debugLog } from '../services/debugLog';
 import { takeLastCrash } from '../services/crashReport';
 import { reportPreviousExits } from '../services/exitInfo';
+import { encodeBase64 } from '../services/fastBase64';
 import {
   EMPTY_LIBRARY,
   addRecentSearch,
@@ -466,7 +466,7 @@ export const useAppStore = create<AppState>((set, get) => {
         title: tags?.title,
         artist: tags?.artist,
         album: tags?.album,
-        coverUri: picture ? `data:${picture.mime};base64,${Buffer.from(picture.data).toString('base64')}` : null,
+        coverUri: picture ? `data:${picture.mime};base64,${encodeBase64(picture.data)}` : null,
       });
     } catch {
       // The transfer ended or failed first: no cover for this one.

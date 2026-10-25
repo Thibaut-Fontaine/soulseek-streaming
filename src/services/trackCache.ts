@@ -1,4 +1,3 @@
-import { Buffer } from 'buffer';
 
 import { id3TagSize, parseId3 } from '../core/id3';
 import type { Id3Tags } from '../core/id3';
@@ -7,6 +6,7 @@ import { AUTO_MATCH_SCORE, matchScore } from '../core/search';
 import { baseName, hitKey } from '../core/types';
 import type { SearchHit, TrackMeta } from '../core/types';
 import type { ShareFileReader, ShareLibrary } from '../core/uploads';
+import { decodeBase64, encodeBase64 } from './fastBase64';
 
 /** The few file operations the cache needs. Backed by react-native-blob-util. */
 export interface CacheFs {
@@ -51,7 +51,7 @@ export function bytesSource(bytes: Uint8Array): ByteSource {
 }
 
 function base64(piece: Uint8Array): string {
-  return Buffer.from(piece.buffer, piece.byteOffset, piece.byteLength).toString('base64');
+  return encodeBase64(piece);
 }
 
 /** Writes bytes to `path` piece by piece, giving the UI a turn between pieces. */
@@ -270,15 +270,14 @@ export class TrackCache implements ShareLibrary {
 
     try {
       if (this.fs.readSliceBase64) {
-        const head = Buffer.from(await this.fs.readSliceBase64(path, 0, 10), 'base64');
-        const size = id3TagSize(new Uint8Array(head));
+        const head = decodeBase64(await this.fs.readSliceBase64(path, 0, 10));
+        const size = id3TagSize(head);
 
         if (size > 0 && size <= MAX_TAG_BYTES) {
-          const bytes = Buffer.from(await this.fs.readSliceBase64(path, 0, size), 'base64');
-          tags = parseId3(new Uint8Array(bytes));
+          tags = parseId3(decodeBase64(await this.fs.readSliceBase64(path, 0, size)));
         }
       } else if (entry.size <= MAX_FILE_BYTES) {
-        tags = parseId3(new Uint8Array(Buffer.from(await this.fs.readBase64(path), 'base64')));
+        tags = parseId3(decodeBase64(await this.fs.readBase64(path)));
       }
     } catch {
       tags = null;
@@ -300,7 +299,7 @@ export class TrackCache implements ShareLibrary {
       const cover = `${entry.file.replace(/\.[^.]+$/, '')}.cover.${extension}`;
 
       try {
-        await this.fs.writeBase64(`${this.fs.dir}/${cover}`, Buffer.from(tags.picture.data).toString('base64'));
+        await this.fs.writeBase64(`${this.fs.dir}/${cover}`, encodeBase64(tags.picture.data));
         entry.cover = cover;
       } catch {
         entry.cover = null;
@@ -482,7 +481,7 @@ export class TrackCache implements ShareLibrary {
     try {
       // Tracks are a few MB; reading the whole file once is simpler and
       // faster over the bridge than many small reads.
-      bytes = new Uint8Array(Buffer.from(await this.fs.readBase64(`${this.fs.dir}/${entry.file}`), 'base64'));
+      bytes = decodeBase64(await this.fs.readBase64(`${this.fs.dir}/${entry.file}`));
     } catch {
       return null;
     }
