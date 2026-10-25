@@ -235,8 +235,11 @@ interface AppState {
    * track being resolved when it is reached.
    */
   playCatalogTrack: (track: CatalogTrack, context?: CatalogPlayContext) => Promise<void>;
-  /** Looks for Soulseek sources of a catalog track without playing it. */
-  resolveTrack: (track: CatalogTrack) => Promise<Resolution>;
+  /**
+   * Looks for Soulseek sources of a catalog track without playing it. A
+   * recent "no source" answer is reused unless `retryMissing` (the user asked).
+   */
+  resolveTrack: (track: CatalogTrack, retryMissing?: boolean) => Promise<Resolution>;
   /** Adds a catalog track to the queue (resolved when reached). */
   enqueueCatalogTrack: (track: CatalogTrack, first?: boolean) => void;
   /** Catalog track for a Soulseek file, when one was matched. */
@@ -292,8 +295,17 @@ const ENOUGH_RESULTS = 300;
 const MAX_COVER_BYTES = 1024 * 1024;
 /** A tag bigger than this is not waited for (it would delay nothing, but costs memory). */
 const MAX_STREAM_TAG_BYTES = 4 * 1024 * 1024;
-/** Background search for one catalog track's sources. */
-const RESOLVE_DURATION_MS = 7000;
+/** First Soulseek search for one catalog track's sources. */
+const RESOLVE_DURATION_MS = 6000;
+/**
+ * Whole source lookup, title-only retry included. It used to reach 14 s
+ * with the music stopped and a spinner when a track had no source at all.
+ */
+const RESOLVE_BUDGET_MS = 9000;
+/** A retry shorter than this would not find anything useful. */
+const MIN_RETRY_MS = 2000;
+/** "No source" is remembered this long, so moving on through a list does not search again. */
+const MISSING_TTL_MS = 5 * 60 * 1000;
 /** Stop a source search this long after the first good source arrived. */
 const RESOLVE_GRACE_MS = 1500;
 /** Sources found for a track are reused for this long. */
@@ -943,7 +955,7 @@ export const useAppStore = create<AppState>((set, get) => {
    * Stops early once a good source answered (plus a short grace period for
    * better ones), so playback starts quickly.
    */
-  async function searchSources(track: CatalogTrack, query: string): Promise<SearchHit[]> {
+  async function searchSources(track: CatalogTrack, query: string, durationMs: number): Promise<SearchHit[]> {
     const searchService = service;
     if (!searchService || get().connection !== 'online') {
       return [];
@@ -968,7 +980,7 @@ export const useAppStore = create<AppState>((set, get) => {
             grace = setTimeout(() => controller.abort(), RESOLVE_GRACE_MS);
           }
         },
-        RESOLVE_DURATION_MS,
+        durationMs,
         { exclusive: false, signal: controller.signal },
       );
     } finally {
@@ -995,12 +1007,19 @@ export const useAppStore = create<AppState>((set, get) => {
 
     const query = soulseekQueryFor(track);
     debugLog('play', `sources pour « ${track.artist.name} – ${track.title} » : recherche « ${query} »`);
-    let sources = sourcesForTrack(track, await searchSources(track, query));
+    const startedAt = Date.now();
+    let sources = sourcesForTrack(track, await searchSources(track, query, RESOLVE_DURATION_MS));
 
     // Files often carry only the title; the length then confirms the match.
     const titleOnly = formatSearchQuery(track.titleShort);
-    if (sources.length === 0 && normalizeForMatch(titleOnly).length >= 6 && titleOnly !== query) {
-      sources = sourcesForTrack(track, await searchSources(track, titleOnly));
+    const remaining = RESOLVE_BUDGET_MS - (Date.now() - startedAt);
+    if (
+      sources.length === 0 &&
+      remaining >= MIN_RETRY_MS &&
+      normalizeForMatch(titleOnly).length >= 6 &&
+      titleOnly !== query
+    ) {
+      sources = sourcesForTrack(track, await searchSources(track, titleOnly, remaining));
     }
 
     debugLog('play', `${sources.length} source(s) pour « ${track.title} »`);
@@ -1058,17 +1077,23 @@ export const useAppStore = create<AppState>((set, get) => {
   }
 
   async function playCatalog(
+  /**
+   * `byUser`: the user tapped this track (search it again even if it had no
+   * source a moment ago). Moving on through a list (end of track, next,
+   * skipping a missing track) reuses recent answers.
+   */
     track: CatalogTrack,
     context: CatalogPlayContext | undefined,
     skipped: number,
   ): Promise<void> {
+    byUser: boolean,
     const sequence = ++catalogPlaySequence;
     set({
       catalogPending: track,
       ...(context ? { catalogContext: context, context: null } : { catalogContext: null }),
     });
 
-    const resolution = await get().resolveTrack(track);
+    const resolution = await get().resolveTrack(track, byUser);
 
     if (sequence !== catalogPlaySequence) {
       return;
@@ -1096,7 +1121,7 @@ export const useAppStore = create<AppState>((set, get) => {
     const nextIndex = context ? nextCatalogIndex(context) : null;
     if (context && nextIndex !== null && skipped + 1 < MAX_SKIPPED_TRACKS && resolution.status !== 'error') {
       set({ notice: `${reason}, morceau suivant.` });
-      await playCatalog(context.tracks[nextIndex], { ...context, index: nextIndex }, skipped + 1);
+      await playCatalog(context.tracks[nextIndex], { ...context, index: nextIndex }, skipped + 1, false);
       return;
     }
 
@@ -1651,7 +1676,7 @@ export const useAppStore = create<AppState>((set, get) => {
           set({ notice: 'Fin de la liste de lecture.' });
           return;
         }
-        await get().playCatalogTrack(catalogContext.tracks[index], { ...catalogContext, index });
+        await playCatalog(catalogContext.tracks[index], { ...catalogContext, index }, 0, false);
         return;
       }
 
@@ -1690,7 +1715,7 @@ export const useAppStore = create<AppState>((set, get) => {
 
       if (catalogContext && catalogContext.index > 0) {
         const index = catalogContext.index - 1;
-        await get().playCatalogTrack(catalogContext.tracks[index], { ...catalogContext, index });
+        await playCatalog(catalogContext.tracks[index], { ...catalogContext, index }, 0, false);
         return;
       }
 
@@ -1834,11 +1859,14 @@ export const useAppStore = create<AppState>((set, get) => {
       set({ home: { status: 'ready', data: { artists: loaded.map(entry => entry.artist), similar } } });
     },
 
-    resolveTrack: track => {
+    resolveTrack: (track, retryMissing = false) => {
       const existing = get().resolutions[track.id];
-      const fresh = Date.now() - (resolvedAt.get(track.id) ?? 0) < RESOLUTION_TTL_MS;
+      const age = Date.now() - (resolvedAt.get(track.id) ?? 0);
 
-      if (existing?.status === 'found' && fresh) {
+      if (
+        (existing?.status === 'found' && age < RESOLUTION_TTL_MS) ||
+        (existing?.status === 'none' && !retryMissing && age < MISSING_TTL_MS)
+      ) {
         return Promise.resolve(existing);
       }
 
@@ -1865,7 +1893,7 @@ export const useAppStore = create<AppState>((set, get) => {
       return promise;
     },
 
-    playCatalogTrack: (track, context) => playCatalog(track, context, 0),
+    playCatalogTrack: (track, context) => playCatalog(track, context, 0, true),
 
     enqueueCatalogTrack: (track, first = false) => {
       set({ notice: 'Recherche de sources…' });

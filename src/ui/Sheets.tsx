@@ -245,7 +245,7 @@ function CatalogActions({ track, context }: { track: CatalogTrack; context?: Cat
     if (searching) {
       return;
     }
-    void resolveTrack(track).then(result => {
+    void resolveTrack(track, true).then(result => {
       if (result.sources.length > 0 && useAppStore.getState().sheet?.kind === 'catalogActions') {
         showSources(result.sources.map(ranked => ranked.hit));
       }

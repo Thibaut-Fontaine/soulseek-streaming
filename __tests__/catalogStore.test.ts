@@ -226,6 +226,64 @@ describe('catalog search and playback', () => {
     );
   });
 
+  test('queue, then back to an album track nobody shares (crash report)', async () => {
+    const OTHER = 'Music\\Fake Artist\\Album\\02 - Other Song.mp3';
+    const OTHER_SONG = track('dz:13', 'Other Song', 200);
+    const errors: unknown[] = [];
+    const onError = (error: unknown) => errors.push(error);
+    process.on('unhandledRejection', onError);
+    process.on('uncaughtException', onError);
+
+    try {
+      await withNetwork(
+        [
+          { username: 'peer_a', filename: TRACK, behavior: 'ok' },
+          { username: 'peer_b', filename: OTHER, behavior: 'ok' },
+        ],
+        async network => {
+          // Album: Stream Me, then a track nobody shares, then Other Song.
+          const album = { label: 'Album', tracks: [STREAM_ME, MISSING, OTHER_SONG], index: 0 };
+          await useAppStore.getState().playCatalogTrack(STREAM_ME, album);
+          await waitFor(() => useAppStore.getState().current?.phase === 'playing');
+          await waitFor(() => useAppStore.getState().resolutions[MISSING.id]?.status === 'none');
+
+          // The user queues another song, which plays next.
+          useAppStore.getState().enqueueCatalogTrack(OTHER_SONG);
+          await waitFor(() => useAppStore.getState().queue.length === 1);
+          await useAppStore.getState().playNext();
+          await waitFor(
+            () =>
+              useAppStore.getState().current?.hit.filename === OTHER &&
+              useAppStore.getState().current?.phase === 'playing',
+          );
+
+          // Back to the album: the next track is known to have no source.
+          // It is skipped at once (no second search) and the album goes on.
+          const searchesBefore = network.searches.length;
+          const started = Date.now();
+          await useAppStore.getState().playNext();
+          await waitFor(
+            () =>
+              useAppStore.getState().catalogContext?.index === 2 &&
+              useAppStore.getState().current?.phase === 'playing',
+          );
+
+          const state = useAppStore.getState();
+          expect(Date.now() - started).toBeLessThan(3000);
+          expect(network.searches.slice(searchesBefore)).not.toContain('Fake Artist Nowhere To Be Found');
+          expect(state.catalogPending).toBeNull();
+          expect(state.resolutions[MISSING.id].status).toBe('none');
+          expect(state.current?.hit.filename).toBe(OTHER);
+        },
+      );
+    } finally {
+      process.off('unhandledRejection', onError);
+      process.off('uncaughtException', onError);
+    }
+
+    expect(errors).toEqual([]);
+  });
+
   test('a wrong length is not accepted as the track', async () => {
     await withNetwork(
       [
