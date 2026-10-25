@@ -2,8 +2,13 @@
 
     <!-- Base application theme. -->
     <style name="AppTheme" parent="Theme.AppCompat.DayNight.NoActionBar">
-        <!-- Customize your theme here. -->
         <item name="android:editTextBackground">@drawable/rn_edit_text_material</item>
+        <!-- App colours instead of the AppCompat defaults (teal accent). -->
+        <item name="colorAccent">@color/app_accent</item>
+        <item name="colorControlActivated">@color/app_accent</item>
+        <item name="colorPrimary">@color/app_background</item>
+        <item name="colorPrimaryDark">@color/app_background</item>
+        <item name="android:windowBackground">@color/app_background</item>
     </style>
 
 </resources>

@@ -1,6 +1,5 @@
 import React from 'react';
 import {
-  Switch,
   Alert,
   KeyboardAvoidingView,
   Platform,
@@ -16,7 +15,7 @@ import LinearGradient from 'react-native-linear-gradient';
 
 import type { Settings } from '../services/settings';
 import { useAppStore } from '../state/store';
-import { Button, Dot, ListRow, StepSlider, connectionStatus } from './components';
+import { Button, Dot, ListRow, StepSlider, Toggle, connectionStatus } from './components';
 import { DebugLogScreen } from './DebugLogScreen';
 import { Icon } from './Icon';
 import { colors, formatBytes, gutter, radius, spacing, type } from './theme';
@@ -237,10 +236,9 @@ function MainSettings({
           subtitle="Pochettes, titres, artistes et suggestions via Deezer. Désactivé : uniquement les noms de fichiers Soulseek."
           last
           right={
-            <Switch
+            <Toggle
               value={settings.catalogEnabled}
               onValueChange={value => toggle({ catalogEnabled: value })}
-              trackColor={{ true: colors.accent, false: colors.surfaceHigh }}
               accessibilityLabel="Catalogue en ligne"
             />
           }
@@ -254,10 +252,9 @@ function MainSettings({
           title="Partager mes morceaux"
           subtitle="Beaucoup de pairs refusent d’envoyer à ceux qui ne partagent rien."
           right={
-            <Switch
+            <Toggle
               value={settings.shareEnabled}
               onValueChange={value => toggle({ shareEnabled: value })}
-              trackColor={{ true: colors.accent, false: colors.surfaceHigh }}
               accessibilityLabel="Partager mes morceaux"
             />
           }
@@ -266,11 +263,10 @@ function MainSettings({
           title="Envoyer uniquement en Wi-Fi"
           subtitle="Évite d’utiliser les données mobiles pour les autres."
           right={
-            <Switch
+            <Toggle
               value={settings.shareWifiOnly}
               onValueChange={value => toggle({ shareWifiOnly: value })}
               disabled={!settings.shareEnabled}
-              trackColor={{ true: colors.accent, false: colors.surfaceHigh }}
               accessibilityLabel="Envoyer uniquement en Wi-Fi"
             />
           }

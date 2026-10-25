@@ -8,6 +8,7 @@ import {
   PixelRatio,
   Pressable,
   StyleSheet,
+  Switch,
   Text,
   View,
 } from 'react-native';
@@ -820,6 +821,35 @@ export function ListRow({
       style={({ pressed }) => [styles.row, !last && styles.rowDivider, pressed && styles.rowPressed]}>
       {content}
     </Pressable>
+  );
+}
+
+/**
+ * On/off switch with the app's colours on both platforms. React Native's
+ * Switch only colours the track; without `thumbColor` Android paints the knob
+ * with its default theme accent (teal), which clashed with the app accent.
+ */
+export function Toggle({
+  value,
+  onValueChange,
+  disabled,
+  accessibilityLabel,
+}: {
+  value: boolean;
+  onValueChange: (value: boolean) => void;
+  disabled?: boolean;
+  accessibilityLabel: string;
+}) {
+  return (
+    <Switch
+      value={value}
+      onValueChange={onValueChange}
+      disabled={disabled}
+      accessibilityLabel={accessibilityLabel}
+      trackColor={{ true: colors.accent, false: colors.surfaceHigh }}
+      thumbColor={value ? colors.text : colors.textMuted}
+      ios_backgroundColor={colors.surfaceHigh}
+    />
   );
 }
 
