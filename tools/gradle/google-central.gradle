@@ -1,0 +1,35 @@
+// Gradle init script for Claude Code cloud sessions (installed into
+// ~/.gradle/init.d by .claude/hooks/session-start.sh). Not used by normal
+// local builds.
+//
+// Why: from the cloud sandbox, Maven Central (repo.maven.apache.org and
+// repo1.maven.org) rate-limits downloads. Gradle then sees random 429s and
+// 404s ("Could not find gson-2.11.0.jar") and the build fails at a different
+// artifact each time. Retrying or adding repo1.maven.org as a fallback does
+// not help. Google's mirror of Maven Central answers reliably.
+//
+// How: every Maven repository pointing at repo.maven.apache.org (what
+// mavenCentral() declares) is rewritten to the mirror. `configureEach` also
+// catches repositories declared later, and `beforeProject` reaches included
+// builds such as React Native's own Gradle plugin (node_modules/@react-native/
+// gradle-plugin), whose buildscript repositories a plain `allprojects` block
+// misses.
+def MIRROR = 'https://maven-central.storage-download.googleapis.com/maven2/'
+
+def rewire = { RepositoryHandler repos ->
+  repos.configureEach { repo ->
+    if (repo instanceof MavenArtifactRepository && repo.url.toString().contains('repo.maven.apache.org')) {
+      repo.url = MIRROR
+    }
+  }
+}
+
+beforeSettings { settings ->
+  rewire(settings.pluginManagement.repositories)
+  rewire(settings.dependencyResolutionManagement.repositories)
+}
+
+gradle.beforeProject { p ->
+  rewire(p.buildscript.repositories)
+  rewire(p.repositories)
+}

@@ -13,11 +13,12 @@ export const palette = {
   white: '#FFFFFF',
   text2: '#B9B4C4',
   text3: '#7D778A',
-  violet: '#A970FF',
-  violetPress: '#9255F7',
-  violetSoft: 'rgba(169,112,255,0.16)',
+  /** Brand colour, shared with the app icon (tools/icon/icon.mjs). */
+  amber: '#FFB627',
+  amberPress: '#F09D0E',
+  amberSoft: 'rgba(255,182,39,0.16)',
   green: '#3DDC84',
-  amber: '#FFB547',
+  orange: '#FF8A3D',
   red: '#FF5C6C',
   sky: '#5CC8FF',
 };
@@ -32,15 +33,16 @@ export const colors = {
   textMuted: palette.text2,
   textDim: palette.text3,
   textOnMedia: 'rgba(255,255,255,0.72)',
-  accent: palette.violet,
-  accentPressed: palette.violetPress,
-  accentSoft: palette.violetSoft,
-  /** Black label on violet, about 6.3:1 contrast. */
+  accent: palette.amber,
+  accentPressed: palette.amberPress,
+  accentSoft: palette.amberSoft,
+  /** Black label on amber, about 11:1 contrast. */
   onAccent: palette.black,
   success: palette.green,
   successSoft: 'rgba(61,220,132,0.14)',
-  warning: palette.amber,
-  warningSoft: 'rgba(255,181,71,0.14)',
+  /** Orange, not amber: amber is the accent. */
+  warning: palette.orange,
+  warningSoft: 'rgba(255,138,61,0.14)',
   danger: palette.red,
   dangerSoft: 'rgba(255,92,108,0.14)',
   info: palette.sky,
@@ -59,7 +61,7 @@ export const colors = {
   bgSoft: palette.elev1,
   card: palette.elev1,
   cardAlt: palette.elev2,
-  accentBright: palette.violet,
+  accentBright: palette.amber,
   cyan: palette.sky,
   cyanSoft: 'rgba(92,200,255,0.14)',
 };

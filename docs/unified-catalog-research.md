@@ -1,6 +1,6 @@
 # Unified catalog — research notes
 
-Date: 2026-10-24. Status: research only, nothing implemented yet.
+Date: 2026-10-24. Status: implemented in 1.3-beta (Deezer provider, `src/core/catalog.ts`; matching, `src/core/unify.ts`). Charts and genres were later removed: the home page only uses the listening history.
 
 ## Problem
 

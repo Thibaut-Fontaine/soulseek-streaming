@@ -1,8 +1,19 @@
 # SoulStream — after-compact handoff
 
-Last updated: **2026-10-23**. Read this first after a context compaction, together
-with the global agent rules (`~/agents-rules/AGENTS-GLOBAL.md`) and the VPS host
-rules (`ssh vps-ovh 'cat ~/AGENTS.md'`).
+Last updated: **2026-10-25**. Read this first after a context compaction, together
+with the repository's **`AGENTS.md`** (project rules, architecture, commands —
+the source of truth shared by every agent), the global agent rules
+(`~/agents-rules/AGENTS-GLOBAL.md`) and the VPS host rules
+(`ssh vps-ovh 'cat ~/AGENTS.md'`). This file keeps what is specific to the
+owner's workstation and VPS, plus history; when it disagrees with `AGENTS.md`,
+`AGENTS.md` wins.
+
+> **Update 2026-10-25 (branch `ccr-2c144a4c-rqe6bc`, version 1.3-beta2,
+> versionCode 5):** online catalog (Deezer) with unified search results,
+> artist/album pages, similar artists and a home page built only from the
+> listening history; search no longer auto-plays (the user taps a result).
+> Sections below still describe 0.2.0 where not updated; see `AGENTS.md`
+> and `docs/unified-catalog-research.md` / `docs/catalog-ui-design.md`.
 
 ---
 
@@ -406,6 +417,8 @@ Then:
   must work during loading.
 - Levenshtein + local pre-search formatting; **no external DeepSeek/LLM API**
   has been added and none should be added without an explicit decision.
+  The Deezer catalog API (metadata and covers, no key) was approved by the
+  owner on 2026-10-24; it can be turned off in Réglages.
 - Only MP3.
 - Minimize Soulseek requests.
 - The owner writes French; user-facing UI/docs are French, code comments English.

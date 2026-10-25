@@ -1,6 +1,5 @@
 import React from 'react';
 import {
-  Switch,
   Alert,
   KeyboardAvoidingView,
   Platform,
@@ -16,7 +15,7 @@ import LinearGradient from 'react-native-linear-gradient';
 
 import type { Settings } from '../services/settings';
 import { useAppStore } from '../state/store';
-import { Button, Dot, ListRow, StepSlider, connectionStatus } from './components';
+import { Button, Dot, ListRow, StepSlider, Toggle, connectionStatus } from './components';
 import { DebugLogScreen } from './DebugLogScreen';
 import { Icon } from './Icon';
 import { colors, formatBytes, gutter, radius, spacing, type } from './theme';
@@ -229,6 +228,23 @@ function MainSettings({
         </View>
       </View>
 
+      <Text style={styles.groupTitle}>Catalogue</Text>
+      <View style={styles.group}>
+        <ListRow
+          icon="disc"
+          title="Catalogue en ligne"
+          subtitle="Pochettes, titres, artistes et suggestions via Deezer. Désactivé : uniquement les noms de fichiers Soulseek."
+          last
+          right={
+            <Toggle
+              value={settings.catalogEnabled}
+              onValueChange={value => toggle({ catalogEnabled: value })}
+              accessibilityLabel="Catalogue en ligne"
+            />
+          }
+        />
+      </View>
+
       <Text style={styles.groupTitle}>Partage</Text>
       <View style={styles.group}>
         <ListRow
@@ -236,10 +252,9 @@ function MainSettings({
           title="Partager mes morceaux"
           subtitle="Beaucoup de pairs refusent d’envoyer à ceux qui ne partagent rien."
           right={
-            <Switch
+            <Toggle
               value={settings.shareEnabled}
               onValueChange={value => toggle({ shareEnabled: value })}
-              trackColor={{ true: colors.accent, false: colors.surfaceHigh }}
               accessibilityLabel="Partager mes morceaux"
             />
           }
@@ -248,11 +263,10 @@ function MainSettings({
           title="Envoyer uniquement en Wi-Fi"
           subtitle="Évite d’utiliser les données mobiles pour les autres."
           right={
-            <Switch
+            <Toggle
               value={settings.shareWifiOnly}
               onValueChange={value => toggle({ shareWifiOnly: value })}
               disabled={!settings.shareEnabled}
-              trackColor={{ true: colors.accent, false: colors.surfaceHigh }}
               accessibilityLabel="Envoyer uniquement en Wi-Fi"
             />
           }
@@ -279,24 +293,6 @@ function MainSettings({
           title="Vider les morceaux écoutés"
           onPress={confirmClear}
           danger
-          last
-        />
-      </View>
-
-      <Text style={styles.groupTitle}>Catalogue</Text>
-      <View style={styles.group}>
-        <ListRow
-          icon="search"
-          title="Catalogue en ligne (Deezer)"
-          subtitle="Titres, artistes, albums et pochettes via l’API publique Deezer. Désactivez pour n’envoyer aucune recherche à un service tiers."
-          right={
-            <Switch
-              value={settings.catalogEnabled}
-              onValueChange={value => toggle({ catalogEnabled: value })}
-              trackColor={{ true: colors.accent, false: colors.surfaceHigh }}
-              accessibilityLabel="Catalogue en ligne Deezer"
-            />
-          }
           last
         />
       </View>
@@ -354,7 +350,7 @@ function MainSettings({
   );
 }
 
-const PROFILE_FADE = ['rgba(169,112,255,0.35)', 'rgba(169,112,255,0)'];
+const PROFILE_FADE = ['rgba(255,182,39,0.28)', 'rgba(255,182,39,0)'];
 
 function NetworkSettings({ onBack }: { onBack: () => void }) {
   const settings = useAppStore(state => state.settings);

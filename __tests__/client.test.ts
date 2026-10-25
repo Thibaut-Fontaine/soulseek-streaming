@@ -85,6 +85,8 @@ class FakeNetwork {
   dropServerWhileStreaming = false;
   closedPort = 0;
   connectToPeerRequests = 0;
+  /** Stop answering, like a server behind a connection that died silently. */
+  mute = false;
 
   constructor() {
     this.server = net.createServer(socket => this.handleServerConnection(socket));
@@ -122,6 +124,9 @@ class FakeNetwork {
 
     socket.on('data', chunk => {
       for (const frame of framer.push(new Uint8Array(chunk))) {
+        if (this.mute) {
+          continue;
+        }
         this.handleServerFrame(socket, frame.code, frame.payload);
       }
     });
@@ -503,5 +508,34 @@ describe('SoulseekClient end to end (fake network)', () => {
 
   test('keeps streaming when the server connection drops', async () => {
     await runScenario(false, { dropServerWhileStreaming: true });
+  });
+});
+
+describe('server connection health check', () => {
+  test('keeps a live connection and drops a silent one', async () => {
+    const network = new FakeNetwork();
+    await network.start();
+    const client = new SoulseekClient({
+      transport: new NodeTransport(),
+      username: 'test-user',
+      password: 'test-pass',
+      listenPort: 0,
+      serverHost: '127.0.0.1',
+      serverPort: network.serverPort,
+    });
+
+    try {
+      expect((await client.connect()).ok).toBe(true);
+      await expect(client.checkConnection(2000)).resolves.toBe(true);
+      expect(client.state).toBe('online');
+
+      // The socket stays open but nothing comes back any more.
+      network.mute = true;
+      await expect(client.checkConnection(500)).resolves.toBe(false);
+      expect(['disconnected', 'reconnecting']).toContain(client.state);
+    } finally {
+      client.disconnect();
+      await network.stop();
+    }
   });
 });

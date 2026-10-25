@@ -1,4 +1,3 @@
-import { Buffer } from 'buffer';
 import { PermissionsAndroid, Platform } from 'react-native';
 import TrackPlayer, { Event } from 'react-native-track-player';
 import { create } from 'zustand';
@@ -18,19 +17,20 @@ import {
   normalizeForMatch,
   rankHits,
   similarity,
+  soulseekSpellings,
 } from '../core/search';
 import type { RankedHit } from '../core/search';
 import { createDeezerCatalog } from '../core/catalog';
 import type { CatalogProvider } from '../core/catalog';
-import { soulseekQueryFor, sourcesForTrack, unifyResults } from '../core/unify';
+import { primeHitScores, soulseekQueryFor, sourcesForTrack, unifyResults } from '../core/unify';
 import type {
   AlbumPageData,
   ArtistPageData,
-  BrowseData,
+  CatalogArtistRef,
   CatalogPlayContext,
   CatalogSearchResult,
   CatalogTrack,
-  GenrePageData,
+  HomeData,
   Loadable,
   Page,
   Resolution,
@@ -44,6 +44,9 @@ import { clearCredentials, loadCredentials, loadSettings, saveCredentials, saveS
 import type { Credentials, Settings } from '../services/settings';
 import { StreamingService } from '../services/streaming';
 import { debugLog } from '../services/debugLog';
+import { takeLastCrash } from '../services/crashReport';
+import { reportPreviousExits } from '../services/exitInfo';
+import { encodeBase64 } from '../services/fastBase64';
 import {
   EMPTY_LIBRARY,
   addRecentSearch,
@@ -75,7 +78,9 @@ export interface PlayContext {
 export type Sheet =
   | { kind: 'actions'; hit: SearchHit; context?: PlayContext }
   | { kind: 'sources'; hits: SearchHit[]; title: string; context?: PlayContext }
-  | { kind: 'queue' };
+  | { kind: 'queue' }
+  /** Menu of a catalog track (artist/album pages, catalog search results). */
+  | { kind: 'catalogActions'; track: CatalogTrack; context?: CatalogPlayContext };
 
 export interface CurrentPlayback {
   hit: SearchHit;
@@ -118,6 +123,11 @@ interface AppState {
   searchQuery: string;
   searchEmpty: boolean;
   searchError: string | null;
+  /**
+   * Soulseek file search for the current query. With the catalog on, a
+   * search only asks the catalog ('idle') unless the user asks for files.
+   */
+  fileSearch: 'idle' | 'running' | 'done';
   /** Ranked sources for the last search, best first. Includes weaker matches. */
   results: RankedHit[];
   /** Tracks already on the device that match the last search. */
@@ -148,12 +158,15 @@ interface AppState {
    * sources, then groups of files no catalog track matched. Best first.
    */
   groups: TrackGroup[];
-  /** Artist/album/genre pages pushed above the current tab, last on top. */
+  /** Artist and album pages pushed above the current tab, last on top. */
   pages: Page[];
   artistPages: Record<string, Loadable<ArtistPageData>>;
   albumPages: Record<string, Loadable<AlbumPageData>>;
-  genrePages: Record<string, Loadable<GenrePageData>>;
-  browse: Loadable<BrowseData> | null;
+  /**
+   * Home content from the listening history only (recent artists and
+   * artists like them); null when the catalog is off or nothing was played.
+   */
+  home: Loadable<HomeData> | null;
   /** Soulseek sources found for catalog tracks, by `CatalogTrack.id`. */
   resolutions: Record<string, Resolution>;
   /** Catalog track of each Soulseek file we matched, by `hitKey`. */
@@ -167,10 +180,14 @@ interface AppState {
   login: (username: string, password: string, keepSessionOnFailure?: boolean) => Promise<boolean>;
   logout: () => Promise<void>;
   reconnect: () => Promise<void>;
+  /** Verifies the server connection still works (after the app slept). */
+  checkConnection: () => Promise<void>;
   applySettings: (settings: Settings) => Promise<void>;
   setTab: (tab: Tab) => void;
   setQuery: (query: string) => void;
   runSearch: (query?: string) => Promise<void>;
+  /** Also searches Soulseek files for the current query (catalog results shown). */
+  searchFilesToo: () => Promise<void>;
   cancelSearch: () => void;
   /** Plays a source; on failure falls back to other sources of the same track. */
   playHit: (hit: SearchHit) => Promise<void>;
@@ -212,7 +229,7 @@ interface AppState {
    */
   importTracks: () => Promise<string | null>;
 
-  /** Pushes an artist/album/genre page and loads its data. */
+  /** Pushes an artist or album page and loads its data. */
   openPage: (page: Page) => void;
   /** Pops the top page. Returns false when there was none. */
   closePage: () => boolean;
@@ -220,16 +237,19 @@ interface AppState {
   closeAllPages: () => void;
   loadArtistPage: (id: string, force?: boolean) => Promise<void>;
   loadAlbumPage: (id: string, force?: boolean) => Promise<void>;
-  loadGenrePage: (id: string, force?: boolean) => Promise<void>;
-  loadBrowse: (force?: boolean) => Promise<void>;
+  /** Builds `home` from the recently played artists; no-op when unchanged. */
+  loadHome: (force?: boolean) => Promise<void>;
   /**
    * Plays a catalog track: finds Soulseek sources (or uses a cached copy) and
    * starts the best one. `context` makes next/previous walk the list, each
    * track being resolved when it is reached.
    */
   playCatalogTrack: (track: CatalogTrack, context?: CatalogPlayContext) => Promise<void>;
-  /** Looks for Soulseek sources of a catalog track without playing it. */
-  resolveTrack: (track: CatalogTrack) => Promise<Resolution>;
+  /**
+   * Looks for Soulseek sources of a catalog track without playing it. A
+   * recent "no source" answer is reused unless `retryMissing` (the user asked).
+   */
+  resolveTrack: (track: CatalogTrack, retryMissing?: boolean) => Promise<Resolution>;
   /** Adds a catalog track to the queue (resolved when reached). */
   enqueueCatalogTrack: (track: CatalogTrack, first?: boolean) => void;
   /** Catalog track for a Soulseek file, when one was matched. */
@@ -251,6 +271,8 @@ let catalog: CatalogProvider = createDeezerCatalog();
 /** Cancels the extra (corrected-query) search of the current search. */
 let searchAbort: AbortController | null = null;
 let catalogPlaySequence = 0;
+/** Recent artist ids the current `home` was built from. */
+let homeKey = '';
 /** Source searches in flight, by catalog track id. */
 const resolving = new Map<string, Promise<Resolution>>();
 /** When each resolution was made, by catalog track id. */
@@ -277,16 +299,35 @@ const MAX_ATTEMPTS = 5;
 const SEARCH_DURATION_MS = 10000;
 /** Weaker matches are still listed; the user picks what to play. */
 const LIST_SCORE = 0.55;
+/** Longest stretch of search scoring before the UI gets a turn. */
+const SCORE_SLICE_MS = 8;
+/** Search results on screen are refreshed at most this often. */
+const PUBLISH_EVERY_MS = 400;
 /** Stop listening for results once this many sources came in. */
 const ENOUGH_RESULTS = 300;
+/** Embedded covers above this are not decoded (JS-thread base64 cost). */
+const MAX_COVER_BYTES = 1024 * 1024;
 /** A tag bigger than this is not waited for (it would delay nothing, but costs memory). */
 const MAX_STREAM_TAG_BYTES = 4 * 1024 * 1024;
-/** Background search for one catalog track's sources. */
-const RESOLVE_DURATION_MS = 7000;
+/** First Soulseek search for one catalog track's sources. */
+const RESOLVE_DURATION_MS = 6000;
+/**
+ * Whole source lookup, title-only retry included. It used to reach 14 s
+ * with the music stopped and a spinner when a track had no source at all.
+ */
+const RESOLVE_BUDGET_MS = 9000;
+/** A retry shorter than this would not find anything useful. */
+const MIN_RETRY_MS = 2000;
+/** "No source" is remembered this long, so moving on through a list does not search again. */
+const MISSING_TTL_MS = 5 * 60 * 1000;
 /** Stop a source search this long after the first good source arrived. */
 const RESOLVE_GRACE_MS = 1500;
 /** Sources found for a track are reused for this long. */
 const RESOLUTION_TTL_MS = 10 * 60 * 1000;
+/** Recent artists shown on the home page. */
+const HOME_ARTISTS = 8;
+/** "Parce que vous écoutez …" shelves on the home page. */
+const HOME_SIMILAR_SHELVES = 2;
 /** Catalog tracks skipped in a row when none of them has a source. */
 const MAX_SKIPPED_TRACKS = 3;
 /** "Previous" restarts the track after this many seconds of playback. */
@@ -352,6 +393,25 @@ async function requestNotificationPermission(): Promise<void> {
   }
 }
 
+/** Artists of the recently played catalog tracks, most recent first. */
+export function recentArtists(library: Library, max = HOME_ARTISTS): CatalogArtistRef[] {
+  const artists: CatalogArtistRef[] = [];
+  const seen = new Set<string>();
+
+  for (const saved of library.history) {
+    const artist = saved.catalog?.artist;
+    if (artist?.id && !seen.has(artist.id)) {
+      seen.add(artist.id);
+      artists.push(artist);
+      if (artists.length >= max) {
+        break;
+      }
+    }
+  }
+
+  return artists;
+}
+
 export const useAppStore = create<AppState>((set, get) => {
   const metaLoading = new Set<string>();
 
@@ -396,13 +456,17 @@ export const useAppStore = create<AppState>((set, get) => {
       }
 
       const tags = parseId3(buffer.read(0, size));
+      // Base64-encoding a cover runs on the JS thread: skip it when the
+      // catalog already gives a cover, and for unusually large pictures.
+      const picture =
+        tags?.picture && !get().trackForHit(hit)?.album?.cover.large && tags.picture.data.length <= MAX_COVER_BYTES
+          ? tags.picture
+          : null;
       setMeta(key, {
         title: tags?.title,
         artist: tags?.artist,
         album: tags?.album,
-        coverUri: tags?.picture
-          ? `data:${tags.picture.mime};base64,${Buffer.from(tags.picture.data).toString('base64')}`
-          : null,
+        coverUri: picture ? `data:${picture.mime};base64,${encodeBase64(picture.data)}` : null,
       });
     } catch {
       // The transfer ended or failed first: no cover for this one.
@@ -859,6 +923,189 @@ export const useAppStore = create<AppState>((set, get) => {
   }
 
 
+  /**
+   * Soulseek file search for a query: results are matched to the catalog
+   * tracks already known (if any) and scored in small slices.
+   */
+  async function searchFiles(
+    sequence: number,
+    rawQuery: string,
+    networkQuery: string,
+    catalogTracks: CatalogTrack[],
+    deviceResults: SearchHit[],
+  ): Promise<void> {
+    const searchService = service;
+    const online = !!searchService && get().connection === 'online';
+
+    if (!searchService || !online) {
+      set({
+        searching: false,
+        fileSearch: 'idle',
+        searchError:
+          deviceResults.length > 0 || get().catalogResults ? null : 'Non connecté au réseau Soulseek',
+      });
+      return;
+    }
+
+    searchAbort?.abort();
+    const abort = new AbortController();
+    searchAbort = abort;
+    const collected: SearchHit[] = [];
+    const collectedKeys = new Set<string>();
+    // File/track scores of this search: each regroup only scores new files.
+    const unifyScores = new Map<string, number>();
+    /**
+     * Files scored so far (against the query and the catalog tracks).
+     * Scoring runs in slices of SCORE_SLICE_MS so slow phones keep a
+     * responsive UI; results only show files already scored.
+     */
+    let scored = 0;
+    let pumpTimer: ReturnType<typeof setTimeout> | null = null;
+    let lastPublish = 0;
+    let drained: (() => void) | null = null;
+    // Accent-free spelling and the catalog's spelling run alongside.
+    const extraSearches: Promise<unknown>[] = [];
+    const [mainSpelling, ...otherSpellings] = soulseekSpellings(networkQuery);
+
+    const regroup = () => {
+      if (sequence !== searchSequence) {
+        return;
+      }
+      const ready = collected.slice(0, scored);
+      const unified = unifyResults(networkQuery, ready, catalogTracks, LIST_SCORE, unifyScores);
+      set(state => ({
+        results: rankHits(networkQuery, ready, LIST_SCORE),
+        groups: unified.groups,
+        hitTracks: { ...state.hitTracks, ...unified.hitTracks },
+      }));
+    };
+
+    const pump = () => {
+      pumpTimer = null;
+      if (sequence !== searchSequence) {
+        drained?.();
+        drained = null;
+        return;
+      }
+
+      const deadline = Date.now() + SCORE_SLICE_MS;
+      while (scored < collected.length && Date.now() < deadline) {
+        primeHitScores(networkQuery, collected[scored], catalogTracks, unifyScores);
+        scored++;
+      }
+
+      const done = scored >= collected.length;
+      if (done || Date.now() - lastPublish >= PUBLISH_EVERY_MS) {
+        lastPublish = Date.now();
+        regroup();
+      }
+
+      if (!done) {
+        // Give touches and rendering a turn before the next slice.
+        pumpTimer = setTimeout(pump, 0);
+      } else if (drained) {
+        const resolve = drained;
+        drained = null;
+        resolve();
+      }
+    };
+
+    const schedulePump = () => {
+      if (!pumpTimer) {
+        pumpTimer = setTimeout(pump, 0);
+      }
+    };
+
+    const onBatch = (batch: SearchHit[]) => {
+      if (sequence !== searchSequence) {
+        return;
+      }
+
+      for (const found of batch) {
+        const key = hitKey(found);
+        if (!collectedKeys.has(key)) {
+          collectedKeys.add(key);
+          collected.push(found);
+        }
+      }
+
+      schedulePump();
+
+      if (collected.length >= ENOUGH_RESULTS) {
+        searchService.cancelSearch();
+        abort.abort();
+      }
+    };
+
+    debugLog('play', `recherche de fichiers « ${networkQuery} » (saisie : « ${rawQuery} »)`);
+    set({ searching: true, fileSearch: 'running', searchEmpty: false, searchError: null });
+
+    // "daft pnk one mor time" finds nothing on Soulseek, where every word
+    // must be in the path: search the catalog's spelling too.
+    const top = catalogTracks[0];
+    const corrected = top ? soulseekQueryFor(top) : '';
+    const sameWords = (a: string, b: string) =>
+      normalizeForMatch(a).split(' ').sort().join(' ') === normalizeForMatch(b).split(' ').sort().join(' ');
+    const spellings = [
+      ...otherSpellings,
+      ...(corrected && !sameWords(corrected, networkQuery) ? soulseekSpellings(corrected) : []),
+    ];
+
+    try {
+      for (const spelling of spellings) {
+        debugLog('play', `recherche aussi « ${spelling} »`);
+        extraSearches.push(
+          searchService
+            .search(spelling, onBatch, SEARCH_DURATION_MS, { exclusive: false, signal: abort.signal })
+            .catch(() => {}),
+        );
+      }
+
+      await searchService.search(mainSpelling, onBatch, SEARCH_DURATION_MS);
+      await Promise.all(extraSearches);
+
+      if (sequence !== searchSequence) {
+        return;
+      }
+
+      // Let the last slices finish (still without blocking the UI).
+      if (scored < collected.length || pumpTimer) {
+        await new Promise<void>(resolve => {
+          drained = resolve;
+          schedulePump();
+        });
+      }
+
+      if (sequence !== searchSequence) {
+        return;
+      }
+
+      regroup();
+      const best = rankHits(networkQuery, collected, 0).slice(0, 5);
+      debugLog(
+        'play',
+        best.length > 0
+          ? `meilleurs candidats : ${best.map(r => `${r.score.toFixed(2)} ${r.hit.filename}`).join(' | ')}`
+          : 'aucun MP3 reçu des pairs',
+      );
+      debugLog('play', `recherche terminée : ${collected.length} MP3 reçus, ${get().results.length} retenus`);
+      set({
+        searching: false,
+        fileSearch: 'done',
+        searchEmpty: get().groups.length === 0 && deviceResults.length === 0,
+      });
+    } catch (error) {
+      debugLog('play', `recherche en erreur : ${errorMessage(error)}`);
+      if (sequence === searchSequence) {
+        set({ searching: false, fileSearch: 'done', searchError: errorMessage(error) });
+      }
+    } finally {
+      if (pumpTimer && sequence !== searchSequence) {
+        clearTimeout(pumpTimer);
+      }
+    }
+  }
+
   /* ---------------------------------------------------------------------- */
   /* Online catalog                                                          */
   /* ---------------------------------------------------------------------- */
@@ -905,33 +1152,44 @@ export const useAppStore = create<AppState>((set, get) => {
    * Stops early once a good source answered (plus a short grace period for
    * better ones), so playback starts quickly.
    */
-  async function searchSources(track: CatalogTrack, query: string): Promise<SearchHit[]> {
+  async function searchSources(track: CatalogTrack, query: string, durationMs: number): Promise<SearchHit[]> {
     const searchService = service;
     if (!searchService || get().connection !== 'online') {
       return [];
     }
 
     const collected: SearchHit[] = [];
+    const seen = new Set<string>();
     const controller = new AbortController();
     let grace: ReturnType<typeof setTimeout> | null = null;
     let goodFree = 0;
 
-    try {
-      await searchService.search(
-        query,
-        batch => {
-          collected.push(...batch);
-          const good = sourcesForTrack(track, batch);
+    const onBatch = (incoming: SearchHit[]) => {
+      // Several spellings run at once: the same file can come back twice.
+      const batch = incoming.filter(found => {
+        const key = hitKey(found);
+        if (seen.has(key)) {
+          return false;
+        }
+        seen.add(key);
+        return true;
+      });
+      collected.push(...batch);
+      const good = sourcesForTrack(track, batch);
           goodFree += good.filter(source => source.hit.slotFree).length;
 
-          if (goodFree >= 3) {
-            controller.abort();
-          } else if (good.length > 0 && !grace) {
-            grace = setTimeout(() => controller.abort(), RESOLVE_GRACE_MS);
-          }
-        },
-        RESOLVE_DURATION_MS,
-        { exclusive: false, signal: controller.signal },
+      if (goodFree >= 3) {
+        controller.abort();
+      } else if (good.length > 0 && !grace) {
+        grace = setTimeout(() => controller.abort(), RESOLVE_GRACE_MS);
+      }
+    };
+
+    try {
+      await Promise.all(
+        soulseekSpellings(query).map(spelling =>
+          searchService.search(spelling, onBatch, durationMs, { exclusive: false, signal: controller.signal }),
+        ),
       );
     } finally {
       if (grace) {
@@ -957,12 +1215,19 @@ export const useAppStore = create<AppState>((set, get) => {
 
     const query = soulseekQueryFor(track);
     debugLog('play', `sources pour « ${track.artist.name} – ${track.title} » : recherche « ${query} »`);
-    let sources = sourcesForTrack(track, await searchSources(track, query));
+    const startedAt = Date.now();
+    let sources = sourcesForTrack(track, await searchSources(track, query, RESOLVE_DURATION_MS));
 
     // Files often carry only the title; the length then confirms the match.
     const titleOnly = formatSearchQuery(track.titleShort);
-    if (sources.length === 0 && normalizeForMatch(titleOnly).length >= 6 && titleOnly !== query) {
-      sources = sourcesForTrack(track, await searchSources(track, titleOnly));
+    const remaining = RESOLVE_BUDGET_MS - (Date.now() - startedAt);
+    if (
+      sources.length === 0 &&
+      remaining >= MIN_RETRY_MS &&
+      normalizeForMatch(titleOnly).length >= 6 &&
+      titleOnly !== query
+    ) {
+      sources = sourcesForTrack(track, await searchSources(track, titleOnly, remaining));
     }
 
     debugLog('play', `${sources.length} source(s) pour « ${track.title} »`);
@@ -985,7 +1250,7 @@ export const useAppStore = create<AppState>((set, get) => {
   }
 
   async function loadPage<T>(
-    field: 'artistPages' | 'albumPages' | 'genrePages',
+    field: 'artistPages' | 'albumPages',
     id: string,
     force: boolean,
     fetchPage: () => Promise<T>,
@@ -1019,10 +1284,16 @@ export const useAppStore = create<AppState>((set, get) => {
     return context.index + 1 < context.tracks.length ? context.index + 1 : null;
   }
 
+  /**
+   * `byUser`: the user tapped this track (search it again even if it had no
+   * source a moment ago). Moving on through a list (end of track, next,
+   * skipping a missing track) reuses recent answers.
+   */
   async function playCatalog(
     track: CatalogTrack,
     context: CatalogPlayContext | undefined,
     skipped: number,
+    byUser: boolean,
   ): Promise<void> {
     const sequence = ++catalogPlaySequence;
     set({
@@ -1030,7 +1301,7 @@ export const useAppStore = create<AppState>((set, get) => {
       ...(context ? { catalogContext: context, context: null } : { catalogContext: null }),
     });
 
-    const resolution = await get().resolveTrack(track);
+    const resolution = await get().resolveTrack(track, byUser);
 
     if (sequence !== catalogPlaySequence) {
       return;
@@ -1058,7 +1329,7 @@ export const useAppStore = create<AppState>((set, get) => {
     const nextIndex = context ? nextCatalogIndex(context) : null;
     if (context && nextIndex !== null && skipped + 1 < MAX_SKIPPED_TRACKS && resolution.status !== 'error') {
       set({ notice: `${reason}, morceau suivant.` });
-      await playCatalog(context.tracks[nextIndex], { ...context, index: nextIndex }, skipped + 1);
+      await playCatalog(context.tracks[nextIndex], { ...context, index: nextIndex }, skipped + 1, false);
       return;
     }
 
@@ -1095,6 +1366,7 @@ export const useAppStore = create<AppState>((set, get) => {
     searchQuery: '',
     searchEmpty: false,
     searchError: null,
+    fileSearch: 'idle',
     results: [],
     deviceResults: [],
 
@@ -1113,8 +1385,7 @@ export const useAppStore = create<AppState>((set, get) => {
     pages: [],
     artistPages: {},
     albumPages: {},
-    genrePages: {},
-    browse: null,
+    home: null,
     resolutions: {},
     hitTracks: {},
     catalogContext: null,
@@ -1129,6 +1400,26 @@ export const useAppStore = create<AppState>((set, get) => {
       initStarted = true;
 
       try {
+        const lastCrash = await takeLastCrash();
+        if (lastCrash) {
+          debugLog('app', `— plantage du ${new Date(lastCrash.at).toLocaleString('fr-FR')} : ${lastCrash.message}`);
+          for (const line of lastCrash.log) {
+            debugLog('app', `  | ${line}`);
+          }
+          if (lastCrash.stack) {
+            debugLog('app', `  pile : ${lastCrash.stack.split('\n').slice(0, 8).join(' ← ')}`);
+          }
+          set({
+            notice: 'SoulStream s’est fermé après une erreur. Détails dans Réglages → Journal de débogage.',
+          });
+        }
+
+        // Low-memory kills and native crashes leave no JavaScript trace.
+        const exitNotice = await reportPreviousExits();
+        if (exitNotice && !lastCrash) {
+          set({ notice: exitNotice });
+        }
+
         const settings = await loadSettings();
         const library = await loadLibrary();
         const hitTracks: Record<string, CatalogTrack> = {};
@@ -1291,6 +1582,13 @@ export const useAppStore = create<AppState>((set, get) => {
       }
     },
 
+    checkConnection: async () => {
+      if (service && get().connection === 'online') {
+        const alive = await service.checkConnection();
+        debugLog('net', alive ? 'connexion au serveur vérifiée' : 'connexion au serveur perdue, reconnexion');
+      }
+    },
+
     applySettings: async (settings: Settings) => {
       const previous = get().settings;
       await saveSettings(settings);
@@ -1350,108 +1648,19 @@ export const useAppStore = create<AppState>((set, get) => {
 
       updateLibrary(library => addRecentSearch(library, rawQuery));
 
-      const searchService = service;
-      const online = !!searchService && get().connection === 'online';
-
-      if (online && get().searching && get().searchQuery === networkQuery) {
+      if (get().searching && get().query === rawQuery) {
         return;
       }
 
       const sequence = ++searchSequence;
       searchAbort?.abort();
-      const abort = new AbortController();
-      searchAbort = abort;
-      const collected: SearchHit[] = [];
-      const collectedKeys = new Set<string>();
-      let catalogTracks: CatalogTrack[] = [];
-      let rankTimer: ReturnType<typeof setTimeout> | null = null;
-      let extraSearch: Promise<unknown> | null = null;
-
-      const regroup = () => {
-        if (sequence !== searchSequence) {
-          return;
-        }
-        const unified = unifyResults(networkQuery, collected, catalogTracks, LIST_SCORE);
-        set(state => ({ groups: unified.groups, hitTracks: { ...state.hitTracks, ...unified.hitTracks } }));
-      };
-
-      const onBatch = (batch: SearchHit[]) => {
-        if (sequence !== searchSequence) {
-          return;
-        }
-
-        for (const found of batch) {
-          const key = hitKey(found);
-          if (!collectedKeys.has(key)) {
-            collectedKeys.add(key);
-            collected.push(found);
-          }
-        }
-
-        if (!rankTimer) {
-          rankTimer = setTimeout(publishResults, 400);
-        }
-
-        if (collected.length >= ENOUGH_RESULTS) {
-          searchService?.cancelSearch();
-          abort.abort();
-        }
-      };
-
-      // The catalog answers in a fraction of a second: covers, proper titles,
-      // artists and albums, and the spelling Soulseek files are likely to use.
-      if (get().settings.catalogEnabled) {
-        const startedAt = Date.now();
-        catalog
-          .search(rawQuery)
-          .then(result => {
-            if (sequence !== searchSequence) {
-              return;
-            }
-
-            catalogTracks = result.tracks;
-            set({ catalogResults: result });
-            regroup();
-
-            // "daft pnk one mor time" finds nothing on Soulseek, where every
-            // word must be in the path. Search the catalog's spelling too.
-            const top = result.tracks[0];
-            const corrected = top ? soulseekQueryFor(top) : '';
-            const remaining = SEARCH_DURATION_MS - (Date.now() - startedAt);
-            const sameWords = (a: string, b: string) =>
-              normalizeForMatch(a).split(' ').sort().join(' ') === normalizeForMatch(b).split(' ').sort().join(' ');
-
-            if (corrected && online && get().searching && remaining > 2000 && !sameWords(corrected, networkQuery)) {
-              debugLog('play', `recherche corrigée « ${corrected} »`);
-              extraSearch = searchService
-                .search(corrected, onBatch, remaining, { exclusive: false, signal: abort.signal })
-                .catch(() => {});
-            }
-          })
-          .catch(error => {
-            debugLog('app', `catalogue : ${errorMessage(error)}`);
-          });
-      }
-
-      if (!searchService || !online) {
-        set({
-          query: rawQuery,
-          searchQuery: networkQuery,
-          deviceResults,
-          results: [],
-          groups: [],
-          catalogResults: null,
-          searchError: deviceResults.length > 0 || get().settings.catalogEnabled ? null : 'Non connecté au réseau Soulseek',
-        });
-        return;
-      }
-
-      debugLog('play', `recherche « ${networkQuery} » (saisie : « ${rawQuery} »)`);
+      searchAbort = null;
 
       set({
         query: rawQuery,
-        searching: true,
         searchQuery: networkQuery,
+        searching: true,
+        fileSearch: 'idle',
         searchEmpty: false,
         searchError: null,
         results: [],
@@ -1460,62 +1669,59 @@ export const useAppStore = create<AppState>((set, get) => {
         deviceResults,
       });
 
-      // Nothing plays until the user picks a result: the list fills in as
-      // peers answer, ranked by match then availability.
-      const publishResults = () => {
-        rankTimer = null;
+      // With the catalog on, a search only asks the catalog: Soulseek is
+      // searched for a title when it is played (`resolveTrack`), so a broad
+      // search such as an artist name costs no Soulseek request at all.
+      if (get().settings.catalogEnabled) {
+        let result: CatalogSearchResult | null = null;
 
-        if (sequence === searchSequence) {
-          set({ results: rankHits(networkQuery, collected, LIST_SCORE) });
-          regroup();
-        }
-      };
-
-      try {
-        await searchService.search(networkQuery, onBatch, SEARCH_DURATION_MS);
-
-        if (extraSearch) {
-          await extraSearch;
+        try {
+          result = await catalog.search(rawQuery);
+        } catch (error) {
+          debugLog('app', `catalogue : ${errorMessage(error)}`);
         }
 
         if (sequence !== searchSequence) {
           return;
         }
 
-        if (rankTimer) {
-          clearTimeout(rankTimer);
+        const found = result && (result.tracks.length > 0 || result.artists.length > 0 || result.albums.length > 0);
+        if (result && found) {
+          set({
+            catalogResults: result,
+            groups: unifyResults(networkQuery, [], result.tracks, LIST_SCORE).groups,
+            searching: false,
+          });
+          return;
         }
 
-        publishResults();
-        const top = rankHits(networkQuery, collected, 0).slice(0, 5);
-        debugLog(
-          'play',
-          top.length > 0
-            ? `meilleurs candidats : ${top.map(r => `${r.score.toFixed(2)} ${r.hit.filename}`).join(' | ')}`
-            : 'aucun MP3 reçu des pairs',
-        );
-        debugLog('play', `recherche terminée : ${collected.length} MP3 reçus, ${get().results.length} retenus`);
-        set({
-          searching: false,
-          searchEmpty: get().groups.length === 0 && deviceResults.length === 0,
-        });
-      } catch (error) {
-        debugLog('play', `recherche en erreur : ${errorMessage(error)}`);
-        if (sequence === searchSequence) {
-          set({ searching: false, searchError: errorMessage(error) });
-        }
-      } finally {
-        if (rankTimer && sequence !== searchSequence) {
-          clearTimeout(rankTimer);
-        }
+        // Nothing in the catalog, or it is unreachable: search the files.
+        debugLog('play', 'rien dans le catalogue : recherche des fichiers sur Soulseek');
       }
+
+      await searchFiles(sequence, rawQuery, networkQuery, [], deviceResults);
+    },
+
+    searchFilesToo: async () => {
+      const { searchQuery, query, catalogResults, deviceResults, fileSearch } = get();
+      if (!searchQuery || fileSearch === 'running') {
+        return;
+      }
+
+      const sequence = ++searchSequence;
+      set({ searching: true });
+      await searchFiles(sequence, query, searchQuery, catalogResults?.tracks ?? [], deviceResults);
     },
 
     cancelSearch: () => {
       searchSequence++;
       searchAbort?.abort();
       service?.cancelSearch();
-      set({ searching: false, searchEmpty: false });
+      set(state => ({
+        searching: false,
+        searchEmpty: false,
+        fileSearch: state.fileSearch === 'running' ? 'done' : state.fileSearch,
+      }));
     },
 
     playHit: async hit => {
@@ -1605,7 +1811,7 @@ export const useAppStore = create<AppState>((set, get) => {
           set({ notice: 'Fin de la liste de lecture.' });
           return;
         }
-        await get().playCatalogTrack(catalogContext.tracks[index], { ...catalogContext, index });
+        await playCatalog(catalogContext.tracks[index], { ...catalogContext, index }, 0, false);
         return;
       }
 
@@ -1644,7 +1850,7 @@ export const useAppStore = create<AppState>((set, get) => {
 
       if (catalogContext && catalogContext.index > 0) {
         const index = catalogContext.index - 1;
-        await get().playCatalogTrack(catalogContext.tracks[index], { ...catalogContext, index });
+        await playCatalog(catalogContext.tracks[index], { ...catalogContext, index }, 0, false);
         return;
       }
 
@@ -1721,10 +1927,8 @@ export const useAppStore = create<AppState>((set, get) => {
       set(state => ({ pages: [...state.pages, page], playerOpen: false, sheet: null }));
       if (page.kind === 'artist') {
         void get().loadArtistPage(page.id);
-      } else if (page.kind === 'album') {
-        void get().loadAlbumPage(page.id);
       } else {
-        void get().loadGenrePage(page.id);
+        void get().loadAlbumPage(page.id);
       }
     },
 
@@ -1740,32 +1944,64 @@ export const useAppStore = create<AppState>((set, get) => {
 
     loadArtistPage: (id, force = false) => loadPage('artistPages', id, force, () => catalog.artist(id)),
     loadAlbumPage: (id, force = false) => loadPage('albumPages', id, force, () => catalog.album(id)),
-    loadGenrePage: (id, force = false) => loadPage('genrePages', id, force, () => catalog.genre(id)),
+    loadHome: async (force = false) => {
+      const artists = get().settings.catalogEnabled ? recentArtists(get().library) : [];
 
-    loadBrowse: async (force = false) => {
-      if (!get().settings.catalogEnabled) {
-        set({ browse: null });
+      if (artists.length === 0) {
+        homeKey = '';
+        set({ home: null });
         return;
       }
 
-      const existing = get().browse;
-      if (existing && !force && existing.status !== 'error') {
+      const key = artists.map(artist => artist.id).join(',');
+      const existing = get().home;
+      if (!force && key === homeKey && existing && existing.status !== 'error') {
         return;
       }
 
-      set({ browse: { status: 'loading' } });
-      try {
-        set({ browse: { status: 'ready', data: await catalog.browse() } });
-      } catch (error) {
-        set({ browse: { status: 'error', error: errorMessage(error) } });
+      homeKey = key;
+      // Keep showing the previous content while it refreshes.
+      if (existing?.status !== 'ready') {
+        set({ home: { status: 'loading' } });
       }
+
+      const results = await Promise.allSettled(artists.map(artist => catalog.artistWithRelated(artist.id)));
+      if (key !== homeKey) {
+        return;
+      }
+
+      const loaded = results.flatMap(result => (result.status === 'fulfilled' ? [result.value] : []));
+      if (loaded.length === 0) {
+        const failure = results.find(result => result.status === 'rejected');
+        set({
+          home: {
+            status: 'error',
+            error: failure?.status === 'rejected' ? errorMessage(failure.reason) : 'Catalogue indisponible',
+          },
+        });
+        return;
+      }
+
+      const known = new Set(loaded.map(entry => entry.artist.id));
+      const similar = loaded
+        .slice(0, HOME_SIMILAR_SHELVES)
+        .map(entry => ({
+          artist: entry.artist,
+          related: entry.related.filter(artist => !known.has(artist.id)).slice(0, 12),
+        }))
+        .filter(entry => entry.related.length > 0);
+
+      set({ home: { status: 'ready', data: { artists: loaded.map(entry => entry.artist), similar } } });
     },
 
-    resolveTrack: track => {
+    resolveTrack: (track, retryMissing = false) => {
       const existing = get().resolutions[track.id];
-      const fresh = Date.now() - (resolvedAt.get(track.id) ?? 0) < RESOLUTION_TTL_MS;
+      const age = Date.now() - (resolvedAt.get(track.id) ?? 0);
 
-      if (existing?.status === 'found' && fresh) {
+      if (
+        (existing?.status === 'found' && age < RESOLUTION_TTL_MS) ||
+        (existing?.status === 'none' && !retryMissing && age < MISSING_TTL_MS)
+      ) {
         return Promise.resolve(existing);
       }
 
@@ -1792,7 +2028,7 @@ export const useAppStore = create<AppState>((set, get) => {
       return promise;
     },
 
-    playCatalogTrack: (track, context) => playCatalog(track, context, 0),
+    playCatalogTrack: (track, context) => playCatalog(track, context, 0, true),
 
     enqueueCatalogTrack: (track, first = false) => {
       set({ notice: 'Recherche de sources…' });

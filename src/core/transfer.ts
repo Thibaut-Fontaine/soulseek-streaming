@@ -1,5 +1,6 @@
 import { ChunkBuffer } from './chunkBuffer';
 import { encodeFileOffset } from './protocol';
+import { MAX_STREAM_BYTES } from './types';
 import type { SearchHit } from './types';
 import type { SocketLike } from '../transport/types';
 
@@ -55,7 +56,7 @@ export class StreamTransfer {
     this.id = `${hit.username}::${hit.filename}::${Date.now().toString(36)}`;
     this.hit = hit;
     this.expectedSize = hit.size;
-    this.buffer = new ChunkBuffer();
+    this.buffer = new ChunkBuffer(MAX_STREAM_BYTES);
   }
 
   get received(): number {

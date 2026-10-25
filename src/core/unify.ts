@@ -1,5 +1,5 @@
 import type { CatalogTrack, TrackGroup } from './catalogTypes';
-import { availabilityScore, formatSearchQuery, matchScore, normalizeForMatch, rankHits } from './search';
+import { availabilityScore, formatSearchQuery, hitFeatures, matchScore, normalizeForMatch, rankHits } from './search';
 import type { RankedHit } from './search';
 import { hitKey, parseTrackName } from './types';
 import type { SearchHit } from './types';
@@ -57,10 +57,41 @@ function durationAdjustment(hit: SearchHit, track: CatalogTrack): number {
   return -0.5;
 }
 
+const titleWordCache = new WeakMap<CatalogTrack, string[]>();
+
+/**
+ * Starts of the title's words (3 letters, or whole numbers), as they appear
+ * after a space in a normalised path. Prefixes keep typo and plural
+ * tolerance ("tim" finds "time"), like the matcher itself.
+ */
+function titleWordStarts(track: CatalogTrack): string[] {
+  let starts = titleWordCache.get(track);
+  if (!starts) {
+    starts = normalizeForMatch(track.titleShort)
+      .split(' ')
+      .filter(word => word.length >= 3 || /^\d+$/.test(word))
+      .map(word => ` ${word.slice(0, 3)}`);
+    titleWordCache.set(track, starts);
+  }
+  return starts;
+}
+
+function mentionsTitle(haystack: string, track: CatalogTrack): boolean {
+  const starts = titleWordStarts(track);
+  // Titles made only of short words ("U", "Go") are not filtered.
+  return starts.length === 0 || starts.some(start => haystack.includes(start));
+}
+
 /**
  * How likely a Soulseek file is this catalog track, in [0, 1].
  */
 export function matchHitToTrack(hit: SearchHit, track: CatalogTrack): number {
+  // Cheap pre-check: a file that mentions no word of the title cannot match.
+  // Most file/track pairs of a search stop here, before any Levenshtein.
+  if (!mentionsTitle(hitFeatures(hit).haystack, track)) {
+    return 0;
+  }
+
   const version = meaningfulVersion(track);
   const title = `${track.titleShort} ${version}`.trim();
   const full = matchScore(`${track.artist.name} ${title}`, hit);
@@ -71,7 +102,7 @@ export function matchHitToTrack(hit: SearchHit, track: CatalogTrack): number {
   const titleOnly = matchScore(title, hit);
   const parsedArtist = parseTrackName(hit.filename).artist;
   const artistMissing =
-    !parsedArtist || !normalizeForMatch(hit.filename).includes(normalizeForMatch(track.artist.name));
+    !parsedArtist || !hitFeatures(hit).haystack.includes(normalizeForMatch(track.artist.name));
 
   if (artistMissing && titleOnly >= 0.9) {
     const confirmed = durationAdjustment(hit, track) > 0;
@@ -112,6 +143,32 @@ export function soulseekQueryFor(track: CatalogTrack): string {
   return formatSearchQuery(`${track.artist.name} ${title} ${keepVersion}`);
 }
 
+function scoreKey(track: CatalogTrack, key: string): string {
+  return `${track.id}\u0000${key}`;
+}
+
+/**
+ * Scores one file against the query and the catalog tracks, into the caches
+ * `unifyResults` and `rankHits` read. Lets a search spread that work over
+ * many small slices instead of one long block on the JS thread.
+ */
+export function primeHitScores(
+  query: string,
+  hit: SearchHit,
+  catalogTracks: CatalogTrack[],
+  scores: Map<string, number>,
+): void {
+  matchScore(query, hit);
+  const key = hitKey(hit);
+
+  for (const track of catalogTracks.slice(0, MAX_CATALOG_TRACKS)) {
+    const cacheKey = scoreKey(track, key);
+    if (!scores.has(cacheKey)) {
+      scores.set(cacheKey, matchHitToTrack(hit, track));
+    }
+  }
+}
+
 export interface UnifiedResults {
   groups: TrackGroup[];
   /** Catalog track of each matched file, by `hitKey`. */
@@ -127,6 +184,12 @@ export function unifyResults(
   hits: SearchHit[],
   catalogTracks: CatalogTrack[],
   minListScore: number,
+  /**
+   * Scores already computed during this search, by track id and hit key.
+   * Results arrive in batches and are regrouped each time: with the cache,
+   * only the new files are scored.
+   */
+  scores?: Map<string, number>,
 ): UnifiedResults {
   const tracks = catalogTracks.slice(0, MAX_CATALOG_TRACKS);
   const byTrack = new Map<string, RankedHit[]>(tracks.map(track => [track.id, []]));
@@ -136,8 +199,14 @@ export function unifyResults(
   for (const hit of hits.slice(0, MAX_HITS)) {
     let best: { track: CatalogTrack; score: number } | null = null;
 
+    const key = hitKey(hit);
     for (const track of tracks) {
-      const score = matchHitToTrack(hit, track);
+      const cacheKey = scoreKey(track, key);
+      let score = scores?.get(cacheKey);
+      if (score === undefined) {
+        score = matchHitToTrack(hit, track);
+        scores?.set(cacheKey, score);
+      }
       if (score >= UNIFY_SCORE && (!best || score > best.score)) {
         best = { track, score };
       }

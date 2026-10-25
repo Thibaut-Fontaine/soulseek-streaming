@@ -41,6 +41,7 @@ export class StreamingService {
   private http: RangeHttpServer | null = null;
   private onUnmeteredNetwork = false;
   private unsubscribeNetInfo: (() => void) | null = null;
+  private networkType: string | null = null;
   private unsubscribeCache: (() => void) | null = null;
 
   private active:
@@ -82,12 +83,19 @@ export class StreamingService {
 
   private handleNetwork(state: NetInfoState): void {
     const wasUnmetered = this.onUnmeteredNetwork;
+    const previousType = this.networkType;
+    this.networkType = state.isConnected ? state.type : null;
     this.onUnmeteredNetwork =
       state.isConnected === true && (state.type === 'wifi' || state.type === 'ethernet');
 
     if (state.isConnected) {
       // The network came back or changed: reconnect now, not after backoff.
       this.client?.reconnectNow();
+
+      // Wi-Fi <-> mobile data while "online": the old socket is often dead.
+      if (previousType !== null && previousType !== state.type) {
+        void this.client?.checkConnection();
+      }
     }
 
     if (wasUnmetered !== this.onUnmeteredNetwork) {
@@ -150,7 +158,10 @@ export class StreamingService {
 
       if (transfer) {
         void this.cache
-          .save(transfer.hit, transfer.buffer.read(0, transfer.buffer.total))
+          .save(transfer.hit, {
+            length: transfer.buffer.total,
+            read: (offset, length) => transfer.buffer.read(offset, length),
+          })
           .then(() => this.client?.refreshShares())
           .catch(() => {});
       }
@@ -201,6 +212,11 @@ export class StreamingService {
     }
 
     return this.client.search(query, { onResults, durationMs, ...options });
+  }
+
+  /** See `SoulseekClient.checkConnection`. */
+  checkConnection(): Promise<boolean> {
+    return this.client?.checkConnection() ?? Promise.resolve(false);
   }
 
   cancelSearch(): void {

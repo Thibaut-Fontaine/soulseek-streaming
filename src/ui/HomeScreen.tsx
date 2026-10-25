@@ -5,6 +5,7 @@ import LinearGradient from 'react-native-linear-gradient';
 import type { SearchHit } from '../core/types';
 import { useAppStore } from '../state/store';
 import type { PlayContext } from '../state/store';
+import { ForYouSections } from './ForYou';
 import { Button, EmptyState } from './components';
 import { Icon } from './Icon';
 import { AppLogo, DeviceMark, TrackCover, useIsCurrent, useTrackInfo } from './track';
@@ -119,6 +120,8 @@ export function HomeScreen() {
           </View>
         </>
       ) : null}
+
+      <ForYouSections />
     </ScrollView>
   );
 }
@@ -234,7 +237,7 @@ const ShelfCard = React.memo(function ShelfCard({
   );
 });
 
-const HEADER_FADE = ['rgba(169,112,255,0.28)', 'rgba(11,10,15,0)'];
+const HEADER_FADE = ['rgba(255,182,39,0.2)', 'rgba(11,10,15,0)'];
 
 const styles = StyleSheet.create({
   container: {

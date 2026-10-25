@@ -1,6 +1,7 @@
 import React from 'react';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 
+import { debugLog } from '../services/debugLog';
 import { StatusCard } from './components';
 import { colors, gutter, spacing, type } from './theme';
 
@@ -20,6 +21,8 @@ export class ErrorBoundary extends React.Component<React.PropsWithChildren, Stat
   }
 
   componentDidCatch(error: Error, info: React.ErrorInfo): void {
+    // Release builds drop console output: keep it in the journal.
+    debugLog('app', `erreur d’affichage : ${error.name}: ${error.message}${info.componentStack ?? ''}`);
     if (__DEV__) {
       console.error('[SoulStream] UI error', error, info.componentStack);
     }

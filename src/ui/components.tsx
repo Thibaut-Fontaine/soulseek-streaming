@@ -3,16 +3,21 @@ import {
   ActivityIndicator,
   Animated,
   Easing,
+  Image,
   PanResponder,
+  PixelRatio,
   Pressable,
   StyleSheet,
+  Switch,
   Text,
   View,
 } from 'react-native';
 import type { LayoutChangeEvent, StyleProp, ViewStyle } from 'react-native';
 import LinearGradient from 'react-native-linear-gradient';
 
+import type { Artwork } from '../core/catalogTypes';
 import type { ConnectionState } from '../core/soulseekClient';
+import { pickArtwork } from './catalogFormat';
 import { Icon } from './Icon';
 import type { IconName } from './Icon';
 import { colors, coverPalette, motion, radius, spacing, tones, type } from './theme';
@@ -69,6 +74,105 @@ export const CoverArt = React.memo(function CoverArt({
     </View>
   );
 });
+
+export type CoverShape = 'xs' | 'sm' | 'md' | 'round';
+
+function coverRadius(size: number, rounded: CoverShape): number {
+  switch (rounded) {
+    case 'round':
+      return size / 2;
+    case 'xs':
+      return 4;
+    case 'sm':
+      return radius.sm;
+    default:
+      return Math.max(radius.sm, size * 0.06);
+  }
+}
+
+/**
+ * Any square picture: the catalog artwork (size picked for the screen
+ * density), else `fallbackUri` (the MP3's own cover), else the generated
+ * gradient. A URL that fails to load falls through to the next one.
+ */
+export const Cover = React.memo(function Cover({
+  artwork,
+  fallbackUri,
+  seed,
+  title,
+  size,
+  rounded = 'md',
+  style,
+}: {
+  artwork?: Artwork | null;
+  fallbackUri?: string | null;
+  seed: string;
+  title: string;
+  size: number;
+  rounded?: CoverShape;
+  style?: StyleProp<ViewStyle>;
+}) {
+  const [failed, setFailed] = React.useState<string[]>([]);
+  const candidates = [pickArtwork(artwork, size * PixelRatio.get()), fallbackUri ?? null];
+  const uri = candidates.find((item): item is string => !!item && !failed.includes(item)) ?? null;
+  const borderRadius = coverRadius(size, rounded);
+
+  if (!uri) {
+    return (
+      <CoverArt
+        seed={seed}
+        title={title}
+        size={size}
+        rounded={rounded === 'round' ? 'md' : rounded}
+        style={[rounded === 'round' && { borderRadius }, style]}
+      />
+    );
+  }
+
+  return (
+    <Image
+      source={{ uri }}
+      style={[{ width: size, height: size, borderRadius }, styles.coverImage, style as object]}
+      resizeMode="cover"
+      onError={() => setFailed(list => [...list, uri])}
+      accessibilityIgnoresInvertColors
+    />
+  );
+});
+
+/** Grey placeholder block that pulses while content loads. */
+export function Skeleton({
+  width,
+  height,
+  round,
+  style,
+}: {
+  width: number | `${number}%`;
+  height: number;
+  round?: boolean;
+  style?: StyleProp<ViewStyle>;
+}) {
+  const opacity = React.useRef(new Animated.Value(0.5)).current;
+
+  React.useEffect(() => {
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(opacity, { toValue: 1, duration: 700, useNativeDriver: true }),
+        Animated.timing(opacity, { toValue: 0.5, duration: 700, useNativeDriver: true }),
+      ]),
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [opacity]);
+
+  return (
+    <Animated.View
+      accessibilityElementsHidden
+      importantForAccessibility="no-hide-descendants"
+      style={[styles.skeleton, { width, height, borderRadius: round ? height / 2 : radius.xs, opacity }, style]}
+    />
+  );
+}
 
 const GRADIENT_TOP_RIGHT = { x: 1, y: 0 };
 const GRADIENT_BOTTOM_LEFT = { x: 0, y: 1 };
@@ -720,6 +824,35 @@ export function ListRow({
   );
 }
 
+/**
+ * On/off switch with the app's colours on both platforms. React Native's
+ * Switch only colours the track; without `thumbColor` Android paints the knob
+ * with its default theme accent (teal), which clashed with the app accent.
+ */
+export function Toggle({
+  value,
+  onValueChange,
+  disabled,
+  accessibilityLabel,
+}: {
+  value: boolean;
+  onValueChange: (value: boolean) => void;
+  disabled?: boolean;
+  accessibilityLabel: string;
+}) {
+  return (
+    <Switch
+      value={value}
+      onValueChange={onValueChange}
+      disabled={disabled}
+      accessibilityLabel={accessibilityLabel}
+      trackColor={{ true: colors.accent, false: colors.surfaceHigh }}
+      thumbColor={value ? colors.text : colors.textMuted}
+      ios_backgroundColor={colors.surfaceHigh}
+    />
+  );
+}
+
 export function clamp01(value: number): number {
   return Number.isFinite(value) ? Math.max(0, Math.min(1, value)) : 0;
 }
@@ -775,6 +908,12 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     overflow: 'hidden',
     backgroundColor: colors.surfaceAlt,
+  },
+  coverImage: {
+    backgroundColor: colors.surfaceAlt,
+  },
+  skeleton: {
+    backgroundColor: colors.surfaceHigh,
   },
   coverLetter: {
     color: 'rgba(255,255,255,0.92)',

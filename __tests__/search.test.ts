@@ -6,6 +6,7 @@ import {
   scoreHit,
   rankHits,
   similarity,
+  soulseekSpellings,
 } from '../src/core/search';
 import { parseTrackName } from '../src/core/types';
 import type { SearchHit } from '../src/core/types';
@@ -151,5 +152,13 @@ describe('auto-match picks the right recording', () => {
     const queued = hit('Daft Punk - One More Time.mp3', { username: 'q', slotFree: false, queueLength: 40, bitrate: 320 });
     const free = hit('Daft Punk - One More Time.mp3', { username: 'f', slotFree: true, queueLength: 0, bitrate: 192 });
     expect(rankHits(query, [queued, free])[0].hit).toBe(free);
+  });
+});
+
+describe('spellings sent to Soulseek', () => {
+  test('lowercase, plus an accent-free copy when there are accents', () => {
+    expect(soulseekSpellings('Jungle Jack SYSTÈME')).toEqual(['jungle jack système', 'jungle jack systeme']);
+    expect(soulseekSpellings('Daft Punk One More Time')).toEqual(['daft punk one more time']);
+    expect(soulseekSpellings('Beyoncé Déjà Vu')).toEqual(['beyoncé déjà vu', 'beyonce deja vu']);
   });
 });

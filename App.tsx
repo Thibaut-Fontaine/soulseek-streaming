@@ -10,6 +10,7 @@ import { HomeScreen } from './src/ui/HomeScreen';
 import { LibraryScreen } from './src/ui/LibraryScreen';
 import { LoginScreen } from './src/ui/LoginScreen';
 import { MiniPlayer } from './src/ui/MiniPlayer';
+import { PageHost } from './src/ui/pages';
 import { PlayerSheet } from './src/ui/PlayerScreen';
 import { SearchScreen } from './src/ui/SearchScreen';
 import { SettingsScreen } from './src/ui/SettingsScreen';
@@ -17,6 +18,9 @@ import { SheetHost } from './src/ui/Sheets';
 import { TabBar } from './src/ui/TabBar';
 import { AppLogo } from './src/ui/track';
 import { colors, gutter, spacing, type } from './src/ui/theme';
+
+/** After this long in the background, check the server connection on return. */
+const CHECK_AFTER_BACKGROUND_MS = 60_000;
 
 function App() {
   return (
@@ -34,18 +38,36 @@ function Root() {
   const username = useAppStore(state => state.username);
   const tab = useAppStore(state => state.tab);
   const setTab = useAppStore(state => state.setTab);
+  const closeAllPages = useAppStore(state => state.closeAllPages);
   const connection = useAppStore(state => state.connection);
   const hasCurrent = useAppStore(state => state.current !== null);
   const init = useAppStore(state => state.init);
   const reconnect = useAppStore(state => state.reconnect);
 
   const insets = useSafeAreaInsets();
+  const backgroundSince = React.useRef<number | null>(null);
 
   React.useEffect(() => {
     void init();
   }, [init]);
 
-  // Android back: close the sheet, then the player, then leave Réglages.
+  // Artist/album pages belong to the tab they were opened from: switching
+  // tab (from the bar or from code, e.g. "Rechercher « artiste »") clears them.
+  React.useEffect(() => {
+    closeAllPages();
+  }, [tab, closeAllPages]);
+
+  // Tapping a tab, even the current one, goes back to its root.
+  const changeTab = React.useCallback(
+    (next: typeof tab) => {
+      closeAllPages();
+      setTab(next);
+    },
+    [closeAllPages, setTab],
+  );
+
+  // Android back: close the sheet, then the player, then the top page, then
+  // leave Réglages.
   React.useEffect(() => {
     const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
       const state = useAppStore.getState();
@@ -56,6 +78,9 @@ function Root() {
       }
       if (state.playerOpen) {
         state.closePlayer();
+        return true;
+      }
+      if (state.closePage()) {
         return true;
       }
       if (state.tab === 'settings') {
@@ -70,12 +95,22 @@ function Root() {
 
   React.useEffect(() => {
     const subscription = AppState.addEventListener('change', nextState => {
+      if (nextState !== 'active') {
+        backgroundSince.current ??= Date.now();
+        return;
+      }
+
+      const away = backgroundSince.current ? Date.now() - backgroundSince.current : 0;
+      backgroundSince.current = null;
+
       if (
-        nextState === 'active' &&
         username &&
         (connection === 'disconnected' || connection === 'error' || connection === 'reconnecting')
       ) {
         void reconnect();
+      } else if (username && connection === 'online' && away > CHECK_AFTER_BACKGROUND_MS) {
+        // The phone may have slept: make sure "online" is still true.
+        void useAppStore.getState().checkConnection();
       }
     });
 
@@ -112,12 +147,13 @@ function Root() {
               <SettingsScreen />
             </>
           )}
+          <PageHost />
         </View>
 
         <View style={styles.dock}>
           <LinearGradient colors={DOCK_FADE} style={styles.dockFade} pointerEvents="none" />
           {hasCurrent ? <MiniPlayer /> : null}
-          <TabBar active={tab} onChange={setTab} bottomInset={insets.bottom} />
+          <TabBar active={tab} onChange={changeTab} bottomInset={insets.bottom} />
         </View>
       </View>
 

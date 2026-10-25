@@ -24,9 +24,9 @@ La page fournit l'APK, son empreinte SHA-256, les captures d'écran et l'archive
 du code source. L'APK est signé avec une clé de développement : il s'installe
 manuellement et n'est pas destiné à une publication sur le Play Store.
 
-### Build actuelle (1.3.0)
+### Build actuelle (1.3.0-beta8)
 
-La version 1.3.0 publiée sur la page est construite depuis `main` et signée avec
+La version 1.3.0-beta8 publiée sur la page est construite depuis `main` et signée avec
 la clé de développement. Elle inclut les architectures ARM (téléphones) et x86_64
 (émulateurs), et son APK est aussi conservé dans
 [`releases/SoulStream.apk`](releases/SoulStream.apk) pour les tests locaux.
@@ -46,6 +46,27 @@ git add releases showcase && git commit -m "build: refresh APK and QR code"
 Le script copie l'APK dans `releases/`, régénère le QR code et les informations
 de build. Il refuse de tourner s'il reste des modifications non commitées dans
 le code de l'application.
+
+### Construire l'APK depuis une session Claude Code (cloud)
+
+Le hook [`.claude/hooks/session-start.sh`](.claude/hooks/session-start.sh)
+prépare chaque session cloud : `npm install`, SDK Android dans
+`/opt/android-sdk` (plateforme 36, build-tools 36.0.0, NDK 27.1, CMake 3.22.1),
+`android/local.properties` et `ANDROID_HOME`. Environ 2 minutes au premier
+démarrage, instantané ensuite. Il ne fait rien en dehors du cloud.
+
+Depuis le bac à sable, Maven Central (`repo.maven.apache.org`,
+`repo1.maven.org`) limite le débit : Gradle reçoit des 429 et des 404 au hasard
+(« Could not find gson-2.11.0.jar ») et la build échoue sur un artefact
+différent à chaque fois. Réessayer ou ajouter `repo1.maven.org` ne suffit pas.
+Le hook installe donc [`tools/gradle/google-central.gradle`](tools/gradle/google-central.gradle)
+dans `~/.gradle/init.d`, qui redirige Maven Central vers le miroir de Google
+(`maven-central.storage-download.googleapis.com`), y compris pour le plugin
+Gradle de React Native. Les builds locales ne sont pas concernées.
+
+```bash
+cd android && ./gradlew assembleRelease --no-daemon && cd ..
+```
 
 ## Fonctionnalités
 
@@ -73,9 +94,16 @@ le code de l'application.
   si un slot est libre, orange si file d'attente) ; rien ne joue tant que
   vous n'avez pas touché un titre. Les morceaux déjà sur le téléphone
   apparaissent en premier.
-- **Pochettes** : celles du catalogue Deezer quand un titre est reconnu, sinon
-  la pochette et les tags ID3 du MP3 (`src/core/id3.ts`), lus dès les premiers
-  Ko reçus du pair. Le lecteur affiche la pochette en grand, floutée en fond.
+- **Catalogue en ligne** (Deezer, désactivable) : un seul résultat par
+  morceau avec sa pochette, son titre et son album, et le nombre de sources
+  Soulseek ; pages artiste (titres populaires, discographie, artistes
+  similaires, radio) et album ; l'orthographe du catalogue est aussi cherchée
+  sur Soulseek, ce qui corrige les fautes de frappe. La durée distingue la
+  version album, l'edit radio ou le live. L'accueil ne montre que du contenu
+  lié à vos écoutes (vos artistes, leurs albums, artistes similaires).
+- **Pochettes sans catalogue** : la pochette et les tags (titre, artiste, album) sont lus
+  dans le tag ID3 du MP3 (`src/core/id3.ts`), dès les premiers Ko reçus du
+  pair. Le lecteur affiche la pochette en grand, floutée en fond.
 - **Bibliothèque** : titres likés, historique d'écoute, morceaux sur
   l'appareil ; recherches récentes. Enregistrés sur le téléphone.
 - Le titre suivant (file d'attente, puis la liste d'où vient le titre) se
@@ -334,6 +362,9 @@ src/
     soulseekClient.ts   serveur + pairs + transferts + reconnexion
     chunkBuffer.ts      tampon en mémoire avec attente progressive
     transfer.ts         état d'un téléchargement / flux
+    search.ts           nettoyage des requêtes, score Levenshtein, classement
+    catalog.ts          catalogue en ligne (Deezer) derrière CatalogProvider
+    unify.ts            association fichiers Soulseek ↔ morceaux du catalogue
   transport/
     rnTcpTransport.ts   sockets TCP React Native
     nodeTransport.ts    sockets TCP Node (tests)
@@ -362,9 +393,11 @@ src/
 
 - Les identifiants sont stockés via `react-native-keychain` (Keychain sur iOS,
   Keystore sur Android).
-- Pas de télémétrie applicative. Le catalogue en ligne interroge l'API
-  publique Deezer (sans clé, sans donnée de compte) ; il est activé par défaut
-  et désactivable dans **Réglages → Catalogue**.
+- Aucune télémétrie, aucun compte supplémentaire.
+- Seul service tiers : le catalogue en ligne Deezer (API publique, sans
+  compte), qui reçoit le texte des recherches et les identifiants d'artistes ou
+  d'albums consultés. Il se désactive dans **Réglages → Catalogue en ligne** ;
+  l'application n'utilise alors que les noms de fichiers Soulseek.
 - Le proxy HTTP n'écoute que sur `127.0.0.1` et sert uniquement les transferts
   en cours.
 - Le trafic Soulseek n'est pas chiffré (le protocole ne le prévoit pas) ; ne

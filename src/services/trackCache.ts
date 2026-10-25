@@ -1,4 +1,3 @@
-import { Buffer } from 'buffer';
 
 import { id3TagSize, parseId3 } from '../core/id3';
 import type { Id3Tags } from '../core/id3';
@@ -7,6 +6,7 @@ import { AUTO_MATCH_SCORE, matchScore } from '../core/search';
 import { baseName, hitKey } from '../core/types';
 import type { SearchHit, TrackMeta } from '../core/types';
 import type { ShareFileReader, ShareLibrary } from '../core/uploads';
+import { decodeBase64, encodeBase64 } from './fastBase64';
 
 /** The few file operations the cache needs. Backed by react-native-blob-util. */
 export interface CacheFs {
@@ -22,6 +22,55 @@ export interface CacheFs {
   move(from: string, to: string): Promise<void>;
   /** Bytes `start`..`end` of a file, base64. Used to read tags cheaply. */
   readSliceBase64?(path: string, start: number, end: number): Promise<string>;
+  /** Appends base64 data; lets big files be written in pieces. */
+  appendBase64?(path: string, data: string): Promise<void>;
+}
+
+/**
+ * Piece size when writing a track: base64-encoding a whole 10 MB MP3 in one
+ * go froze the JS thread for seconds on phones. A multiple of 3 bytes, so the
+ * base64 pieces join without padding in the middle.
+ */
+export const WRITE_CHUNK_BYTES = 192 * 1024;
+
+/**
+ * Bytes to store, read piece by piece. A finished download is read straight
+ * from its stream buffer: copying a whole 10 MB file first doubled the
+ * memory needed at the end of every download.
+ */
+export interface ByteSource {
+  readonly length: number;
+  read(offset: number, length: number): Uint8Array;
+}
+
+export function bytesSource(bytes: Uint8Array): ByteSource {
+  return {
+    length: bytes.length,
+    read: (offset, length) => bytes.subarray(offset, Math.min(bytes.length, offset + length)),
+  };
+}
+
+function base64(piece: Uint8Array): string {
+  return encodeBase64(piece);
+}
+
+/** Writes bytes to `path` piece by piece, giving the UI a turn between pieces. */
+export async function writeBytesInChunks(
+  fs: CacheFs,
+  path: string,
+  input: Uint8Array | ByteSource,
+): Promise<void> {
+  const source = input instanceof Uint8Array ? bytesSource(input) : input;
+
+  if (!fs.appendBase64 || source.length <= WRITE_CHUNK_BYTES) {
+    await fs.writeBase64(path, base64(source.read(0, source.length)));
+    return;
+  }
+
+  for (let offset = 0; offset < source.length; offset += WRITE_CHUNK_BYTES) {
+    const data = base64(source.read(offset, WRITE_CHUNK_BYTES));
+    await (offset === 0 ? fs.writeBase64(path, data) : fs.appendBase64(path, data));
+  }
 }
 
 export interface CacheEntry {
@@ -81,6 +130,7 @@ export class TrackCache implements ShareLibrary {
   private loaded = false;
   private writing: Promise<void> = Promise.resolve();
   private readonly listeners = new Set<() => void>();
+  private readonly hits = new WeakMap<CacheEntry, SearchHit>();
 
   constructor(
     private readonly fs: CacheFs,
@@ -220,15 +270,14 @@ export class TrackCache implements ShareLibrary {
 
     try {
       if (this.fs.readSliceBase64) {
-        const head = Buffer.from(await this.fs.readSliceBase64(path, 0, 10), 'base64');
-        const size = id3TagSize(new Uint8Array(head));
+        const head = decodeBase64(await this.fs.readSliceBase64(path, 0, 10));
+        const size = id3TagSize(head);
 
         if (size > 0 && size <= MAX_TAG_BYTES) {
-          const bytes = Buffer.from(await this.fs.readSliceBase64(path, 0, size), 'base64');
-          tags = parseId3(new Uint8Array(bytes));
+          tags = parseId3(decodeBase64(await this.fs.readSliceBase64(path, 0, size)));
         }
       } else if (entry.size <= MAX_FILE_BYTES) {
-        tags = parseId3(new Uint8Array(Buffer.from(await this.fs.readBase64(path), 'base64')));
+        tags = parseId3(decodeBase64(await this.fs.readBase64(path)));
       }
     } catch {
       tags = null;
@@ -250,7 +299,7 @@ export class TrackCache implements ShareLibrary {
       const cover = `${entry.file.replace(/\.[^.]+$/, '')}.cover.${extension}`;
 
       try {
-        await this.fs.writeBase64(`${this.fs.dir}/${cover}`, Buffer.from(tags.picture.data).toString('base64'));
+        await this.fs.writeBase64(`${this.fs.dir}/${cover}`, encodeBase64(tags.picture.data));
         entry.cover = cover;
       } catch {
         entry.cover = null;
@@ -281,13 +330,22 @@ export class TrackCache implements ShareLibrary {
     return best?.entry ?? null;
   }
 
-  /** A SearchHit describing a cached entry, for display and matching. */
+  /**
+   * A SearchHit describing a cached entry, for display and matching. The same
+   * object is returned for an entry each time, so search scoring caches and
+   * memoised rows can reuse their work.
+   */
   asHit(entry: CacheEntry): SearchHit {
+    const known = this.hits.get(entry);
+    if (known) {
+      return known;
+    }
+
     // Downloads keep the peer's name (`sourceKey` is its hitKey), so the hit
     // matches the one in search results, likes and history.
     const separator = entry.sourceKey.indexOf('\u0000');
 
-    return {
+    const hit: SearchHit = {
       username: !entry.imported && separator > 0 ? entry.sourceKey.slice(0, separator) : '',
       filename: entry.sourceFilename,
       size: entry.size,
@@ -298,6 +356,8 @@ export class TrackCache implements ShareLibrary {
       queueLength: 0,
       extension: 'mp3',
     };
+    this.hits.set(entry, hit);
+    return hit;
   }
 
   markPlayed(entry: CacheEntry): void {
@@ -306,7 +366,8 @@ export class TrackCache implements ShareLibrary {
   }
 
   /** Stores a completed download. */
-  save(hit: SearchHit, bytes: Uint8Array): Promise<CacheEntry | null> {
+  save(hit: SearchHit, input: Uint8Array | ByteSource): Promise<CacheEntry | null> {
+    const bytes = input instanceof Uint8Array ? bytesSource(input) : input;
     return this.serialize(async () => {
       if (bytes.length === 0 || bytes.length > MAX_FILE_BYTES) {
         return null;
@@ -328,7 +389,11 @@ export class TrackCache implements ShareLibrary {
       }
 
       const file = `${Date.now().toString(36)}-${Math.floor(Math.random() * 1e6).toString(36)}.mp3`;
-      await this.fs.writeBase64(`${this.fs.dir}/${file}`, Buffer.from(bytes).toString('base64'));
+      // Written under a temporary name: an interrupted write never leaves a
+      // truncated track that looks complete.
+      const partial = `${this.fs.dir}/${file}.part`;
+      await writeBytesInChunks(this.fs, partial, bytes);
+      await this.fs.move(partial, `${this.fs.dir}/${file}`);
 
       const entry: CacheEntry = {
         sharedPath,
@@ -342,8 +407,8 @@ export class TrackCache implements ShareLibrary {
         lastPlayedAt: Date.now(),
       };
 
-      const size = id3TagSize(bytes);
-      await this.applyTags(entry, size > 0 ? parseId3(bytes.subarray(0, Math.min(bytes.length, size))) : null);
+      const size = id3TagSize(bytes.read(0, 10));
+      await this.applyTags(entry, size > 0 && size <= MAX_TAG_BYTES ? parseId3(bytes.read(0, size)) : null);
 
       this.entries.push(entry);
       await this.evict();
@@ -416,7 +481,7 @@ export class TrackCache implements ShareLibrary {
     try {
       // Tracks are a few MB; reading the whole file once is simpler and
       // faster over the bridge than many small reads.
-      bytes = new Uint8Array(Buffer.from(await this.fs.readBase64(`${this.fs.dir}/${entry.file}`), 'base64'));
+      bytes = decodeBase64(await this.fs.readBase64(`${this.fs.dir}/${entry.file}`));
     } catch {
       return null;
     }

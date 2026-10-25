@@ -70,12 +70,6 @@ export interface CatalogArtist extends CatalogArtistRef {
   albumCount?: number;
 }
 
-export interface CatalogGenre {
-  id: string;
-  name: string;
-  picture: Artwork;
-}
-
 /** Everything the catalog found for a typed query. */
 export interface CatalogSearchResult {
   query: string;
@@ -100,12 +94,12 @@ export interface AlbumPageData {
   moreByArtist: CatalogAlbum[];
 }
 
-/** Content for the Home / browse tab. */
-export interface BrowseData {
-  chartTracks: CatalogTrack[];
-  chartAlbums: CatalogAlbum[];
-  chartArtists: CatalogArtist[];
-  genres: CatalogGenre[];
+/** Home content, built only from what the user listened to. */
+export interface HomeData {
+  /** Artists of recently played tracks, most recent first. */
+  artists: CatalogArtist[];
+  /** "Parce que vous écoutez X": artists similar to the recent ones. */
+  similar: Array<{ artist: CatalogArtist; related: CatalogArtist[] }>;
 }
 
 /**
@@ -137,14 +131,7 @@ export type Loadable<T> =
 /** Pages pushed above the tabs, like a navigation stack. */
 export type Page =
   | { kind: 'artist'; id: string; name?: string }
-  | { kind: 'album'; id: string; title?: string }
-  | { kind: 'genre'; id: string; name?: string };
-
-export interface GenrePageData {
-  genre: CatalogGenre;
-  artists: CatalogArtist[];
-  chartTracks: CatalogTrack[];
-}
+  | { kind: 'album'; id: string; title?: string };
 
 /** A list of catalog tracks being played (album, top tracks, radio...). */
 export interface CatalogPlayContext {
