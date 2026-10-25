@@ -45,6 +45,10 @@ export function SearchScreen() {
   const online = connection === 'online';
   const groups = React.useMemo(() => groupSources(results.map(ranked => ranked.hit)), [results]);
   const bestHits = React.useMemo(() => groups.map(group => group.hits[0]), [groups]);
+  // Hundreds of rows are slow to build on modest phones: show a first page.
+  const [allFiles, setAllFiles] = React.useState(false);
+  React.useEffect(() => setAllFiles(false), [searchQuery]);
+  const shownGroups = allFiles ? groups : groups.slice(0, FILES_SHOWN);
   const label = `Recherche « ${query.trim() || searchQuery} »`;
   const hasSearched = searchQuery.length > 0 || searching;
   const best = results.length > 0 && results[0].score >= AUTO_MATCH_SCORE ? groups[0] : null;
@@ -185,7 +189,7 @@ export function SearchScreen() {
                   <Text style={styles.sectionTitle} accessibilityRole="header">
                     Titres
                   </Text>
-                  {groups.map(group => (
+                  {shownGroups.map(group => (
                     <TrackRow
                       key={group.key}
                       hit={group.hits[0]}
@@ -195,6 +199,9 @@ export function SearchScreen() {
                       onMore={showActions(bestHits)}
                     />
                   ))}
+                  {groups.length > FILES_SHOWN ? (
+                    <MoreToggle expanded={allFiles} onPress={() => setAllFiles(value => !value)} />
+                  ) : null}
                 </>
               ) : null}
             </>
@@ -217,6 +224,8 @@ export function SearchScreen() {
 }
 
 const CATALOG_TRACKS = 5;
+/** File rows built before "Afficher plus" (modest phones). */
+const FILES_SHOWN = 20;
 
 function catalogHasResults(catalog: CatalogSearchResult | null): boolean {
   return !!catalog && (catalog.tracks.length > 0 || catalog.artists.length > 0 || catalog.albums.length > 0);
@@ -237,6 +246,7 @@ function CatalogResults({ label }: { label: string }) {
   const openSheet = useAppStore(state => state.openSheet);
   const openPage = useAppStore(state => state.openPage);
   const [expanded, setExpanded] = React.useState(false);
+  const [allOthers, setAllOthers] = React.useState(false);
 
   const trackGroups = React.useMemo(() => catalogTrackGroups(catalog, groups), [catalog, groups]);
   const tracks = React.useMemo(() => trackGroups.flatMap(group => (group.track ? [group.track] : [])), [trackGroups]);
@@ -312,7 +322,7 @@ function CatalogResults({ label }: { label: string }) {
             Autres fichiers
           </Text>
           <Text style={styles.sectionHint}>Fichiers du réseau qui ne correspondent à aucun titre du catalogue.</Text>
-          {others.map(group => (
+          {(allOthers ? others : others.slice(0, FILES_SHOWN)).map(group => (
             <TrackRow
               key={group.id}
               hit={group.sources[0].hit}
@@ -322,6 +332,9 @@ function CatalogResults({ label }: { label: string }) {
               onMore={hit => openSheet({ kind: 'actions', hit })}
             />
           ))}
+          {others.length > FILES_SHOWN ? (
+            <MoreToggle expanded={allOthers} onPress={() => setAllOthers(value => !value)} />
+          ) : null}
         </>
       ) : null}
     </>

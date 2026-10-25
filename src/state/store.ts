@@ -23,7 +23,7 @@ import {
 import type { RankedHit } from '../core/search';
 import { createDeezerCatalog } from '../core/catalog';
 import type { CatalogProvider } from '../core/catalog';
-import { soulseekQueryFor, sourcesForTrack, unifyResults } from '../core/unify';
+import { primeHitScores, soulseekQueryFor, sourcesForTrack, unifyResults } from '../core/unify';
 import type {
   AlbumPageData,
   ArtistPageData,
@@ -291,6 +291,10 @@ const MAX_ATTEMPTS = 5;
 const SEARCH_DURATION_MS = 10000;
 /** Weaker matches are still listed; the user picks what to play. */
 const LIST_SCORE = 0.55;
+/** Longest stretch of search scoring before the UI gets a turn. */
+const SCORE_SLICE_MS = 8;
+/** Search results on screen are refreshed at most this often. */
+const PUBLISH_EVERY_MS = 400;
 /** Stop listening for results once this many sources came in. */
 const ENOUGH_RESULTS = 300;
 /** Embedded covers above this are not decoded (JS-thread base64 cost). */
@@ -1462,7 +1466,17 @@ export const useAppStore = create<AppState>((set, get) => {
       let catalogTracks: CatalogTrack[] = [];
       // File/track scores of this search: each regroup only scores new files.
       const unifyScores = new Map<string, number>();
-      let rankTimer: ReturnType<typeof setTimeout> | null = null;
+      /**
+       * Files scored so far (against the query and the current catalog
+       * tracks). Scoring runs in slices of SCORE_SLICE_MS so slow phones keep
+       * a responsive UI; results only show files already scored.
+       */
+      let scored = 0;
+      /** Files scored against the query: the flat result list. Survives a new catalog answer. */
+      let textScored = 0;
+      let pumpTimer: ReturnType<typeof setTimeout> | null = null;
+      let lastPublish = 0;
+      let drained: (() => void) | null = null;
       // Accent-free spelling and the catalog's spelling run alongside.
       const extraSearches: Promise<unknown>[] = [];
       const [mainSpelling, ...otherSpellings] = soulseekSpellings(networkQuery);
@@ -1471,8 +1485,50 @@ export const useAppStore = create<AppState>((set, get) => {
         if (sequence !== searchSequence) {
           return;
         }
-        const unified = unifyResults(networkQuery, collected, catalogTracks, LIST_SCORE, unifyScores);
-        set(state => ({ groups: unified.groups, hitTracks: { ...state.hitTracks, ...unified.hitTracks } }));
+        const ready = collected.slice(0, scored);
+        const unified = unifyResults(networkQuery, ready, catalogTracks, LIST_SCORE, unifyScores);
+        set(state => ({
+          results: rankHits(networkQuery, collected.slice(0, Math.max(scored, textScored)), LIST_SCORE),
+          groups: unified.groups,
+          hitTracks: { ...state.hitTracks, ...unified.hitTracks },
+        }));
+      };
+
+      const pump = () => {
+        pumpTimer = null;
+        if (sequence !== searchSequence) {
+          drained?.();
+          drained = null;
+          return;
+        }
+
+        const deadline = Date.now() + SCORE_SLICE_MS;
+        while (scored < collected.length && Date.now() < deadline) {
+          primeHitScores(networkQuery, collected[scored], catalogTracks, unifyScores);
+          scored++;
+          textScored = Math.max(textScored, scored);
+        }
+
+        const done = scored >= collected.length;
+        if (done || Date.now() - lastPublish >= PUBLISH_EVERY_MS) {
+          lastPublish = Date.now();
+          regroup();
+        }
+
+        if (!done) {
+          // Give touches and rendering a turn before the next slice.
+          pumpTimer = setTimeout(pump, 0);
+        } else if (drained) {
+          const resolve = drained;
+          drained = null;
+          resolve();
+        }
+      };
+
+      const schedulePump = () => {
+        if (!pumpTimer) {
+          pumpTimer = setTimeout(pump, 0);
+        }
       };
 
       const onBatch = (batch: SearchHit[]) => {
@@ -1488,9 +1544,7 @@ export const useAppStore = create<AppState>((set, get) => {
           }
         }
 
-        if (!rankTimer) {
-          rankTimer = setTimeout(publishResults, 400);
-        }
+        schedulePump();
 
         if (collected.length >= ENOUGH_RESULTS) {
           searchService?.cancelSearch();
@@ -1511,7 +1565,11 @@ export const useAppStore = create<AppState>((set, get) => {
 
             catalogTracks = result.tracks;
             set({ catalogResults: result });
+            // Files are scored again against the catalog tracks, in slices
+            // (text scores are cached, only the track matching is new).
+            scored = 0;
             regroup();
+            schedulePump();
 
             // "daft pnk one mor time" finds nothing on Soulseek, where every
             // word must be in the path. Search the catalog's spelling too.
@@ -1566,14 +1624,6 @@ export const useAppStore = create<AppState>((set, get) => {
 
       // Nothing plays until the user picks a result: the list fills in as
       // peers answer, ranked by match then availability.
-      const publishResults = () => {
-        rankTimer = null;
-
-        if (sequence === searchSequence) {
-          set({ results: rankHits(networkQuery, collected, LIST_SCORE) });
-          regroup();
-        }
-      };
 
       try {
         for (const spelling of otherSpellings) {
@@ -1596,11 +1646,19 @@ export const useAppStore = create<AppState>((set, get) => {
           return;
         }
 
-        if (rankTimer) {
-          clearTimeout(rankTimer);
+        // Let the last slices finish (still without blocking the UI).
+        if (scored < collected.length || pumpTimer) {
+          await new Promise<void>(resolve => {
+            drained = resolve;
+            schedulePump();
+          });
         }
 
-        publishResults();
+        if (sequence !== searchSequence) {
+          return;
+        }
+
+        regroup();
         const top = rankHits(networkQuery, collected, 0).slice(0, 5);
         debugLog(
           'play',
@@ -1619,8 +1677,8 @@ export const useAppStore = create<AppState>((set, get) => {
           set({ searching: false, searchError: errorMessage(error) });
         }
       } finally {
-        if (rankTimer && sequence !== searchSequence) {
-          clearTimeout(rankTimer);
+        if (pumpTimer && sequence !== searchSequence) {
+          clearTimeout(pumpTimer);
         }
       }
     },

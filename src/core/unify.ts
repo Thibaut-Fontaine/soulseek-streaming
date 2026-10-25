@@ -143,6 +143,32 @@ export function soulseekQueryFor(track: CatalogTrack): string {
   return formatSearchQuery(`${track.artist.name} ${title} ${keepVersion}`);
 }
 
+function scoreKey(track: CatalogTrack, key: string): string {
+  return `${track.id}\u0000${key}`;
+}
+
+/**
+ * Scores one file against the query and the catalog tracks, into the caches
+ * `unifyResults` and `rankHits` read. Lets a search spread that work over
+ * many small slices instead of one long block on the JS thread.
+ */
+export function primeHitScores(
+  query: string,
+  hit: SearchHit,
+  catalogTracks: CatalogTrack[],
+  scores: Map<string, number>,
+): void {
+  matchScore(query, hit);
+  const key = hitKey(hit);
+
+  for (const track of catalogTracks.slice(0, MAX_CATALOG_TRACKS)) {
+    const cacheKey = scoreKey(track, key);
+    if (!scores.has(cacheKey)) {
+      scores.set(cacheKey, matchHitToTrack(hit, track));
+    }
+  }
+}
+
 export interface UnifiedResults {
   groups: TrackGroup[];
   /** Catalog track of each matched file, by `hitKey`. */
@@ -175,7 +201,7 @@ export function unifyResults(
 
     const key = hitKey(hit);
     for (const track of tracks) {
-      const cacheKey = `${track.id}\u0000${key}`;
+      const cacheKey = scoreKey(track, key);
       let score = scores?.get(cacheKey);
       if (score === undefined) {
         score = matchHitToTrack(hit, track);
