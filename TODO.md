@@ -49,7 +49,7 @@ quality. Only tracks still without a source get their own search on play.
 
 - Test on an older / low-RAM Android device or emulator profile (2–3 GB RAM,
   older Android version; minSdk is 24).
-- Watch memory: the in-memory stream buffer (256 MiB cap), cover images
+- Watch memory: the in-memory stream buffer (64 MB cap), cover images
   (catalog artwork sizes), kept-mounted pages, list virtualisation.
 - Lower limits or sizes when the device reports little memory.
 
