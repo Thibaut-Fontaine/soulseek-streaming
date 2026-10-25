@@ -170,7 +170,7 @@ describe('catalog search and playback', () => {
         expect(state.catalogResults?.tracks[0].id).toBe(STREAM_ME.id);
         expect(network.searches).toEqual([
           'fake artst stream me',
-          'Fake Artist Stream Me',
+          'fake artist stream me',
         ]);
         expect(state.groups[0].track?.id).toBe(STREAM_ME.id);
         expect(
@@ -220,8 +220,8 @@ describe('catalog search and playback', () => {
         expect(state.resolutions[STREAM_ME.id].status).toBe('found');
         expect(state.catalogContext?.index).toBe(1);
         expect(state.current?.hit.filename).toBe(TRACK);
-        expect(network.searches).toContain('Fake Artist Nowhere To Be Found');
-        expect(network.searches).toContain('Fake Artist Stream Me');
+        expect(network.searches).toContain('fake artist nowhere to be found');
+        expect(network.searches).toContain('fake artist stream me');
       },
     );
   });
@@ -270,7 +270,7 @@ describe('catalog search and playback', () => {
 
           const state = useAppStore.getState();
           expect(Date.now() - started).toBeLessThan(3000);
-          expect(network.searches.slice(searchesBefore)).not.toContain('Fake Artist Nowhere To Be Found');
+          expect(network.searches.slice(searchesBefore)).not.toContain('fake artist nowhere to be found');
           expect(state.catalogPending).toBeNull();
           expect(state.resolutions[MISSING.id].status).toBe('none');
           expect(state.current?.hit.filename).toBe(OTHER);
@@ -282,6 +282,19 @@ describe('catalog search and playback', () => {
     }
 
     expect(errors).toEqual([]);
+  });
+
+  test('a capitalised, accented catalog title is searched in lowercase and without accents', async () => {
+    // Deezer writes this title "SYSTÈME D"; the shared file has no accent.
+    const SYSTEME = track('dz:14', 'SYSTÈME D', 200, 'Jungle Jack');
+    await withNetwork(
+      [{ username: 'peer_a', filename: 'Music\\Jungle Jack\\Jungle des illusions vol 2\\05 - Systeme D.mp3', behavior: 'ok' }],
+      async network => {
+        const resolution = await useAppStore.getState().resolveTrack(SYSTEME);
+        expect(network.searches).toEqual(expect.arrayContaining(['jungle jack système', 'jungle jack systeme']));
+        expect(resolution.status).toBe('found');
+      },
+    );
   });
 
   test('a wrong length is not accepted as the track', async () => {

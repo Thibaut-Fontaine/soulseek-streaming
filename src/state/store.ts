@@ -18,6 +18,7 @@ import {
   normalizeForMatch,
   rankHits,
   similarity,
+  soulseekSpellings,
 } from '../core/search';
 import type { RankedHit } from '../core/search';
 import { createDeezerCatalog } from '../core/catalog';
@@ -963,26 +964,37 @@ export const useAppStore = create<AppState>((set, get) => {
     }
 
     const collected: SearchHit[] = [];
+    const seen = new Set<string>();
     const controller = new AbortController();
     let grace: ReturnType<typeof setTimeout> | null = null;
     let goodFree = 0;
 
-    try {
-      await searchService.search(
-        query,
-        batch => {
-          collected.push(...batch);
-          const good = sourcesForTrack(track, batch);
+    const onBatch = (incoming: SearchHit[]) => {
+      // Several spellings run at once: the same file can come back twice.
+      const batch = incoming.filter(found => {
+        const key = hitKey(found);
+        if (seen.has(key)) {
+          return false;
+        }
+        seen.add(key);
+        return true;
+      });
+      collected.push(...batch);
+      const good = sourcesForTrack(track, batch);
           goodFree += good.filter(source => source.hit.slotFree).length;
 
-          if (goodFree >= 3) {
-            controller.abort();
-          } else if (good.length > 0 && !grace) {
-            grace = setTimeout(() => controller.abort(), RESOLVE_GRACE_MS);
-          }
-        },
-        durationMs,
-        { exclusive: false, signal: controller.signal },
+      if (goodFree >= 3) {
+        controller.abort();
+      } else if (good.length > 0 && !grace) {
+        grace = setTimeout(() => controller.abort(), RESOLVE_GRACE_MS);
+      }
+    };
+
+    try {
+      await Promise.all(
+        soulseekSpellings(query).map(spelling =>
+          searchService.search(spelling, onBatch, durationMs, { exclusive: false, signal: controller.signal }),
+        ),
       );
     } finally {
       if (grace) {
@@ -1451,7 +1463,9 @@ export const useAppStore = create<AppState>((set, get) => {
       // File/track scores of this search: each regroup only scores new files.
       const unifyScores = new Map<string, number>();
       let rankTimer: ReturnType<typeof setTimeout> | null = null;
-      let extraSearch: Promise<unknown> | null = null;
+      // Accent-free spelling and the catalog's spelling run alongside.
+      const extraSearches: Promise<unknown>[] = [];
+      const [mainSpelling, ...otherSpellings] = soulseekSpellings(networkQuery);
 
       const regroup = () => {
         if (sequence !== searchSequence) {
@@ -1508,10 +1522,14 @@ export const useAppStore = create<AppState>((set, get) => {
               normalizeForMatch(a).split(' ').sort().join(' ') === normalizeForMatch(b).split(' ').sort().join(' ');
 
             if (corrected && online && get().searching && remaining > 2000 && !sameWords(corrected, networkQuery)) {
-              debugLog('play', `recherche corrigée « ${corrected} »`);
-              extraSearch = searchService
-                .search(corrected, onBatch, remaining, { exclusive: false, signal: abort.signal })
-                .catch(() => {});
+              for (const spelling of soulseekSpellings(corrected)) {
+                debugLog('play', `recherche corrigée « ${spelling} »`);
+                extraSearches.push(
+                  searchService
+                    .search(spelling, onBatch, remaining, { exclusive: false, signal: abort.signal })
+                    .catch(() => {}),
+                );
+              }
             }
           })
           .catch(error => {
@@ -1558,10 +1576,20 @@ export const useAppStore = create<AppState>((set, get) => {
       };
 
       try {
-        await searchService.search(networkQuery, onBatch, SEARCH_DURATION_MS);
+        for (const spelling of otherSpellings) {
+          debugLog('play', `recherche aussi « ${spelling} »`);
+          extraSearches.push(
+            searchService
+              .search(spelling, onBatch, SEARCH_DURATION_MS, { exclusive: false, signal: abort.signal })
+              .catch(() => {}),
+          );
+        }
 
-        if (extraSearch) {
-          await extraSearch;
+        await searchService.search(mainSpelling, onBatch, SEARCH_DURATION_MS);
+
+        // The catalog may add one while we wait: drain until none is left.
+        while (extraSearches.length > 0) {
+          await Promise.all(extraSearches.splice(0));
         }
 
         if (sequence !== searchSequence) {

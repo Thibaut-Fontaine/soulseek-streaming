@@ -80,6 +80,18 @@ export function formatSearchQuery(raw: string): string {
   return cleaned.length >= 2 ? cleaned : raw.trim();
 }
 
+/**
+ * Spellings of a query to send to Soulseek. Peers compare words without case
+ * for plain letters only ("È" may not equal "è"), and many files are named
+ * without accents ("Systeme D" for "Système D"). So the query is sent in
+ * lowercase, plus an accent-free copy when it has accents.
+ */
+export function soulseekSpellings(query: string): string[] {
+  const lower = query.normalize('NFC').toLowerCase();
+  const plain = stripDiacritics(lower).normalize('NFC');
+  return plain !== lower ? [lower, plain] : [lower];
+}
+
 /** Levenshtein distance with a bounded input length. */
 export function levenshtein(a: string, b: string): number {
   const left = a.slice(0, 128);
