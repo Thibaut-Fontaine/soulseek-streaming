@@ -189,3 +189,41 @@ describe('search and library', () => {
     );
   });
 });
+
+describe('login without network', () => {
+  async function closedPort(): Promise<number> {
+    const net = jest.requireActual<typeof import('node:net')>('node:net');
+    const server = net.createServer();
+    await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+    const { port } = server.address() as { port: number };
+    await new Promise<void>(resolve => server.close(() => resolve()));
+    return port;
+  }
+
+  beforeEach(async () => {
+    useAppStore.setState({
+      settings: {
+        ...useAppStore.getState().settings,
+        serverHost: '127.0.0.1',
+        serverPort: await closedPort(),
+        listenPort: 0,
+      },
+    });
+  });
+
+  afterEach(() => useAppStore.getState().logout());
+
+  test('stored credentials keep the user in the app, offline', async () => {
+    expect(await useAppStore.getState().login('tester', 'secret', 'saved')).toBe(false);
+
+    expect(useAppStore.getState().username).toBe('tester');
+    expect(useAppStore.getState().connection).toBe('error');
+  });
+
+  test('credentials typed on the login screen stay there', async () => {
+    expect(await useAppStore.getState().login('tester', 'secret')).toBe(false);
+
+    expect(useAppStore.getState().username).toBeNull();
+    expect(useAppStore.getState().prefillUsername).toBe('tester');
+  });
+});

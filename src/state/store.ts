@@ -10,6 +10,7 @@ import {
 } from '@react-native-documents/picker';
 
 import { id3TagSize, parseId3 } from '../core/id3';
+import { LoginError } from '../core/soulseekClient';
 import type { ConnectionState } from '../core/soulseekClient';
 import type { TransferSnapshot } from '../core/transfer';
 import {
@@ -102,6 +103,8 @@ export interface CurrentPlayback {
   warning: string | null;
 }
 
+export type LoginSession = 'new' | 'saved' | 'keep';
+
 interface AppState {
   ready: boolean;
   playerReady: boolean;
@@ -177,7 +180,12 @@ interface AppState {
   catalogPending: CatalogTrack | null;
 
   init: () => Promise<void>;
-  login: (username: string, password: string, keepSessionOnFailure?: boolean) => Promise<boolean>;
+  /**
+   * `session`: 'new' (typed on the login screen), 'saved' (stored
+   * credentials: stay in the app unless the server refuses them) or 'keep'
+   * (settings change: the current session stays whatever happens).
+   */
+  login: (username: string, password: string, session?: LoginSession) => Promise<boolean>;
   logout: () => Promise<void>;
   reconnect: () => Promise<void>;
   /** Verifies the server connection still works (after the app slept). */
@@ -1506,14 +1514,14 @@ export const useAppStore = create<AppState>((set, get) => {
 
         if (credentials) {
           set({ prefillUsername: credentials.username });
-          await get().login(credentials.username, credentials.password);
+          await get().login(credentials.username, credentials.password, 'saved');
         }
       } finally {
         set({ ready: true });
       }
     },
 
-    login: async (username, password, keepSessionOnFailure = false) => {
+    login: async (username, password, session = 'new') => {
       const settings = get().settings;
       const previousUsername = get().username;
 
@@ -1532,7 +1540,7 @@ export const useAppStore = create<AppState>((set, get) => {
       wire(instance);
 
       set({
-        username: keepSessionOnFailure ? previousUsername : null,
+        username: session === 'keep' ? previousUsername : session === 'saved' ? username : null,
         prefillUsername: username,
         connection: 'connecting',
         connectionError: null,
@@ -1560,7 +1568,7 @@ export const useAppStore = create<AppState>((set, get) => {
           connection: 'online',
           listenPort: instance.listenPort,
           httpPort: instance.httpPort,
-          tab: keepSessionOnFailure ? get().tab : 'home',
+          tab: session === 'new' ? 'home' : get().tab,
         });
         return true;
       } catch (error) {
@@ -1570,8 +1578,17 @@ export const useAppStore = create<AppState>((set, get) => {
           service = null;
         }
 
+        // Without network, stored credentials keep the user in the app (offline
+        // banner, "Réessayer"); only refused credentials go back to login.
+        const keptUsername =
+          session === 'keep'
+            ? previousUsername
+            : session === 'saved' && !(error instanceof LoginError)
+              ? username
+              : null;
+
         set({
-          username: keepSessionOnFailure ? previousUsername : null,
+          username: keptUsername,
           connection: 'error',
           connectionError: errorMessage(error),
         });
@@ -1632,7 +1649,7 @@ export const useAppStore = create<AppState>((set, get) => {
       const credentials: Credentials | null = await loadCredentials();
 
       if (credentials) {
-        await get().login(credentials.username, credentials.password);
+        await get().login(credentials.username, credentials.password, 'saved');
       }
     },
 
@@ -1676,7 +1693,7 @@ export const useAppStore = create<AppState>((set, get) => {
         return;
       }
 
-      const ok = await get().login(username, password, true);
+      const ok = await get().login(username, password, 'keep');
 
       if (ok) {
         set({ tab: 'settings' });
