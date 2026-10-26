@@ -1298,6 +1298,46 @@ export const useAppStore = create<AppState>((set, get) => {
     return context.index + 1 < context.tracks.length ? context.index + 1 : null;
   }
 
+  /** Plays a file (from the device cache when it is there). */
+  async function startHit(hit: SearchHit): Promise<void> {
+    if (!service) {
+      return;
+    }
+
+    if (!isStreamableFile(hit.filename)) {
+      set({ notice: 'Seuls les fichiers MP3 sont proposés par SoulStream.' });
+      return;
+    }
+
+    const cached = trackCache?.findByHit(hit);
+
+    try {
+      lastPlayStartedAt = Date.now();
+
+      if (cached) {
+        await playCached(cached, hit);
+      } else {
+        await playWithFallback(hit);
+      }
+    } catch (error) {
+      set(state => ({
+        current: state.current
+          ? { ...state.current, phase: 'error', error: errorMessage(error) }
+          : null,
+        searchError: state.current ? state.searchError : errorMessage(error),
+      }));
+    }
+  }
+
+  /**
+   * Drops a catalog track still waiting for its sources: anything the user
+   * plays or stops meanwhile wins over it.
+   */
+  function cancelCatalogPlay(): void {
+    catalogPlaySequence++;
+    set({ catalogPending: null });
+  }
+
   /**
    * `byUser`: the user tapped this track (search it again even if it had no
    * source a moment ago). Moving on through a list (end of track, next,
@@ -1325,7 +1365,7 @@ export const useAppStore = create<AppState>((set, get) => {
     const best = resolution.sources[0];
 
     if (best) {
-      await get().playHit(best.hit);
+      await startHit(best.hit);
 
       // Find the next track's sources while this one plays.
       const upcoming = context ? context.tracks[context.index + 1] : undefined;
@@ -1739,33 +1779,8 @@ export const useAppStore = create<AppState>((set, get) => {
     },
 
     playHit: async hit => {
-      if (!service) {
-        return;
-      }
-
-      if (!isStreamableFile(hit.filename)) {
-        set({ notice: 'Seuls les fichiers MP3 sont proposés par SoulStream.' });
-        return;
-      }
-
-      const cached = trackCache?.findByHit(hit);
-
-      try {
-        lastPlayStartedAt = Date.now();
-
-        if (cached) {
-          await playCached(cached, hit);
-        } else {
-          await playWithFallback(hit);
-        }
-      } catch (error) {
-        set(state => ({
-          current: state.current
-            ? { ...state.current, phase: 'error', error: errorMessage(error) }
-            : null,
-          searchError: state.current ? state.searchError : errorMessage(error),
-        }));
-      }
+      cancelCatalogPlay();
+      await startHit(hit);
     },
 
     playNextSource: async () => {
@@ -1796,16 +1811,17 @@ export const useAppStore = create<AppState>((set, get) => {
     stopPlayback: async () => {
       debugLog('play', `arrêt demandé (${get().current?.phase ?? 'rien en cours'})`);
       playSequence++;
+      cancelCatalogPlay();
+      // Clear the UI first: the native reset can take a while.
+      set({ current: null, playerOpen: false });
       await resetPlayer();
       service?.cancelActive();
-      set({ current: null, playerOpen: false });
     },
 
     dismissNotice: () => set({ notice: null }),
 
     playTrack: async (hit, context) => {
-      catalogPlaySequence++;
-      set({ context: context ?? null, catalogContext: null, catalogPending: null });
+      set({ context: context ?? null, catalogContext: null });
       await get().playHit(hit);
     },
 

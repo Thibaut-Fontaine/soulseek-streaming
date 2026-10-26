@@ -207,6 +207,22 @@ describe('catalog search and playback', () => {
     );
   });
 
+  test('stopping while sources are searched cancels the track', async () => {
+    await withNetwork(
+      [{ username: 'peer_a', filename: TRACK, behavior: 'ok' }],
+      async () => {
+        const playing = useAppStore.getState().playCatalogTrack(STREAM_ME);
+        await waitFor(() => useAppStore.getState().resolutions[STREAM_ME.id]?.status === 'searching');
+
+        await useAppStore.getState().stopPlayback();
+        await playing;
+
+        expect(useAppStore.getState().current).toBeNull();
+        expect(useAppStore.getState().catalogPending).toBeNull();
+      },
+    );
+  });
+
   test('an album plays track by track, skipping tracks nobody shares', async () => {
     await withNetwork(
       [{ username: 'peer_a', filename: TRACK, behavior: 'ok' }],
