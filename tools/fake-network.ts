@@ -36,6 +36,13 @@ const CLIENT_PORT = Number(process.env.CLIENT_PORT ?? 22345);
 const PEER_IP = process.env.PEER_IP ?? '10.0.2.2';
 const FILE_PATH = process.env.FILE ?? path.resolve(process.cwd(), 'tools/demo.mp3');
 const DURATION_SEC = Number(process.env.DURATION ?? 28);
+// Slow peer, to test what happens while a track loads: wait before accepting
+// the upload, and between 16 KiB chunks.
+const ACCEPT_DELAY_MS = Number(process.env.ACCEPT_DELAY_MS ?? 0);
+const CHUNK_DELAY_MS = Number(process.env.CHUNK_DELAY_MS ?? 5);
+// ECHO=1: answer every search with a file named after the query, so catalog
+// tracks (searched by artist + title when played) find a source too.
+const ECHO = process.env.ECHO === '1';
 const sourceFile = fs.existsSync(FILE_PATH) ? FILE_PATH : null;
 const extension = sourceFile ? path.extname(sourceFile).slice(1).toLowerCase() || 'mp3' : 'wav';
 const USERNAME = 'alice';
@@ -97,10 +104,16 @@ function readString(payload: Uint8Array, offset: number): { value: string; next:
   return { value, next: offset + 4 + length };
 }
 
-function buildSearchPayload(token: number): Uint8Array {
-  const files = [1, 2, 3].map(
-    index => `Music\\Fake Artist\\Fake Album\\0${index} - Fake Song ${index}.${extension}`,
-  );
+function buildSearchPayload(token: number, query: string): Uint8Array {
+  const words = query
+    .split(/\s+/)
+    .filter(word => word && !word.startsWith('-'))
+    .join(' ');
+  const files = ECHO
+    ? [`Music\\${words}.${extension}`]
+    : [1, 2, 3].map(
+        index => `Music\\Fake Artist\\Fake Album\\0${index} - Fake Song ${index}.${extension}`,
+      );
 
   const writer = new ByteWriter();
   writer.string(USERNAME).u32(token).u32(files.length);
@@ -108,7 +121,7 @@ function buildSearchPayload(token: number): Uint8Array {
   for (const filename of files) {
     writer.u8(1).string(filename).u64(data.length).string('');
     // bitrate (0), duration (1), sample rate (4)
-    writer.u32(3).u32(0).u32(192).u32(1).u32(DURATION_SEC).u32(4).u32(44100);
+    writer.u32(3).u32(0).u32(192).u32(1).u32(ECHO ? 0 : DURATION_SEC).u32(4).u32(44100);
   }
 
   writer.bool(true).u32(500000).u32(0).u32(0);
@@ -154,7 +167,7 @@ function handleServerConnection(socket: net.Socket): void {
           log('search token', token, JSON.stringify(query));
 
           if (!query.toLowerCase().includes('none')) {
-            setTimeout(() => sendSearchResults(token), 120);
+            setTimeout(() => sendSearchResults(token, query), 120);
           }
 
           break;
@@ -188,18 +201,102 @@ function handleServerConnection(socket: net.Socket): void {
   socket.on('error', () => {});
 }
 
-function sendSearchResults(token: number): void {
+function sendSearchResults(token: number, query: string): void {
   const socket = net.createConnection({ host: '127.0.0.1', port: clientPort }, () => {
     const init = new ByteWriter();
     init.string(USERNAME).string('P').u32(0);
     socket.write(encodePeerInitMessage(1, init.toBytes()));
-    socket.write(encodePeerMessage(PeerCode.FILE_SEARCH_RESPONSE, buildSearchPayload(token)));
+    socket.write(encodePeerMessage(PeerCode.FILE_SEARCH_RESPONSE, buildSearchPayload(token, query)));
     log('sent search result');
   });
 
   sockets.add(socket);
+  // The client may reuse this connection to ask for the file.
+  const framer = new Framer(4);
+  socket.on('data', chunk => {
+    for (const frame of framer.push(new Uint8Array(chunk))) {
+      answerPeerFrame(socket, frame);
+    }
+  });
   socket.on('error', error => log('search connection error', error.message));
-  setTimeout(() => socket.destroy(), 5000);
+  // Real peers close this idle connection after a while too.
+  setTimeout(() => socket.destroy(), Number(process.env.RESULT_CONN_MS ?? 5000));
+}
+
+function startFileConnection(token: number): void {
+  const fileSocket = net.createConnection({ host: '127.0.0.1', port: clientPort }, () => {
+    const init = new ByteWriter();
+    init.string(USERNAME).string('F').u32(0);
+    fileSocket.write(encodePeerInitMessage(1, init.toBytes()));
+
+    const tokenBytes = new Uint8Array(4);
+    tokenBytes[0] = token & 0xff;
+    tokenBytes[1] = (token >>> 8) & 0xff;
+    tokenBytes[2] = (token >>> 16) & 0xff;
+    tokenBytes[3] = (token >>> 24) & 0xff;
+    fileSocket.write(tokenBytes);
+    log('file connection opened, token', token);
+  });
+
+  sockets.add(fileSocket);
+  let offsetReceived = false;
+
+  fileSocket.on('data', chunk => {
+    if (offsetReceived) {
+      return;
+    }
+
+    if (Buffer.from(chunk).length >= 8) {
+      offsetReceived = true;
+      log('offset received, streaming', data.length, 'bytes');
+      let offset = 0;
+      const send = () => {
+        if (offset >= data.length) {
+          log('file fully sent');
+          return;
+        }
+        if (fileSocket.destroyed) {
+          log('file connection closed by the client at', offset);
+          return;
+        }
+
+        const end = Math.min(offset + 16384, data.length);
+        fileSocket.write(data.subarray(offset, end));
+        offset = end;
+        setTimeout(send, CHUNK_DELAY_MS);
+      };
+      send();
+    }
+  });
+
+  fileSocket.on('error', error => log('file connection error', error.message));
+}
+
+/** Upload requests, on whichever P connection they arrive. */
+function answerPeerFrame(socket: net.Socket, frame: { code: number; payload: Uint8Array }): void {
+  if (frame.code === PeerCode.QUEUE_UPLOAD) {
+    const { value: requestedName } = readString(frame.payload, 0);
+    const writer = new ByteWriter();
+    writer
+      .u32(TransferDirection.UPLOAD)
+      .u32(4242)
+      .string(requestedName)
+      .u64(data.length);
+    setTimeout(() => {
+      socket.write(encodePeerMessage(PeerCode.TRANSFER_REQUEST, writer.toBytes()));
+      log('sent TransferRequest');
+    }, ACCEPT_DELAY_MS);
+  } else if (frame.code === PeerCode.TRANSFER_RESPONSE) {
+    const allowed = frame.payload[4] !== 0;
+    const token = readU32(frame.payload, 0);
+    log('TransferResponse', allowed, 'token', token);
+
+    if (allowed) {
+      startFileConnection(token);
+    }
+  } else {
+    log('peer message', frame.code);
+  }
 }
 
 function handlePeerConnection(socket: net.Socket): void {
@@ -207,58 +304,7 @@ function handlePeerConnection(socket: net.Socket): void {
   const queue = new ByteQueue();
   const framer = new Framer(4);
   let stage: 'init' | 'peer' = 'init';
-  let transferStarted = false;
 
-  const startFileConnection = (token: number) => {
-    if (transferStarted) {
-      return;
-    }
-
-    transferStarted = true;
-
-    const fileSocket = net.createConnection({ host: '127.0.0.1', port: clientPort }, () => {
-      const init = new ByteWriter();
-      init.string(USERNAME).string('F').u32(0);
-      fileSocket.write(encodePeerInitMessage(1, init.toBytes()));
-
-      const tokenBytes = new Uint8Array(4);
-      tokenBytes[0] = token & 0xff;
-      tokenBytes[1] = (token >>> 8) & 0xff;
-      tokenBytes[2] = (token >>> 16) & 0xff;
-      tokenBytes[3] = (token >>> 24) & 0xff;
-      fileSocket.write(tokenBytes);
-      log('file connection opened, token', token);
-    });
-
-    sockets.add(fileSocket);
-    let offsetReceived = false;
-
-    fileSocket.on('data', chunk => {
-      if (offsetReceived) {
-        return;
-      }
-
-      if (Buffer.from(chunk).length >= 8) {
-        offsetReceived = true;
-        log('offset received, streaming', data.length, 'bytes');
-        let offset = 0;
-        const send = () => {
-          if (offset >= data.length) {
-            log('file fully sent');
-            return;
-          }
-
-          const end = Math.min(offset + 16384, data.length);
-          fileSocket.write(data.subarray(offset, end));
-          offset = end;
-          setTimeout(send, 5);
-        };
-        send();
-      }
-    });
-
-    fileSocket.on('error', error => log('file connection error', error.message));
-  };
 
   const pump = () => {
     if (stage === 'init') {
@@ -292,27 +338,7 @@ function handlePeerConnection(socket: net.Socket): void {
       const chunk = queue.take(queue.length);
 
       for (const frame of framer.push(chunk)) {
-        if (frame.code === PeerCode.QUEUE_UPLOAD) {
-          const { value: requestedName } = readString(frame.payload, 0);
-          const writer = new ByteWriter();
-          writer
-            .u32(TransferDirection.UPLOAD)
-            .u32(4242)
-            .string(requestedName)
-            .u64(data.length);
-          socket.write(encodePeerMessage(PeerCode.TRANSFER_REQUEST, writer.toBytes()));
-          log('sent TransferRequest');
-        } else if (frame.code === PeerCode.TRANSFER_RESPONSE) {
-          const allowed = frame.payload[4] !== 0;
-          const token = readU32(frame.payload, 0);
-          log('TransferResponse', allowed, 'token', token);
-
-          if (allowed) {
-            startFileConnection(token);
-          }
-        } else {
-          log('peer message', frame.code);
-        }
+        answerPeerFrame(socket, frame);
       }
     }
   };

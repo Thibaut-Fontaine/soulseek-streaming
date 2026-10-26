@@ -242,7 +242,12 @@ Fake server env:
 - `DURATION=300` (advertised duration; default 28);
 - `SERVER_PORT=22420`, `PEER_PORT=22421`, `PEER_IP=10.0.2.2`,
   `CLIENT_PORT=22345`;
-- `LATE_RESPONSES=40` sends late 500-file bursts (freeze regression).
+- `ACCEPT_DELAY_MS=4000`, `CHUNK_DELAY_MS=1500` (default 0 and 5): a slow
+  peer, to test what happens while a track loads (cancel, tabs, fallback);
+- `ECHO=1`: every search gets one file named after the query, so catalog
+  tracks (searched as artist + title when played) find a source;
+- `RESULT_CONN_MS=600000` (default 5000): how long the peer keeps the
+  connection it delivered results on (the app reuses it for the download).
 
 The fake hits are now `Music\Fake Artist\Fake Album\0N - Fake Song N.mp3`.
 Search **`Fake Song 1`** (not just `Fake`) to get a high enough score for
