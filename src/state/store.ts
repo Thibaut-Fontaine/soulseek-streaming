@@ -1375,9 +1375,10 @@ export const useAppStore = create<AppState>((set, get) => {
     if (best) {
       await startHit(best.hit);
 
-      // Find the next track's sources while this one plays.
+      // Find the next track's sources while this one plays (not when the
+      // user stopped it or moved on meanwhile).
       const upcoming = context ? context.tracks[context.index + 1] : undefined;
-      if (upcoming && !get().shuffle) {
+      if (upcoming && !get().shuffle && sequence === catalogPlaySequence && get().current) {
         void get().resolveTrack(upcoming);
       }
       return;

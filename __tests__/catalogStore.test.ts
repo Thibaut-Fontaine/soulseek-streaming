@@ -223,6 +223,30 @@ describe('catalog search and playback', () => {
     );
   });
 
+  test('stopping a list track does not search the next one', async () => {
+    await withNetwork(
+      [{ username: 'peer_a', filename: TRACK, behavior: 'ok' }],
+      async network => {
+        // Known sources: playing needs no search, so any search is the next track's.
+        await useAppStore.getState().runSearch('fake artist stream me');
+        await useAppStore.getState().searchFilesToo();
+        const searches = network.searches.length;
+
+        const playing = useAppStore.getState().playCatalogTrack(STREAM_ME, {
+          label: 'Album',
+          tracks: [STREAM_ME, MISSING],
+          index: 0,
+        });
+        await waitFor(() => useAppStore.getState().current?.phase === 'preparing');
+        await useAppStore.getState().stopPlayback();
+        await playing;
+
+        expect(useAppStore.getState().resolutions[MISSING.id]?.status).not.toBe('searching');
+        expect(network.searches).toHaveLength(searches);
+      },
+    );
+  });
+
   test('an album plays track by track, skipping tracks nobody shares', async () => {
     await withNetwork(
       [{ username: 'peer_a', filename: TRACK, behavior: 'ok' }],
