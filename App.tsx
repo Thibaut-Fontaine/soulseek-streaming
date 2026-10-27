@@ -5,7 +5,8 @@ import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-cont
 
 import { debugLog } from './src/services/debugLog';
 import { useAppStore } from './src/state/store';
-import { IconButton, Toast } from './src/ui/components';
+import { IconButton } from './src/ui/components';
+import { Banners } from './src/ui/Banners';
 import { ErrorBoundary } from './src/ui/ErrorBoundary';
 import { HomeScreen } from './src/ui/HomeScreen';
 import { LibraryScreen } from './src/ui/LibraryScreen';
@@ -18,7 +19,7 @@ import { SettingsScreen } from './src/ui/SettingsScreen';
 import { SheetHost } from './src/ui/Sheets';
 import { TabBar } from './src/ui/TabBar';
 import { AppLogo } from './src/ui/track';
-import { colors, gutter, spacing, type } from './src/ui/theme';
+import { colors, spacing, type } from './src/ui/theme';
 
 /** A JS-thread gap longer than this is written to the journal. */
 const STALL_LOG_MS = 1000;
@@ -159,26 +160,30 @@ function Root() {
 
   return (
     <View style={styles.root} onStartShouldSetResponderCapture={logTouch}>
-      <View style={[styles.main, { paddingTop: insets.top }]}>
-        <Banners />
+      <View style={styles.main}>
         <View style={styles.content}>
-          {tab === 'home' ? (
-            <HomeScreen />
-          ) : tab === 'search' ? (
-            <SearchScreen />
-          ) : tab === 'library' ? (
-            <LibraryScreen />
-          ) : (
-            <>
-              <View style={styles.settingsBar}>
-                <IconButton icon="left" accessibilityLabel="Retour" onPress={() => setTab('home')} />
-                <Text style={styles.settingsTitle} accessibilityRole="header">
-                  Réglages
-                </Text>
-              </View>
-              <SettingsScreen />
-            </>
-          )}
+          {/* Tabs stay below the status bar; pages (PageHost) fill up to the
+              top edge of the screen, like the full player. */}
+          <View style={[styles.content, { paddingTop: insets.top }]}>
+            <Banners />
+            {tab === 'home' ? (
+              <HomeScreen />
+            ) : tab === 'search' ? (
+              <SearchScreen />
+            ) : tab === 'library' ? (
+              <LibraryScreen />
+            ) : (
+              <>
+                <View style={styles.settingsBar}>
+                  <IconButton icon="left" accessibilityLabel="Retour" onPress={() => setTab('home')} />
+                  <Text style={styles.settingsTitle} accessibilityRole="header">
+                    Réglages
+                  </Text>
+                </View>
+                <SettingsScreen />
+              </>
+            )}
+          </View>
           <PageHost />
         </View>
 
@@ -196,63 +201,6 @@ function Root() {
 }
 
 const DOCK_FADE = ['rgba(11,10,15,0)', colors.bg];
-const NOTICE_MS = 4000;
-
-/** Connection state and network notices, shown above the current screen. */
-function Banners() {
-  const connection = useAppStore(state => state.connection);
-  const connectionError = useAppStore(state => state.connectionError);
-  const notice = useAppStore(state => state.notice);
-  const dismissNotice = useAppStore(state => state.dismissNotice);
-  const reconnect = useAppStore(state => state.reconnect);
-
-  // Notices ("Sera lu ensuite", "Fin de la liste"…) go away on their own.
-  React.useEffect(() => {
-    if (!notice) {
-      return;
-    }
-    const timer = setTimeout(dismissNotice, NOTICE_MS);
-    return () => clearTimeout(timer);
-  }, [notice, dismissNotice]);
-
-  const reconnecting = connection === 'connecting' || connection === 'reconnecting';
-  const offline = connection === 'disconnected' || connection === 'error';
-
-  if (!notice && !reconnecting && !offline) {
-    return null;
-  }
-
-  return (
-    <View style={styles.banners}>
-      {reconnecting ? (
-        <Toast
-          key="reconnecting"
-          tone="warn"
-          icon="server"
-          message={
-            connection === 'reconnecting'
-              ? 'Reconnexion au serveur Soulseek…'
-              : 'Connexion au serveur Soulseek…'
-          }
-        />
-      ) : null}
-      {offline ? (
-        <Toast
-          key="offline"
-          tone="bad"
-          icon="offline"
-          message={connectionError ?? 'Déconnecté du réseau Soulseek'}
-          actionLabel="Réessayer"
-          onAction={() => void reconnect()}
-        />
-      ) : null}
-      {notice ? (
-        <Toast key={notice} tone="warn" icon="info" message={notice} onDismiss={dismissNotice} />
-      ) : null}
-    </View>
-  );
-}
-
 function Splash() {
   return (
     <View style={styles.splash}>
@@ -285,11 +233,6 @@ const styles = StyleSheet.create({
   },
   content: {
     flex: 1,
-  },
-  banners: {
-    paddingTop: spacing.sm,
-    paddingHorizontal: gutter,
-    gap: spacing.sm,
   },
   dock: {
     backgroundColor: colors.bg,

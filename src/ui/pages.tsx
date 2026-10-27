@@ -6,6 +6,7 @@
 import React from 'react';
 import { Animated, Image, Pressable, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import LinearGradient from 'react-native-linear-gradient';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import type {
   AlbumPageData,
@@ -39,6 +40,7 @@ import {
   splitDiscography,
   trackArtists,
 } from './catalogFormat';
+import { Banners } from './Banners';
 import { Button, Cover, IconButton, Skeleton, StatusCard, TrackGradient } from './components';
 import { colors, gutter, spacing, type } from './theme';
 
@@ -48,6 +50,7 @@ const HEADER_HEIGHT = 52;
 
 export function PageHost() {
   const pages = useAppStore(state => state.pages);
+  const insets = useSafeAreaInsets();
 
   if (pages.length === 0) {
     return null;
@@ -64,6 +67,10 @@ export function PageHost() {
           <PageView page={page} />
         </View>
       ))}
+      {/* Pages cover the tab's banners: show notices below the page header. */}
+      <View style={[styles.banners, { top: insets.top + HEADER_HEIGHT }]} pointerEvents="box-none">
+        <Banners />
+      </View>
     </View>
   );
 }
@@ -108,6 +115,7 @@ function PageScaffold({
   children: React.ReactNode;
 }) {
   const closePage = useAppStore(state => state.closePage);
+  const insets = useSafeAreaInsets();
   const scrollY = React.useRef(new Animated.Value(0)).current;
   const fade = scrollY.interpolate({
     inputRange: [Math.max(0, heroHeight - 120), Math.max(1, heroHeight - 40)],
@@ -126,7 +134,10 @@ function PageScaffold({
       >
         {children}
       </Animated.ScrollView>
-      <View style={styles.header} pointerEvents="box-none">
+      {/* The page fills the screen up to its top edge, under the status bar. */}
+      <View
+        style={[styles.header, { height: HEADER_HEIGHT + insets.top, paddingTop: insets.top }]}
+        pointerEvents="box-none">
         <Animated.View style={[StyleSheet.absoluteFill, styles.headerBg, { opacity: fade }]} pointerEvents="none" />
         <IconButton
           icon="left"
@@ -208,7 +219,9 @@ export function ArtistPage({ id, name }: { id: string; name?: string }) {
   const artistPages = useAppStore(state => state.artistPages);
   const { entry, retry } = usePageData(key => artistPages[key], loadArtistPage, id);
   const { width } = useWindowDimensions();
-  const heroHeight = Math.min(width * 0.8, 340);
+  const insets = useSafeAreaInsets();
+  // The picture also fills the status bar area.
+  const heroHeight = Math.min(width * 0.8, 340) + insets.top;
   const title = entry?.status === 'ready' ? entry.data.artist.name : name ?? 'Artiste';
 
   return (
@@ -349,19 +362,25 @@ const HERO_SHADE = ['rgba(11,10,15,0)', colors.bg];
 
 const ALBUM_COVER = 220;
 
+/** The album hero starts under the status bar, its cover below the header. */
+function albumHeroTop(statusBar: number): number {
+  return statusBar + HEADER_HEIGHT + spacing.sm;
+}
+
 export function AlbumPage({ id, title }: { id: string; title?: string }) {
   const loadAlbumPage = useAppStore(state => state.loadAlbumPage);
   const albumPages = useAppStore(state => state.albumPages);
   const { entry, retry } = usePageData(key => albumPages[key], loadAlbumPage, id);
   const heading = entry?.status === 'ready' ? entry.data.album.title : title ?? 'Album';
+  const insets = useSafeAreaInsets();
 
   return (
-    <PageScaffold title={heading} heroHeight={ALBUM_COVER + 140}>
+    <PageScaffold title={heading} heroHeight={ALBUM_COVER + 140 + insets.top}>
       {entry?.status === 'ready' ? (
         <AlbumContent data={entry.data} />
       ) : (
         <>
-          <View style={styles.albumHero}>
+          <View style={[styles.albumHero, { paddingTop: albumHeroTop(insets.top) }]}>
             <TrackGradient seed={id} />
             <Skeleton width={ALBUM_COVER} height={ALBUM_COVER} />
             <Text style={styles.albumTitle} numberOfLines={2}>
@@ -381,6 +400,7 @@ export function AlbumPage({ id, title }: { id: string; title?: string }) {
 
 function AlbumContent({ data }: { data: AlbumPageData }) {
   const { album, tracks, moreByArtist } = data;
+  const insets = useSafeAreaInsets();
   const { play, shuffle } = usePlayList();
   const { openArtist, openAlbum, more } = useOpeners();
   const sections = React.useMemo(() => discSections(tracks), [tracks]);
@@ -390,7 +410,7 @@ function AlbumContent({ data }: { data: AlbumPageData }) {
 
   return (
     <>
-      <View style={styles.albumHero}>
+      <View style={[styles.albumHero, { paddingTop: albumHeroTop(insets.top) }]}>
         <TrackGradient seed={album.id} />
         <Cover
           artwork={album.cover}
@@ -474,6 +494,11 @@ const styles = StyleSheet.create({
   hidden: {
     display: 'none',
   },
+  banners: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+  },
   page: {
     flex: 1,
     backgroundColor: colors.bg,
@@ -544,7 +569,6 @@ const styles = StyleSheet.create({
   },
   albumHero: {
     alignItems: 'center',
-    paddingTop: HEADER_HEIGHT + spacing.sm,
     paddingHorizontal: gutter,
     gap: spacing.lg,
     overflow: 'hidden',

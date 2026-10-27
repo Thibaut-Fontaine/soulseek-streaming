@@ -4,6 +4,7 @@
  * store state with realistic catalog data.
  */
 import React from 'react';
+import { StyleSheet } from 'react-native';
 import ReactTestRenderer, { act } from 'react-test-renderer';
 
 jest.mock('react-native-track-player', () => ({
@@ -238,6 +239,23 @@ describe('page host', () => {
     expect(out).not.toContain('Around the World');
     press(page, 'Afficher plus');
     expect(text(page)).toContain('Around the World');
+  });
+
+  test('a page fills the screen up to its top edge, under the status bar', () => {
+    useAppStore.setState({
+      pages: [{ kind: 'artist', id: DAFT_PUNK.id }],
+      artistPages: { [DAFT_PUNK.id]: { status: 'ready', data: ARTIST_PAGE } },
+    });
+    const page = render(<PageHost />);
+    const styles = page.root
+      .findAll(node => typeof node.type === 'string' && node.type === 'View')
+      .map(node => StyleSheet.flatten(node.props.style) ?? {});
+
+    // Insets are mocked with a 24 pt status bar.
+    expect(styles.some(style => style.position === 'absolute' && style.top === 0 && style.paddingTop === 24)).toBe(
+      true,
+    );
+    expect(styles.some(style => style.height === Math.min(750 * 0.8, 340) + 24)).toBe(true);
   });
 
   test('artist page actions: play, shuffle, radio, related artist, back', () => {
