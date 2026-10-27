@@ -124,6 +124,25 @@ describe('playback with source fallback', () => {
     );
   });
 
+  test('never falls back to another song with a close title', async () => {
+    await withNetwork(
+      [
+        { username: 'no1', filename: 'Music\\Fake Artist\\Album\\03 - Stream Me 3.mp3', behavior: 'deny' },
+        { username: 'part1', filename: 'Music\\Fake Artist\\Album\\01 - Stream Me 1.mp3', behavior: 'ok' },
+      ],
+      async network => {
+        await useAppStore.getState().runSearch('fake artist stream me');
+        const wanted = useAppStore
+          .getState()
+          .results.find(ranked => ranked.hit.username === 'no1')!.hit;
+        await useAppStore.getState().playTrack(wanted);
+        await waitFor(() => useAppStore.getState().current?.phase === 'error');
+
+        expect(network.queueRequests).toEqual(['no1']);
+      },
+    );
+  });
+
   test('reports an error after every source failed', async () => {
     await withNetwork(
       [

@@ -168,6 +168,15 @@ export function similarity(a: string, b: string): number {
   return 1 - levenshtein(left, right) / Math.max(left.length, right.length);
 }
 
+/**
+ * Two file titles that are probably the same song: close spellings, and the
+ * same numbers ("Part 1" and "Part 2" are close but are different songs).
+ */
+export function sameSongTitle(a: string, b: string): boolean {
+  const numbers = (value: string) => (normalizeForMatch(value).match(/\d+/g) ?? []).join(' ');
+  return similarity(a, b) >= 0.85 && numbers(a) === numbers(b);
+}
+
 function sortTokens(value: string): string {
   return value.split(' ').filter(Boolean).sort().join(' ');
 }

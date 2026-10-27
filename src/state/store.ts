@@ -17,7 +17,7 @@ import {
   formatSearchQuery,
   normalizeForMatch,
   rankHits,
-  similarity,
+  sameSongTitle,
   soulseekSpellings,
 } from '../core/search';
 import type { RankedHit } from '../core/search';
@@ -740,14 +740,14 @@ export const useAppStore = create<AppState>((set, get) => {
       return null;
     }
 
-    const title = normalizeForMatch(displayTitle(original.filename));
+    const title = displayTitle(original.filename);
 
     for (const { hit } of get().results) {
       if (tried.has(hitKey(hit)) || deniedPeers.has(hit.username.toLowerCase())) {
         continue;
       }
 
-      if (similarity(title, displayTitle(hit.filename)) >= 0.85) {
+      if (sameSongTitle(title, displayTitle(hit.filename))) {
         return hit;
       }
     }
