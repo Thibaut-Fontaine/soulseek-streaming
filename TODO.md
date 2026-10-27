@@ -5,7 +5,25 @@ Ordered by priority, highest first. When an item is done, remove it in the
 commit that finishes it (git history keeps the record); add new items where
 they belong in the order, with enough context to start without asking.
 
-## 1. Audit asynchronous behaviour and responsiveness: device checks
+## 1. Open findings from the October 2026 audit (emulator + real network)
+
+Seen on the emulator (fake network and real Soulseek, test account
+`soulstream_dev`), not fixed yet:
+
+- A track from a search-result list with no source skips to the next
+  result ("Get Lucky" → "Veridis Quo"): `playCatalog` applies the album
+  behaviour to every list. Skip only in albums, radios and top tracks.
+- A transfer waiting for the peer's TransferRequest fails 5 s after its P
+  connection closes (`handlePeerSessionClosed`), although uploaders keep
+  queued requests: keep waiting (or reconnect and re-send QueueUpload).
+- Two devices on one account kick each other: after RELOGGED, coming back
+  to the foreground reconnects and logs the other device out.
+- "Réessayer" / `reconnect()` goes through `login()`, which stops a track
+  playing from the device cache (no network needed).
+- Owner report, parked until a screen recording: the full player could
+  not be closed (it still scrolled) around "Autre source"; not reproduced.
+
+## 2. Audit asynchronous behaviour and responsiveness: device checks
 
 Code audit and fixes done (`docs/performance-audit.md`): search scoring
 (534 ms → 5.5 ms per update), chunked download writes, cover decoding,
@@ -22,7 +40,7 @@ catalog request priority, dead-connection detection after sleep. Left:
   read Réglages → Journal de débogage. If tracks still stutter when they
   start on modest phones: native (Kotlin) data path (see the audit).
 
-## 2. Optional pre-download of the next track (setting, off by default)
+## 3. Optional pre-download of the next track (setting, off by default)
 
 Not implemented. Today, when an album/radio/top-tracks list plays, only the
 next track's *sources* are looked up in advance (one Soulseek search,
@@ -38,7 +56,7 @@ next track's *sources* are looked up in advance (one Soulseek search,
 - Decide whether the automatic source lookup for the next track should also
   move behind this setting.
 
-## 3. One Soulseek search per album
+## 4. One Soulseek search per album
 
 When an album starts playing, search "artist album" once and match the
 files to every track of the album (`sourcesForTrack` per track). The query
@@ -47,7 +65,7 @@ track and only when the other steps failed. Albums are
 shared as folders, so one request usually covers them, from the same peer and
 quality. Only tracks still without a source get their own search on play.
 
-## 4. Check behaviour on older, low-RAM devices (last)
+## 5. Check behaviour on older, low-RAM devices (last)
 
 - Test on an older / low-RAM Android device or emulator profile (2–3 GB RAM,
   older Android version; minSdk is 24).
