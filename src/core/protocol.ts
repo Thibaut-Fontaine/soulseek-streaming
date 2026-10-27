@@ -72,6 +72,29 @@ export const LoginRejection = {
   SVRPRIVATE: 'SVRPRIVATE',
 } as const;
 
+/** Soulseek's limit on usernames (the server answers INVALIDUSERNAME beyond). */
+export const MAX_USERNAME_LENGTH = 30;
+
+/**
+ * Why the server would refuse a new username, in French, or null when it
+ * looks valid: at most 30 printable ASCII characters, no space at either end.
+ */
+export function usernameProblem(name: string): string | null {
+  if (!name.trim()) {
+    return "Choisissez un nom d'utilisateur";
+  }
+  if (name.length > MAX_USERNAME_LENGTH) {
+    return `Le nom d'utilisateur ne peut pas dépasser ${MAX_USERNAME_LENGTH} caractères`;
+  }
+  if (!/^[\x20-\x7E]+$/.test(name)) {
+    return "Lettres sans accents, chiffres et signes simples uniquement (pas d'accents ni d'emoji)";
+  }
+  if (name !== name.trim()) {
+    return "Pas d'espace au début ni à la fin du nom";
+  }
+  return null;
+}
+
 export interface FileInfo {
   filename: string;
   size: number;

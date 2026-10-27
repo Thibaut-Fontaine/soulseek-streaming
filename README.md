@@ -71,6 +71,9 @@ cd android && ./gradlew assembleRelease --no-daemon && cd ..
 ## Fonctionnalités
 
 - Connexion au serveur Soulseek avec votre compte (`server.slsknet.org:2242`).
+- Création d'un compte depuis l'écran de connexion (« Créer un compte ») : Soulseek
+  n'a pas de formulaire d'inscription, le serveur enregistre un nom libre et son mot
+  de passe à la première connexion. Le mot de passe ne peut pas être récupéré.
 - Recherche sur le réseau, résultats enrichis (bitrate, durée, taille, nombre
   de personnes en file d'attente, vitesse moyenne du pair).
 - **MP3 uniquement** : les résultats d'autres formats sont ignorés, ce qui

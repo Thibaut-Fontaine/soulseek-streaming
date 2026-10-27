@@ -212,3 +212,21 @@ describe('peer messages', () => {
     expect(view.getUint32(4, true)).toBe(26);
   });
 });
+
+describe('usernameProblem', () => {
+  const { usernameProblem } = jest.requireActual('../src/core/protocol') as typeof import('../src/core/protocol');
+
+  test('accepts plain names up to 30 characters', () => {
+    expect(usernameProblem('soulstream_fan')).toBeNull();
+    expect(usernameProblem('DJ Mark 2000')).toBeNull();
+    expect(usernameProblem('a'.repeat(30))).toBeNull();
+  });
+
+  test('explains what the server would refuse', () => {
+    expect(usernameProblem('')).toMatch(/Choisissez/);
+    expect(usernameProblem('a'.repeat(31))).toMatch(/30 caractères/);
+    expect(usernameProblem('élodie')).toMatch(/accents/);
+    expect(usernameProblem('music 🎵')).toMatch(/accents/);
+    expect(usernameProblem(' mark')).toMatch(/espace/);
+  });
+});

@@ -114,6 +114,8 @@ interface AppState {
   prefillUsername: string;
   connection: ConnectionState;
   connectionError: string | null;
+  /** The server's reason for refusing the last login (LoginRejection), if it did. */
+  loginRejection: string | null;
   listenPort: number;
   httpPort: number;
 
@@ -1418,6 +1420,7 @@ export const useAppStore = create<AppState>((set, get) => {
     prefillUsername: '',
     connection: 'idle',
     connectionError: null,
+    loginRejection: null,
     listenPort: 0,
     httpPort: 0,
 
@@ -1545,6 +1548,7 @@ export const useAppStore = create<AppState>((set, get) => {
         prefillUsername: username,
         connection: 'connecting',
         connectionError: null,
+        loginRejection: null,
         searching: false,
         searchQuery: '',
         searchEmpty: false,
@@ -1592,6 +1596,7 @@ export const useAppStore = create<AppState>((set, get) => {
           username: keptUsername,
           connection: 'error',
           connectionError: errorMessage(error),
+          loginRejection: error instanceof LoginError ? error.reason : null,
         });
 
         return false;
