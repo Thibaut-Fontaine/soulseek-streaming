@@ -180,6 +180,30 @@ const GRADIENT_CENTER = { x: 0.4, y: 0.6 };
 const COVER_SHEEN = ['rgba(255,255,255,0.22)', 'rgba(255,255,255,0)'];
 
 /** Full-bleed background tinted by a track (Now Playing, hero cards). */
+/**
+ * The cover, blurred, behind a header (full player, album page), fading into
+ * the page background. Without a cover: the seed's gradient.
+ */
+export function CoverBackdrop({ coverUri, seed }: { coverUri: string | null; seed: string }) {
+  if (!coverUri) {
+    return <TrackGradient seed={seed} />;
+  }
+
+  return (
+    <>
+      <Image source={{ uri: coverUri }} style={StyleSheet.absoluteFill} blurRadius={40} resizeMode="cover" />
+      <LinearGradient
+        colors={BACKDROP_SHADE}
+        locations={[0, 0.55, 1]}
+        style={StyleSheet.absoluteFill}
+        pointerEvents="none"
+      />
+    </>
+  );
+}
+
+const BACKDROP_SHADE = ['rgba(11,10,15,0.35)', 'rgba(11,10,15,0.7)', colors.bg];
+
 export function TrackGradient({
   seed,
   style,

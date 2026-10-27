@@ -41,7 +41,7 @@ import {
   trackArtists,
 } from './catalogFormat';
 import { Banners } from './Banners';
-import { Button, Cover, IconButton, Skeleton, StatusCard, TrackGradient } from './components';
+import { Button, Cover, CoverBackdrop, IconButton, Skeleton, StatusCard, TrackGradient } from './components';
 import { colors, gutter, spacing, type } from './theme';
 
 const TOP_TRACKS = 5;
@@ -411,7 +411,8 @@ function AlbumContent({ data }: { data: AlbumPageData }) {
   return (
     <>
       <View style={[styles.albumHero, { paddingTop: albumHeroTop(insets.top) }]}>
-        <TrackGradient seed={album.id} />
+        {/* Like the full player: the blurred cover (a small size is enough). */}
+        <CoverBackdrop coverUri={pickArtwork(album.cover, 250)} seed={album.id} />
         <Cover
           artwork={album.cover}
           seed={album.id}

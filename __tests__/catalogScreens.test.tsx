@@ -248,7 +248,7 @@ describe('page host', () => {
     });
     const page = render(<PageHost />);
     const styles = page.root
-      .findAll(node => typeof node.type === 'string' && node.type === 'View')
+      .findAll(node => (node.type as unknown) === 'View')
       .map(node => StyleSheet.flatten(node.props.style) ?? {});
 
     // Insets are mocked with a 24 pt status bar.
@@ -316,6 +316,8 @@ describe('page host', () => {
     ]) {
       expect(out).toContain(label);
     }
+    // The header shows the cover blurred, like the full player.
+    expect(page.root.findAll(node => node.props.blurRadius === 40 && node.props.source?.uri)).not.toHaveLength(0);
     press(page, 'Aller à l’artiste Daft Punk');
     expect(actions.openPage).toHaveBeenCalledWith({ kind: 'artist', id: DAFT_PUNK.id, name: 'Daft Punk' });
     press(page, `Écouter ${DIGITAL_LOVE.title}, Daft Punk`);
