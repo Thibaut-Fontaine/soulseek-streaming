@@ -26,6 +26,7 @@ import {
   TransferDirection,
   encodePeerInitMessage,
   encodePeerMessage,
+  encodePlaceInQueueResponse,
   encodeServerMessage,
   parsePeerInit,
 } from '../src/core/protocol';
@@ -45,7 +46,22 @@ const CHUNK_DELAY_MS = Number(process.env.CHUNK_DELAY_MS ?? 5);
 const ECHO = process.env.ECHO === '1';
 const sourceFile = fs.existsSync(FILE_PATH) ? FILE_PATH : null;
 const extension = sourceFile ? path.extname(sourceFile).slice(1).toLowerCase() || 'mp3' : 'wav';
-const USERNAME = 'alice';
+
+/**
+ * PEERS=alice,bob:12 : peers sharing the same files, one port each from
+ * PEER_PORT. `name:N` keeps you queued at position N and never sends the
+ * file (to test "Autre source" and queue messages).
+ */
+interface FakePeer {
+  name: string;
+  port: number;
+  queue: number;
+}
+
+const PEERS: FakePeer[] = (process.env.PEERS ?? 'alice').split(',').map((entry, index) => {
+  const [name, queue] = entry.trim().split(':');
+  return { name, port: PEER_PORT + index, queue: Number(queue ?? 0) };
+});
 
 function generateDemoWav(): Buffer {
   const sampleRate = 44100;
@@ -104,7 +120,7 @@ function readString(payload: Uint8Array, offset: number): { value: string; next:
   return { value, next: offset + 4 + length };
 }
 
-function buildSearchPayload(token: number, query: string): Uint8Array {
+function buildSearchPayload(peer: FakePeer, token: number, query: string): Uint8Array {
   const words = query
     .split(/\s+/)
     .filter(word => word && !word.startsWith('-'))
@@ -116,7 +132,7 @@ function buildSearchPayload(token: number, query: string): Uint8Array {
       );
 
   const writer = new ByteWriter();
-  writer.string(USERNAME).u32(token).u32(files.length);
+  writer.string(peer.name).u32(token).u32(files.length);
 
   for (const filename of files) {
     writer.u8(1).string(filename).u64(data.length).string('');
@@ -124,7 +140,8 @@ function buildSearchPayload(token: number, query: string): Uint8Array {
     writer.u32(3).u32(0).u32(192).u32(1).u32(ECHO ? 0 : DURATION_SEC).u32(4).u32(44100);
   }
 
-  writer.bool(true).u32(500000).u32(0).u32(0);
+  // slot free, speed, queue length
+  writer.bool(peer.queue === 0).u32(500000).u32(peer.queue).u32(0);
   return deflate(writer.toBytes());
 }
 
@@ -167,22 +184,24 @@ function handleServerConnection(socket: net.Socket): void {
           log('search token', token, JSON.stringify(query));
 
           if (!query.toLowerCase().includes('none')) {
-            setTimeout(() => sendSearchResults(token, query), 120);
+            PEERS.forEach((peer, index) => setTimeout(() => sendSearchResults(peer, token, query), 120 + index * 50));
           }
 
           break;
         }
 
         case ServerCode.GET_PEER_ADDRESS: {
+          const { value: name } = readString(frame.payload, 0);
+          const peer = PEERS.find(candidate => candidate.name === name) ?? PEERS[0];
           const writer = new ByteWriter();
           writer
-            .string(USERNAME)
+            .string(peer.name)
             .raw(wireIp(PEER_IP))
-            .u32(PEER_PORT)
+            .u32(peer.port)
             .u32(0)
             .u16(0);
           socket.write(encodeServerMessage(ServerCode.GET_PEER_ADDRESS, writer.toBytes()));
-          log('sent peer address', PEER_IP, PEER_PORT);
+          log('sent peer address', peer.name, PEER_IP, peer.port);
           break;
         }
 
@@ -201,13 +220,13 @@ function handleServerConnection(socket: net.Socket): void {
   socket.on('error', () => {});
 }
 
-function sendSearchResults(token: number, query: string): void {
+function sendSearchResults(peer: FakePeer, token: number, query: string): void {
   const socket = net.createConnection({ host: '127.0.0.1', port: clientPort }, () => {
     const init = new ByteWriter();
-    init.string(USERNAME).string('P').u32(0);
+    init.string(peer.name).string('P').u32(0);
     socket.write(encodePeerInitMessage(1, init.toBytes()));
-    socket.write(encodePeerMessage(PeerCode.FILE_SEARCH_RESPONSE, buildSearchPayload(token, query)));
-    log('sent search result');
+    socket.write(encodePeerMessage(PeerCode.FILE_SEARCH_RESPONSE, buildSearchPayload(peer, token, query)));
+    log(peer.name, 'sent search result');
   });
 
   sockets.add(socket);
@@ -215,7 +234,7 @@ function sendSearchResults(token: number, query: string): void {
   const framer = new Framer(4);
   socket.on('data', chunk => {
     for (const frame of framer.push(new Uint8Array(chunk))) {
-      answerPeerFrame(socket, frame);
+      answerPeerFrame(peer, socket, frame);
     }
   });
   socket.on('error', error => log('search connection error', error.message));
@@ -223,10 +242,10 @@ function sendSearchResults(token: number, query: string): void {
   setTimeout(() => socket.destroy(), Number(process.env.RESULT_CONN_MS ?? 5000));
 }
 
-function startFileConnection(token: number): void {
+function startFileConnection(peer: FakePeer, token: number): void {
   const fileSocket = net.createConnection({ host: '127.0.0.1', port: clientPort }, () => {
     const init = new ByteWriter();
-    init.string(USERNAME).string('F').u32(0);
+    init.string(peer.name).string('F').u32(0);
     fileSocket.write(encodePeerInitMessage(1, init.toBytes()));
 
     const tokenBytes = new Uint8Array(4);
@@ -273,9 +292,21 @@ function startFileConnection(token: number): void {
 }
 
 /** Upload requests, on whichever P connection they arrive. */
-function answerPeerFrame(socket: net.Socket, frame: { code: number; payload: Uint8Array }): void {
-  if (frame.code === PeerCode.QUEUE_UPLOAD) {
+function answerPeerFrame(
+  peer: FakePeer,
+  socket: net.Socket,
+  frame: { code: number; payload: Uint8Array },
+): void {
+  if (frame.code === PeerCode.PLACE_IN_QUEUE_REQUEST) {
     const { value: requestedName } = readString(frame.payload, 0);
+    socket.write(encodePlaceInQueueResponse(requestedName, peer.queue));
+    log(peer.name, 'place in queue', peer.queue);
+  } else if (frame.code === PeerCode.QUEUE_UPLOAD) {
+    const { value: requestedName } = readString(frame.payload, 0);
+    if (peer.queue > 0) {
+      log(peer.name, 'queued the upload at position', peer.queue);
+      return;
+    }
     const writer = new ByteWriter();
     writer
       .u32(TransferDirection.UPLOAD)
@@ -292,19 +323,18 @@ function answerPeerFrame(socket: net.Socket, frame: { code: number; payload: Uin
     log('TransferResponse', allowed, 'token', token);
 
     if (allowed) {
-      startFileConnection(token);
+      startFileConnection(peer, token);
     }
   } else {
     log('peer message', frame.code);
   }
 }
 
-function handlePeerConnection(socket: net.Socket): void {
+function handlePeerConnection(peer: FakePeer, socket: net.Socket): void {
   sockets.add(socket);
   const queue = new ByteQueue();
   const framer = new Framer(4);
   let stage: 'init' | 'peer' = 'init';
-
 
   const pump = () => {
     if (stage === 'init') {
@@ -338,7 +368,7 @@ function handlePeerConnection(socket: net.Socket): void {
       const chunk = queue.take(queue.length);
 
       for (const frame of framer.push(chunk)) {
-        answerPeerFrame(socket, frame);
+        answerPeerFrame(peer, socket, frame);
       }
     }
   };
@@ -354,15 +384,16 @@ function handlePeerConnection(socket: net.Socket): void {
 }
 
 const server = net.createServer(handleServerConnection);
-const peer = net.createServer(handlePeerConnection);
 
 server.listen(SERVER_PORT, '0.0.0.0', () => {
   log(`fake server listening on 0.0.0.0:${SERVER_PORT}`);
 });
 
-peer.listen(PEER_PORT, '0.0.0.0', () => {
-  log(`fake peer listening on 0.0.0.0:${PEER_PORT}`);
-});
+for (const peer of PEERS) {
+  net.createServer(socket => handlePeerConnection(peer, socket)).listen(peer.port, '0.0.0.0', () => {
+    log(`fake peer ${peer.name} listening on 0.0.0.0:${peer.port}`);
+  });
+}
 
 process.on('SIGINT', () => {
   for (const socket of sockets) {
@@ -370,6 +401,5 @@ process.on('SIGINT', () => {
   }
 
   server.close();
-  peer.close();
   process.exit(0);
 });

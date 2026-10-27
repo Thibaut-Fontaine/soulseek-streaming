@@ -246,6 +246,9 @@ Fake server env:
   peer, to test what happens while a track loads (cancel, tabs, fallback);
 - `ECHO=1`: every search gets one file named after the query, so catalog
   tracks (searched as artist + title when played) find a source;
+- `PEERS=bob:12,carol:20` (default `alice`): several peers sharing the same
+  files, one port each from `PEER_PORT` (`adb reverse` each one); `name:N`
+  keeps you queued at position N and never sends the file;
 - `RESULT_CONN_MS=600000` (default 5000): how long the peer keeps the
   connection it delivered results on (the app reuses it for the download).
 
