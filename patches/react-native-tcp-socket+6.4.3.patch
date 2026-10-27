@@ -1,3 +1,20 @@
+diff --git a/node_modules/react-native-tcp-socket/android/src/main/java/com/asterinet/react/tcpsocket/TcpSocketModule.java b/node_modules/react-native-tcp-socket/android/src/main/java/com/asterinet/react/tcpsocket/TcpSocketModule.java
+index 121edb4..5a9dec9 100644
+--- a/node_modules/react-native-tcp-socket/android/src/main/java/com/asterinet/react/tcpsocket/TcpSocketModule.java
++++ b/node_modules/react-native-tcp-socket/android/src/main/java/com/asterinet/react/tcpsocket/TcpSocketModule.java
+@@ -49,7 +49,11 @@ public class TcpSocketModule extends ReactContextBaseJavaModule {
+     private final ConcurrentHashMap<Integer, ReadableMap> pendingTLS = new ConcurrentHashMap<>();
+     private final ConcurrentHashMap<String, Network> mNetworkMap = new ConcurrentHashMap<>();
+     private final CurrentNetwork currentNetwork = new CurrentNetwork();
+-    private final ExecutorService executorService = Executors.newFixedThreadPool(N_THREADS);
++    // SoulStream patch: connect() blocks its thread until the peer answers or
++    // the timeout (up to 15 s). With a fixed pool of N_THREADS, a handful of
++    // unreachable peers delayed every other connect, destroy and listen behind
++    // them; the app limits how many connects it starts at once instead.
++    private final ExecutorService executorService = Executors.newCachedThreadPool();
+     private TcpEventListener tcpEvtListener;
+ 
+     public TcpSocketModule(ReactApplicationContext reactContext) {
 diff --git a/node_modules/react-native-tcp-socket/src/Socket.js b/node_modules/react-native-tcp-socket/src/Socket.js
 index 9913e5a..7262b91 100644
 --- a/node_modules/react-native-tcp-socket/src/Socket.js

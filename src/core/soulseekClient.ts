@@ -115,6 +115,13 @@ const PEER_ADDRESS_TTL_MS = 10 * 60 * 1000;
 const QUEUE_POLL_MS = 60000;
 const MAX_QUEUE_POLLS = 10;
 const MAX_INBOUND_PEERS = 64;
+/**
+ * Peers behind a firewall ask us (ConnectToPeer) to connect to them, mostly to
+ * deliver search results: dozens per search, many unreachable, each attempt
+ * open for up to 15 s. Past this many attempts at once, further P requests
+ * are declined so file connections (never declined) are not kept waiting.
+ */
+const MAX_INDIRECT_PEER_CONNECTS = 12;
 const PEER_CONNECT_TIMEOUT_MS = 12000;
 const INDIRECT_CONNECT_TIMEOUT_MS = 20000;
 const RECONNECT_DELAYS_MS = [2000, 5000, 10000, 20000, 30000, 60000];
@@ -327,6 +334,8 @@ export class SoulseekClient extends Emitter<SoulseekClientEvents> {
   private readonly shares: ShareLibrary | null;
   private readonly description: string;
   private readonly pendingPeerTimers = new Set<ReturnType<typeof setTimeout>>();
+  private indirectPeerConnects = 0;
+  private declinedIndirectPeers = 0;
 
   private readonly transfers = new Map<string, StreamTransfer>();
   private readonly transfersByToken = new Map<number, StreamTransfer>();
@@ -911,6 +920,25 @@ export class SoulseekClient extends Emitter<SoulseekClientEvents> {
       return;
     }
 
+    const isPeer = request.connectionType === ConnectionType.PEER;
+
+    if (isPeer && this.indirectPeerConnects >= MAX_INDIRECT_PEER_CONNECTS) {
+      // One journal line per burst, not one per declined peer.
+      if (this.declinedIndirectPeers++ === 0) {
+        this.log(`[peer] trop de connexions en cours : demandes P suivantes refusées (${request.username}…)`);
+      }
+      try {
+        this.sendServer(encodeCantConnectToPeer(request.token, request.username));
+      } catch {
+        // Ignore: the server connection may be gone.
+      }
+      return;
+    }
+
+    if (isPeer) {
+      this.indirectPeerConnects++;
+    }
+
     try {
       const socket = await this.transport.connect({
         host: request.ipAddress,
@@ -939,6 +967,14 @@ export class SoulseekClient extends Emitter<SoulseekClientEvents> {
         this.sendServer(encodeCantConnectToPeer(request.token, request.username));
       } catch {
         // Ignore: the server connection may be gone.
+      }
+    } finally {
+      if (isPeer) {
+        this.indirectPeerConnects--;
+        if (this.indirectPeerConnects === 0 && this.declinedIndirectPeers > 0) {
+          this.log(`[peer] ${this.declinedIndirectPeers} demande(s) P refusée(s) pendant la rafale`);
+          this.declinedIndirectPeers = 0;
+        }
       }
     }
   }

@@ -539,3 +539,36 @@ describe('server connection health check', () => {
     }
   });
 });
+
+describe('connections peers ask us to open (ConnectToPeer)', () => {
+  test('a burst of P requests cannot hold back a file connection', () => {
+    const connects: string[] = [];
+    const hanging: import('../src/transport/types').Transport = {
+      // Unreachable peers: the attempt neither succeeds nor fails.
+      connect: async ({ host }) => {
+        connects.push(host);
+        return new Promise<never>(() => {});
+      },
+      listen: async () => ({ port: 0, close: () => {} }),
+    };
+    const client = new SoulseekClient({
+      transport: hanging,
+      username: 'test-user',
+      password: 'test-pass',
+      listenPort: 0,
+      serverHost: '127.0.0.1',
+      serverPort: 1,
+    });
+    const accept = (client as unknown as {
+      acceptIndirectConnection(request: object): Promise<void>;
+    }).acceptIndirectConnection.bind(client);
+
+    for (let i = 0; i < 40; i++) {
+      void accept({ username: `peer${i}`, connectionType: 'P', ipAddress: `10.0.0.${i}`, port: 2234, token: i });
+    }
+    void accept({ username: 'uploader', connectionType: 'F', ipAddress: '10.0.1.1', port: 2234, token: 99 });
+
+    expect(connects.filter(host => host.startsWith('10.0.0.'))).toHaveLength(12);
+    expect(connects).toContain('10.0.1.1');
+  });
+});
