@@ -266,6 +266,10 @@ const stepLabel = StyleSheet.create({
 // ---------------------------------------------------------------------------
 // Scrubber
 
+const THUMB_SIZE = 14;
+/** Room for the thumb at either end, also when it grows while dragging. */
+const RAIL_INSET = Math.ceil((THUMB_SIZE * 1.25) / 2);
+
 /**
  * Three-layer seek bar: position, received range (with an edge tick) and the
  * unreceived remainder. Seeks past the received edge are clamped to it,
@@ -302,7 +306,11 @@ export function Scrubber({
     return () => clearTimeout(timer);
   }, [blocked]);
 
-  const ratioAt = (x: number) => (width.current > 0 ? clamp01(x / width.current) : 0);
+  // The rail is inset by the thumb's radius on each side (see scrubHit).
+  const ratioAt = (x: number) => {
+    const rail = width.current - 2 * RAIL_INSET;
+    return rail > 0 ? clamp01((x - RAIL_INSET) / rail) : 0;
+  };
 
   const commit = (ratio: number) => {
     const { duration: total, receivedRatio: received, onSeek: seek } = latest.current;
@@ -359,10 +367,11 @@ export function Scrubber({
           ) : null}
         </View>
         {canSeek ? (
-          <View
-            pointerEvents="none"
-            style={[styles.scrubThumb, dragRatio !== null && styles.scrubThumbActive, { left: `${shown * 100}%` }]}
-          />
+          <View style={styles.scrubRail} pointerEvents="none">
+            <View
+              style={[styles.scrubThumb, dragRatio !== null && styles.scrubThumbActive, { left: `${shown * 100}%` }]}
+            />
+          </View>
         ) : null}
       </View>
       <View style={styles.times}>
@@ -500,8 +509,19 @@ const styles = StyleSheet.create({
     color: colors.textMuted,
     marginTop: spacing.sm,
   },
+  // The thumb is centred on the position, so at 0 and at the end half of it
+  // would stick out of the bar and be clipped by the parent: inset the rail.
   scrubHit: {
     height: 24,
+    justifyContent: 'center',
+    paddingHorizontal: RAIL_INSET,
+  },
+  scrubRail: {
+    position: 'absolute',
+    left: RAIL_INSET,
+    right: RAIL_INSET,
+    top: 0,
+    bottom: 0,
     justifyContent: 'center',
   },
   scrubTrack: {
@@ -536,10 +556,10 @@ const styles = StyleSheet.create({
   },
   scrubThumb: {
     position: 'absolute',
-    width: 14,
-    height: 14,
-    marginLeft: -7,
-    borderRadius: 7,
+    width: THUMB_SIZE,
+    height: THUMB_SIZE,
+    marginLeft: -THUMB_SIZE / 2,
+    borderRadius: THUMB_SIZE / 2,
     backgroundColor: colors.text,
     shadowColor: '#000',
     shadowOpacity: 0.4,
@@ -555,6 +575,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     marginTop: 2,
+    marginHorizontal: RAIL_INSET,
   },
   time: {
     ...type.mono,
