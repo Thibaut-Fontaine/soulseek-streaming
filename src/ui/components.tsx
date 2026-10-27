@@ -113,7 +113,14 @@ export const Cover = React.memo(function Cover({
   style?: StyleProp<ViewStyle>;
 }) {
   const [failed, setFailed] = React.useState<string[]>([]);
-  const candidates = [pickArtwork(artwork, size * PixelRatio.get()), fallbackUri ?? null];
+  // Best size first; when it fails to load, the other sizes, then the fallback.
+  const candidates = [
+    pickArtwork(artwork, size * PixelRatio.get()),
+    artwork?.medium,
+    artwork?.large,
+    artwork?.small,
+    fallbackUri,
+  ];
   const uri = candidates.find((item): item is string => !!item && !failed.includes(item)) ?? null;
   const borderRadius = coverRadius(size, rounded);
 

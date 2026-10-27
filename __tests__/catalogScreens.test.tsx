@@ -570,3 +570,18 @@ describe('player with a matched file', () => {
     expect(text(render(<HomeScreen />))).toContain('cdn.example/discovery');
   });
 });
+
+describe('cover images', () => {
+  test('a size that fails to load falls back to another size', () => {
+    const { Cover } = jest.requireActual('../src/ui/components') as typeof import('../src/ui/components');
+    const artwork = { small: 's.jpg', medium: 'm.jpg', large: 'l.jpg' };
+    const cover = render(<Cover artwork={artwork} seed="x" title="Funk" size={220} />);
+    const image = () => cover.root.findAll(node => node.props.source?.uri)[0];
+
+    expect(image().props.source.uri).toBe('l.jpg');
+    act(() => image().props.onError());
+    expect(image().props.source.uri).toBe('m.jpg');
+    act(() => image().props.onError());
+    expect(image().props.source.uri).toBe('s.jpg');
+  });
+});
