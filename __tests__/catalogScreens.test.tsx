@@ -190,6 +190,9 @@ describe('catalog formatting', () => {
     expect(pickArtwork(art('x'), 40)).toContain('56x56');
     expect(pickArtwork(art('x'), 200)).toContain('250x250');
     expect(pickArtwork(art('x'), 900)).toContain('1000x1000');
+    // Shelf tiles and the album cover (≈ 400–600 px on a phone) get 500 px, not 1000.
+    expect(pickArtwork(art('x'), 400)).toContain('500x500');
+    expect(pickArtwork({ small: null, medium: 'M', large: 'L' }, 400)).toBe('L');
     expect(pickArtwork({ small: null, medium: null, large: 'L' }, 40)).toBe('L');
   });
 

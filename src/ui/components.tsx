@@ -141,6 +141,9 @@ export const Cover = React.memo(function Cover({
       source={{ uri }}
       style={[{ width: size, height: size, borderRadius }, styles.coverImage, style as object]}
       resizeMode="cover"
+      // Decode at the shown size: a 1000 px cover is 4 MB of bitmap memory,
+      // and Android's image pool fills up after a few pages otherwise.
+      resizeMethod="resize"
       onError={() => setFailed(list => [...list, uri])}
       accessibilityIgnoresInvertColors
     />
@@ -198,7 +201,13 @@ export function CoverBackdrop({ coverUri, seed }: { coverUri: string | null; see
 
   return (
     <>
-      <Image source={{ uri: coverUri }} style={StyleSheet.absoluteFill} blurRadius={40} resizeMode="cover" />
+      <Image
+        source={{ uri: coverUri }}
+        style={StyleSheet.absoluteFill}
+        blurRadius={40}
+        resizeMode="cover"
+        resizeMethod="resize"
+      />
       <LinearGradient
         colors={BACKDROP_SHADE}
         locations={[0, 0.55, 1]}

@@ -271,6 +271,7 @@ function ArtistContent({ data, heroHeight }: { data: ArtistPageData; heroHeight:
             source={{ uri: picture }}
             style={StyleSheet.absoluteFill}
             resizeMode="cover"
+            resizeMethod="resize"
             accessibilityIgnoresInvertColors
           />
         ) : (

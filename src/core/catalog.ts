@@ -204,6 +204,7 @@ function artwork(json: Json, field: 'cover' | 'picture'): Artwork {
   return {
     small: pick(`${field}_small`),
     medium: pick(`${field}_medium`) ?? pick(`${field}_big`),
+    big: pick(`${field}_big`),
     large: pick(`${field}_xl`) ?? pick(`${field}_big`),
   };
 }

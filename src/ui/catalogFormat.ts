@@ -169,8 +169,16 @@ export function pickArtwork(artwork: Artwork | null | undefined, px: number): st
   if (!artwork) {
     return null;
   }
+  // 1000 px covers decode to 4 MB each: keep them for the player and the
+  // artist picture, and use 500 px for shelf tiles and the album cover.
   const order: Array<keyof Artwork> =
-    px <= 64 ? ['small', 'medium', 'large'] : px <= 300 ? ['medium', 'large', 'small'] : ['large', 'medium', 'small'];
+    px <= 64
+      ? ['small', 'medium', 'big', 'large']
+      : px <= 300
+        ? ['medium', 'big', 'large', 'small']
+        : px <= 600
+          ? ['big', 'large', 'medium', 'small']
+          : ['large', 'big', 'medium', 'small'];
   for (const key of order) {
     if (artwork[key]) {
       return artwork[key];

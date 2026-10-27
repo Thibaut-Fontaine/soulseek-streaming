@@ -19,6 +19,7 @@ export function art(name: string): Artwork {
   return {
     small: `https://cdn.example/${name}/56x56.jpg`,
     medium: `https://cdn.example/${name}/250x250.jpg`,
+    big: `https://cdn.example/${name}/500x500.jpg`,
     large: `https://cdn.example/${name}/1000x1000.jpg`,
   };
 }
