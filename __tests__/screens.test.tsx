@@ -46,6 +46,7 @@ import { savedTrack } from '../src/services/library';
 import { useAppStore } from '../src/state/store';
 import { HomeScreen } from '../src/ui/HomeScreen';
 import { LibraryScreen } from '../src/ui/LibraryScreen';
+import { MarqueeText } from '../src/ui/components';
 import { MiniPlayer } from '../src/ui/MiniPlayer';
 import { PlayerSheet } from '../src/ui/PlayerScreen';
 import { SearchScreen } from '../src/ui/SearchScreen';
@@ -191,4 +192,27 @@ test('closing layers let taps through before their animation ends', () => {
   expect(playerHost().props.pointerEvents).toBe('auto');
   act(() => useAppStore.getState().closePlayer());
   expect(playerHost().props.pointerEvents).toBe('none');
+});
+
+test('a title too long for its line scrolls, a short one stays still', () => {
+  jest.useFakeTimers();
+  const title = 'A Very Long Title (Extended Club Mix) [Remastered 2024]';
+  const marquee = render(<MarqueeText>{title}</MarqueeText>);
+  const copies = () => marquee.root.findAll(node => String(node.type) === 'Text' && node.props.children === title).length;
+  const layout = (width: number) => ({ nativeEvent: { layout: { x: 0, y: 0, width, height: 20 } } });
+  const [box] = marquee.root.findAll(node => String(node.type) === 'View' && node.props.accessibilityLabel === title);
+  const [line] = marquee.root.findAll(node => String(node.type) === 'Text' && node.props.children === title);
+
+  act(() => {
+    box.props.onLayout(layout(200));
+    line.props.onLayout(layout(150));
+  });
+  expect(copies()).toBe(1);
+
+  // Wider than its box: a second copy follows it round the loop.
+  act(() => {
+    line.props.onLayout(layout(420));
+  });
+  expect(copies()).toBe(2);
+  jest.useRealTimers();
 });
