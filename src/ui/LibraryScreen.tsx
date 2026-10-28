@@ -1,5 +1,5 @@
 import React from 'react';
-import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Alert, FlatList, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import LinearGradient from 'react-native-linear-gradient';
 
 import type { SearchHit } from '../core/types';
@@ -68,11 +68,7 @@ export function LibraryScreen() {
     },
   };
 
-  const play = (items: SearchHit[], label: string) => (hit: SearchHit) => {
-    const context: PlayContext = { label, items, index: Math.max(0, items.indexOf(hit)) };
-    void playTrack(hit, context);
-  };
-  const more = (hit: SearchHit) => openSheet({ kind: 'actions', hit });
+  const more = React.useCallback((hit: SearchHit) => openSheet({ kind: 'actions', hit }), [openSheet]);
 
   const addFromPhone = async () => {
     try {
@@ -86,11 +82,20 @@ export function LibraryScreen() {
   };
 
   const selected = filter === 'all' ? null : lists[filter];
-  const visible = selected ? selected.items : historyHits.slice(0, RECENT_IN_OVERVIEW);
-  const playVisible = play(visible, selected ? selected.label : 'Écoutés récemment');
+  const items = selected?.items;
+  const visible = React.useMemo(() => items ?? historyHits.slice(0, RECENT_IN_OVERVIEW), [items, historyHits]);
+  const label = selected ? selected.label : 'Écoutés récemment';
+  // Stable between renders so the memoized rows do not redraw.
+  const playVisible = React.useCallback(
+    (hit: SearchHit) => {
+      const context: PlayContext = { label, items: visible, index: Math.max(0, visible.indexOf(hit)) };
+      void playTrack(hit, context);
+    },
+    [label, visible, playTrack],
+  );
 
-  return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+  const header = (
+    <>
       <View style={styles.header}>
         <Pressable
           accessibilityRole="button"
@@ -165,18 +170,30 @@ export function LibraryScreen() {
       ) : (
         <Text style={styles.caption}>{selected?.caption}</Text>
       )}
-
-      {visible.map(hit => (
-        <TrackRow
-          key={`${hit.username}:${hit.filename}`}
-          hit={hit}
-          onDevice={filter === 'device'}
-          onPress={playVisible}
-          onMore={more}
-        />
-      ))}
-    </ScrollView>
+    </>
   );
+
+  // Liked titles, history (up to 200) and device tracks can be long: only the
+  // rows near the screen are built.
+  return (
+    <FlatList
+      style={styles.container}
+      contentContainerStyle={styles.content}
+      showsVerticalScrollIndicator={false}
+      data={visible}
+      keyExtractor={rowKey}
+      ListHeaderComponent={header}
+      initialNumToRender={12}
+      windowSize={7}
+      renderItem={({ item }) => (
+        <TrackRow hit={item} onDevice={filter === 'device'} onPress={playVisible} onMore={more} />
+      )}
+    />
+  );
+}
+
+function rowKey(hit: SearchHit): string {
+  return `${hit.username}:${hit.filename}`;
 }
 
 function Collection({

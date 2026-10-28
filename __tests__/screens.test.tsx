@@ -126,7 +126,17 @@ afterEach(() => {
 });
 
 function text(renderer: ReactTestRenderer.ReactTestRenderer): string {
-  return JSON.stringify(renderer.toJSON());
+  // Lists (FlatList) pass circular objects down to their host views.
+  const seen = new WeakSet<object>();
+  return JSON.stringify(renderer.toJSON(), (_key, value) => {
+    if (typeof value === 'object' && value !== null) {
+      if (seen.has(value)) {
+        return undefined;
+      }
+      seen.add(value);
+    }
+    return value;
+  });
 }
 
 beforeEach(seed);
@@ -228,4 +238,29 @@ test('a new search scrolls the kept search tab back to the top', () => {
   });
 
   expect(scrollTo).toHaveBeenCalledWith({ y: 0, animated: false });
+});
+
+test('a long library list builds only the rows near the screen, and plays in order', () => {
+  const { TrackRow } = require('../src/ui/track');
+  const { FilterChip } = require('../src/ui/components');
+  const many = Array.from({ length: 150 }, (_, index) =>
+    savedTrack(hit(`Music\\Artist\\Album\\${String(index).padStart(3, '0')} - Song ${index}.mp3`)),
+  );
+  const playTrack = jest.fn(async () => {});
+  useAppStore.setState(state => ({ library: { ...state.library, history: many }, playTrack }));
+  const renderer = render(<LibraryScreen />);
+
+  const chip = renderer.root.findAllByType(FilterChip).find(item => item.props.label === 'Historique')!;
+  act(() => chip.props.onPress());
+
+  // TrackRow is a React.memo: the test tree holds its inner component.
+  const rows = renderer.root.findAll(node => node.type === TrackRow.type);
+  expect(rows.length).toBeGreaterThan(0);
+  expect(rows.length).toBeLessThan(150);
+
+  act(() => rows[3].props.onPress(rows[3].props.hit));
+  expect(playTrack).toHaveBeenCalledWith(
+    many[3].hit,
+    expect.objectContaining({ index: 3, label: 'Historique', items: many.map(track => track.hit) }),
+  );
 });
