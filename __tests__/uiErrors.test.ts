@@ -20,6 +20,17 @@ describe('describePlaybackError', () => {
     expect(describePlaybackError('Refusé par le pair : Banned').kind).toBe('peer-refused-sharing');
   });
 
+  it.each(['Too many megabytes', 'Too many files', 'Queue full', 'Too many megabytes (2 sources essayées)'])(
+    'explains queue quota refusals (%s) in French',
+    reason => {
+      const result = describePlaybackError(`Refusé par le pair : ${reason}`);
+      expect(result.kind).toBe('peer-quota');
+      expect(result.title).toBe('File d’attente pleine chez ce pair');
+      expect(result.body).not.toContain('Too many');
+      expect(result.actions).toEqual(['next-source', 'retry']);
+    },
+  );
+
   it('quotes other refusal reasons', () => {
     const result = describePlaybackError('Refusé par le pair : Queued');
     expect(result.kind).toBe('peer-refused');

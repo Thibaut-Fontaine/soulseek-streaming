@@ -12,6 +12,7 @@ export type ErrorAction =
 export type ErrorKind =
   | 'peer-offline'
   | 'peer-refused'
+  | 'peer-quota'
   | 'peer-refused-sharing'
   | 'peer-unreachable'
   | 'connection-lost'
@@ -49,6 +50,9 @@ export const SHARING_EXPLANATION =
   'aucun fichier. SoulStream ne partage pas encore de fichiers : essayez une autre source, ' +
   'ou partagez des fichiers depuis un autre client avec le même compte.';
 
+// Uploader quotas per account (Nicotine+ "Too many megabytes" / "Too many
+// files", others "Queue full"): our account already has enough waiting there.
+const QUOTA_REASON = /too many (megabytes|files)|queue (is )?full/i;
 const SHARING_REASON = /shar|partag|ban|leech|no share/i;
 
 function percentLabel(ratio: number): string {
@@ -90,6 +94,18 @@ export function describePlaybackError(
         body:
           'Ce pair bloque les comptes qui ne partagent rien. SoulStream ne partage pas encore de fichiers.',
         actions: ['next-source', 'learn-more'],
+      };
+    }
+
+    if (QUOTA_REASON.test(reason)) {
+      return {
+        kind: 'peer-quota',
+        tone: 'bad',
+        icon: 'clock',
+        title: 'File d’attente pleine chez ce pair',
+        body:
+          'Ce pair limite ce qu’un même compte peut mettre en attente chez lui, et la limite est atteinte (titres demandés plus tôt, depuis ce téléphone ou un autre appareil connecté au même compte). Essayez une autre source.',
+        actions: ['next-source', 'retry'],
       };
     }
 
