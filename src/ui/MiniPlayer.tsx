@@ -4,7 +4,7 @@ import LinearGradient from 'react-native-linear-gradient';
 import TrackPlayer, { State, usePlaybackState, useProgress } from 'react-native-track-player';
 
 import { useAppStore } from '../state/store';
-import { ProgressBar } from './components';
+import { MarqueeText, ProgressBar } from './components';
 import { Icon } from './Icon';
 import { TrackCover, useIsLiked, useTrackInfo } from './track';
 import { colors, coverPalette, coverSeed, formatBytes, percent, radius, spacing } from './theme';
@@ -130,9 +130,7 @@ export function MiniPlayer() {
           accessibilityHint="Glissez à gauche ou à droite pour changer de titre">
           <TrackCover hit={hit} size={40} rounded="xs" />
           <View style={styles.textBlock}>
-            <Text style={styles.title} numberOfLines={1}>
-              {info.title}
-            </Text>
+            <MarqueeText style={styles.title}>{info.title}</MarqueeText>
             <Text
               style={[styles.subtitle, preparing && styles.subtitleWait, error && styles.subtitleError]}
               numberOfLines={1}>

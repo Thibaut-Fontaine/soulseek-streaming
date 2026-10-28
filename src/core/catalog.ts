@@ -33,6 +33,8 @@ export interface CatalogProvider {
   artistWithRelated(id: string): Promise<{ artist: CatalogArtist; related: CatalogArtist[] }>;
   /** Tracks like this artist's (an artist "radio"). */
   artistRadio(id: string): Promise<CatalogTrack[]>;
+  /** One track in full: unlike lists, it names every artist on it. */
+  track(id: string): Promise<CatalogTrack>;
 }
 
 /** Fetches a URL and returns parsed JSON. Injected so tests run offline. */
@@ -249,10 +251,12 @@ export function parseTrack(json: Json, fallbackAlbum?: CatalogAlbum): CatalogTra
   const albumJson = obj(json.album);
   const title = str(json.title);
   const titleShort = str(json.title_short) || title;
+  const artist = artistRef(obj(json.artist));
+  // Search results and album track lists leave contributors out; the title
+  // still names featured artists ("Stay (feat. Justin Bieber)").
   const contributors = Array.isArray(json.contributors)
     ? json.contributors.map(obj).map(artistRef)
-    : [];
-  const artist = artistRef(obj(json.artist));
+    : featuredInTitle(title).map(name => ({ id: '', name }));
 
   let album: CatalogTrack['album'] = null;
   if (albumJson.id !== undefined) {
@@ -275,6 +279,24 @@ export function parseTrack(json: Json, fallbackAlbum?: CatalogAlbum): CatalogTra
     explicit: json.explicit_lyrics === true,
     rank: num(json.rank),
   };
+}
+
+/** "Stay (feat. Justin Bieber & X)" → ["Justin Bieber & X"]. Not split: "&" can be part of a name. */
+export function featuredInTitle(title: string): string[] {
+  const match = /[([]\s*(?:feat\.?|ft\.|featuring)\s+([^)\]]+)[)\]]/i.exec(title);
+  const names = match?.[1].trim();
+  return names ? [names] : [];
+}
+
+/** Main artist, then the others: "Daft Punk, Pharrell Williams". */
+export function trackArtists(track: CatalogTrack): string {
+  const names = [track.artist.name];
+  for (const contributor of track.contributors) {
+    if (!names.includes(contributor.name)) {
+      names.push(contributor.name);
+    }
+  }
+  return names.join(', ');
 }
 
 /** "One More Time (Radio Edit)" minus "One More Time" → "(Radio Edit)". */
@@ -481,6 +503,10 @@ export function createDeezerCatalog(fetchJson: JsonFetcher = defaultFetcher()): 
     async artistRadio(catalogId) {
       const raw = requireId(catalogId);
       return list(await get(`/artist/${raw}/radio?limit=40`, SEARCH_TTL_MS)).map(track => parseTrack(track));
+    },
+
+    async track(catalogId) {
+      return parseTrack(await get(`/track/${requireId(catalogId)}`, PAGE_TTL_MS, 'low'));
     },
   };
 }

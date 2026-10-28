@@ -21,7 +21,7 @@ import {
   soulseekSpellings,
 } from '../core/search';
 import type { RankedHit } from '../core/search';
-import { createDeezerCatalog } from '../core/catalog';
+import { createDeezerCatalog, trackArtists } from '../core/catalog';
 import type { CatalogProvider } from '../core/catalog';
 import { primeHitScores, soulseekLadder, soulseekQueryFor, sourcesForTrack, unifyResults } from '../core/unify';
 import type {
@@ -57,6 +57,7 @@ import {
   saveLibrary,
   savedTrack,
   toggleLike,
+  withCatalogTrack,
 } from '../services/library';
 import type { Library } from '../services/library';
 import type { LogTag } from '../services/debugLog';
@@ -287,6 +288,11 @@ let homeKey = '';
 const resolving = new Map<string, Promise<Resolution>>();
 /** When each resolution was made, by catalog track id. */
 const resolvedAt = new Map<string, number>();
+/**
+ * Played catalog tracks fetched in full (lists leave out featured artists),
+ * by id; null while the request runs.
+ */
+const fullTracks = new Map<string, CatalogTrack | null>();
 
 /** Tests replace the online catalog with recorded answers. */
 export function setCatalogProvider(provider: CatalogProvider): void {
@@ -483,6 +489,70 @@ export const useAppStore = create<AppState>((set, get) => {
     } catch {
       // The transfer ended or failed first: no cover for this one.
     }
+  }
+
+  /**
+   * What the notification and lock screen show: the catalog track when the
+   * file was matched to one, else its tag, else its path. Never the peer.
+   */
+  function nowPlayingInfo(hit: SearchHit): { title: string; artist: string; album?: string; artwork?: string } {
+    const track = get().trackForHit(hit);
+    const meta = get().meta[hitKey(hit)];
+    const cover = track?.album?.cover;
+    return {
+      title: track?.title || meta?.title || displayTitle(hit.filename),
+      artist: (track ? trackArtists(track) : '') || meta?.artist || displayArtist(hit) || 'SoulStream',
+      album: track?.album?.title || meta?.album,
+      artwork: cover?.big ?? cover?.large ?? cover?.medium ?? undefined,
+    };
+  }
+
+  /** The native player holds one track at a time: index 0 is the current one. */
+  function refreshNowPlaying(hit: SearchHit): void {
+    const current = get().current;
+    if (!current || hitKey(current.hit) !== hitKey(hit)) {
+      return;
+    }
+    void Promise.resolve()
+      .then(() => TrackPlayer.updateMetadataForTrack(0, nowPlayingInfo(hit)))
+      .catch(() => {});
+  }
+
+  /**
+   * Catalog lists (search, albums) name only the main artist: fetch the
+   * playing track in full once, to show everyone on it.
+   */
+  function completeTrack(hit: SearchHit): void {
+    const track = get().trackForHit(hit);
+    if (!track || !get().settings.catalogEnabled || fullTracks.has(track.id)) {
+      return;
+    }
+
+    fullTracks.set(track.id, null);
+    catalog
+      .track(track.id)
+      .then(full => {
+        const complete: CatalogTrack = {
+          ...track,
+          contributors: full.contributors.length > 0 ? full.contributors : track.contributors,
+        };
+        fullTracks.set(track.id, complete);
+        if (trackArtists(complete) === trackArtists(track)) {
+          return;
+        }
+        set(state => {
+          const hitTracks: Record<string, CatalogTrack> = {};
+          for (const [key, value] of Object.entries(state.hitTracks)) {
+            hitTracks[key] = value.id === track.id ? complete : value;
+          }
+          return { hitTracks };
+        });
+        updateLibrary(library => withCatalogTrack(library, complete));
+        refreshNowPlaying(hit);
+      })
+      .catch(() => {
+        fullTracks.delete(track.id);
+      });
   }
 
   /** Marks the current track as played, once it really started. */
@@ -710,9 +780,7 @@ export const useAppStore = create<AppState>((set, get) => {
     await TrackPlayer.add({
       id,
       url: prepared.url,
-      title: displayTitle(hit.filename),
-      artist: displayArtist(hit) ?? hit.username,
-      album: hit.username,
+      ...nowPlayingInfo(hit),
       duration: hit.durationSec,
       contentType: contentTypeFor(hit.filename),
     });
@@ -857,8 +925,7 @@ export const useAppStore = create<AppState>((set, get) => {
     await TrackPlayer.add({
       id: `cache:${entry.file}`,
       url,
-      title: displayTitle(hit.filename),
-      artist: displayArtist(hit) ?? 'SoulStream',
+      ...nowPlayingInfo(hit),
       duration: hit.durationSec,
       contentType: contentTypeFor(hit.filename),
     });
@@ -1141,8 +1208,9 @@ export const useAppStore = create<AppState>((set, get) => {
   function setResolution(track: CatalogTrack, resolution: Resolution): void {
     set(state => {
       const hitTracks = { ...state.hitTracks };
+      const known = fullTracks.get(track.id) ?? track;
       for (const source of resolution.sources) {
-        hitTracks[hitKey(source.hit)] = track;
+        hitTracks[hitKey(source.hit)] = known;
       }
       return { resolutions: { ...state.resolutions, [track.id]: resolution }, hitTracks };
     });
@@ -1328,6 +1396,11 @@ export const useAppStore = create<AppState>((set, get) => {
         await playCached(cached, hit);
       } else {
         await playWithFallback(hit);
+      }
+
+      const playing = get().current;
+      if (playing && playing.phase === 'playing') {
+        completeTrack(playing.hit);
       }
     } catch (error) {
       set(state => ({

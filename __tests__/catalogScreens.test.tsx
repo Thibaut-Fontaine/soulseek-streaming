@@ -53,7 +53,7 @@ jest.mock('../src/player/player', () => ({
 import { hitKey } from '../src/core/types';
 import { EMPTY_LIBRARY, savedTrack } from '../src/services/library';
 import { useAppStore } from '../src/state/store';
-import { HomeScreen } from '../src/ui/HomeScreen';
+import { HomeScreen, quickItems } from '../src/ui/HomeScreen';
 import { MiniPlayer } from '../src/ui/MiniPlayer';
 import { PageHost } from '../src/ui/pages';
 import { PlayerSheet } from '../src/ui/PlayerScreen';
@@ -69,10 +69,13 @@ import {
   formatTotalDuration,
   pickArtwork,
   splitDiscography,
+  trackArtists,
 } from '../src/ui/catalogFormat';
 import {
+  AERODYNAMIC,
   ALBUM_PAGE,
   ARTIST_PAGE,
+  BOOTLEG_FILE,
   DAFT_PUNK,
   DIGITAL_LOVE,
   DISCOVERY,
@@ -82,6 +85,7 @@ import {
   OMT_RADIO,
   ONE_MORE_TIME,
   SEARCH_GROUPS,
+  soulseekHit,
   SEARCH_RESULT,
   TOP_TRACKS,
   art,
@@ -476,6 +480,24 @@ describe('home from the listening history', () => {
     expect(actions.openPage).toHaveBeenCalledWith({ kind: 'album', id: DISCOVERY.id, title: 'Discovery' });
   });
 
+  test('top tiles show the albums of recent tracks, once each', () => {
+    const aerodynamic = savedTrack(
+      soulseekHit('Music\\Daft Punk\\Discovery\\02 - Aerodynamic.mp3', 'dj_mark'),
+      undefined,
+      AERODYNAMIC,
+    );
+    const bootleg = savedTrack(BOOTLEG_FILE);
+    const history = [played, aerodynamic, bootleg];
+    expect(quickItems(history, true).map(item => item.kind)).toEqual(['album', 'track']);
+    // Catalog off: no album page to open, one tile per track.
+    expect(quickItems(history, false).map(item => item.kind)).toEqual(['track', 'track', 'track']);
+
+    useAppStore.setState({ library: { ...EMPTY_LIBRARY, history } });
+    const home = render(<HomeScreen />);
+    press(home, 'Ouvrir l’album Discovery');
+    expect(actions.openPage).toHaveBeenCalledWith({ kind: 'album', id: DISCOVERY.id, title: 'Discovery' });
+  });
+
   test('error offers a retry', () => {
     useAppStore.setState({
       library: { ...EMPTY_LIBRARY, history: [played] },
@@ -522,6 +544,25 @@ describe('catalog track menu', () => {
   test('shows known sources', () => {
     useAppStore.setState({ sheet: { kind: 'catalogActions', track: ONE_MORE_TIME }, groups: SEARCH_GROUPS });
     expect(text(render(<SheetHost />))).toContain('Voir les sources');
+  });
+});
+
+describe('queue', () => {
+  test('shows the rest of the album being played', () => {
+    const [, second, third] = ALBUM_PAGE.tracks;
+    useAppStore.setState({
+      sheet: { kind: 'queue' },
+      catalogContext: { label: 'Discovery', tracks: ALBUM_PAGE.tracks, index: 0 },
+    });
+    const sheet = render(<SheetHost />);
+    const out = text(sheet);
+    expect(out).toContain('"À suivre · ","Discovery"');
+    expect(out).toContain(second.title);
+    expect(out).toContain(third.title);
+    expect(out).not.toContain('Rien à suivre');
+
+    press(sheet, `Écouter ${second.title}, ${trackArtists(second)}`);
+    expect(actions.playCatalogTrack).toHaveBeenCalledWith(second, expect.objectContaining({ index: 1 }));
   });
 });
 

@@ -17,7 +17,7 @@ import TrackPlayer, { State, usePlaybackState, useProgress } from 'react-native-
 import type { TransferSnapshot } from '../core/transfer';
 import type { SearchHit } from '../core/types';
 import { useAppStore } from '../state/store';
-import { CoverBackdrop, Dot, IconButton, StatusCard } from './components';
+import { CoverBackdrop, Dot, IconButton, MarqueeText, StatusCard } from './components';
 import type { CardAction } from './components';
 import { ACTION_LABELS, SHARING_EXPLANATION, describePlaybackError } from './errors';
 import type { ErrorAction } from './errors';
@@ -279,18 +279,14 @@ function PlayerContent({ translateY }: { translateY: Animated.Value }) {
               accessibilityRole={album ? 'link' : undefined}
               accessibilityLabel={album ? `Aller à l’album ${album.title}` : undefined}
               onPress={() => album && openPage({ kind: 'album', id: album.id, title: album.title })}>
-              <Text style={styles.title} numberOfLines={1}>
-                {info.title}
-              </Text>
+              <MarqueeText style={styles.title}>{info.title}</MarqueeText>
             </Pressable>
             <Pressable
               disabled={!catalog}
               accessibilityRole={catalog ? 'link' : undefined}
               accessibilityLabel={catalog ? `Aller à l’artiste ${catalog.artist.name}` : undefined}
               onPress={() => catalog && openPage({ kind: 'artist', id: catalog.artist.id, name: catalog.artist.name })}>
-              <Text style={styles.artist} numberOfLines={1}>
-                {info.artist}
-              </Text>
+              <MarqueeText style={styles.artist}>{info.artist}</MarqueeText>
             </Pressable>
           </View>
           <IconButton

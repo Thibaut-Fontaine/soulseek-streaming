@@ -7,12 +7,13 @@ import {
   PanResponder,
   PixelRatio,
   Pressable,
+  ScrollView,
   StyleSheet,
   Switch,
   Text,
   View,
 } from 'react-native';
-import type { LayoutChangeEvent, StyleProp, ViewStyle } from 'react-native';
+import type { LayoutChangeEvent, StyleProp, TextStyle, ViewStyle } from 'react-native';
 import LinearGradient from 'react-native-linear-gradient';
 
 import type { Artwork } from '../core/catalogTypes';
@@ -22,6 +23,70 @@ import { Icon } from './Icon';
 import type { IconName } from './Icon';
 import { colors, coverPalette, motion, radius, spacing, tones, type } from './theme';
 import type { Tone } from './theme';
+
+// ---------------------------------------------------------------------------
+// Scrolling title
+
+const MARQUEE_GAP = 48;
+const MARQUEE_PAUSE_MS = 2000;
+/** Pixels per second. */
+const MARQUEE_SPEED = 32;
+
+/**
+ * One line of text that scrolls when it is too long, like music apps do for
+ * titles: pause, slide left until a second copy takes its place, repeat.
+ * Touches go to the parent (the title can be a link).
+ */
+export function MarqueeText({ children, style }: { children: string; style?: StyleProp<TextStyle> }) {
+  const [boxWidth, setBoxWidth] = React.useState(0);
+  const [textWidth, setTextWidth] = React.useState(0);
+  const offset = React.useRef(new Animated.Value(0)).current;
+  const overflows = boxWidth > 0 && textWidth > boxWidth + 1;
+
+  React.useEffect(() => {
+    offset.setValue(0);
+    if (!overflows) {
+      return;
+    }
+    const distance = textWidth + MARQUEE_GAP;
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.delay(MARQUEE_PAUSE_MS),
+        Animated.timing(offset, {
+          toValue: -distance,
+          duration: (distance / MARQUEE_SPEED) * 1000,
+          easing: Easing.linear,
+          useNativeDriver: true,
+        }),
+        Animated.timing(offset, { toValue: 0, duration: 0, useNativeDriver: true }),
+      ]),
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [overflows, textWidth, offset, children]);
+
+  return (
+    <View
+      pointerEvents="none"
+      accessible
+      accessibilityLabel={children}
+      onLayout={event => setBoxWidth(event.nativeEvent.layout.width)}>
+      {/* A horizontal ScrollView lets the text take its full width; it clips the rest. */}
+      <ScrollView horizontal scrollEnabled={false} showsHorizontalScrollIndicator={false}>
+        <Animated.View style={[styles.marqueeRow, { transform: [{ translateX: offset }] }]}>
+          <Text style={style} numberOfLines={1} onLayout={event => setTextWidth(event.nativeEvent.layout.width)}>
+            {children}
+          </Text>
+          {overflows ? (
+            <Text style={[style, styles.marqueeCopy]} numberOfLines={1}>
+              {children}
+            </Text>
+          ) : null}
+        </Animated.View>
+      </ScrollView>
+    </View>
+  );
+}
 
 // ---------------------------------------------------------------------------
 // Cover art
@@ -943,6 +1008,12 @@ const dotStyles = StyleSheet.create({
 });
 
 const styles = StyleSheet.create({
+  marqueeRow: {
+    flexDirection: 'row',
+  },
+  marqueeCopy: {
+    marginLeft: MARQUEE_GAP,
+  },
   cover: {
     alignItems: 'center',
     justifyContent: 'center',

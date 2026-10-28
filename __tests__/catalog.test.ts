@@ -1,7 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 
-import { createDeezerCatalog, dedupeTracks } from '../src/core/catalog';
+import { createDeezerCatalog, dedupeTracks, featuredInTitle, parseTrack, trackArtists } from '../src/core/catalog';
 import type { JsonFetcher } from '../src/core/catalog';
 import type { CatalogTrack } from '../src/core/catalogTypes';
 import {
@@ -151,6 +151,27 @@ describe('Deezer catalog', () => {
     ];
 
     expect(dedupeTracks(tracks).map(track => track.id)).toEqual(['dz:2', 'dz:3']);
+  });
+
+  test('every artist of a track is named, from contributors or from the title', () => {
+    const full = parseTrack({
+      id: 1,
+      title: 'Get Lucky',
+      artist: { id: 27, name: 'Daft Punk' },
+      contributors: [
+        { id: 27, name: 'Daft Punk' },
+        { id: 103, name: 'Pharrell Williams' },
+      ],
+    });
+    expect(trackArtists(full)).toBe('Daft Punk, Pharrell Williams');
+
+    // Lists (search, albums) have no contributors: the title names the guests.
+    const listed = parseTrack({ id: 2, title: 'Stay (feat. Justin Bieber)', artist: { id: 1, name: 'The Kid LAROI' } });
+    expect(trackArtists(listed)).toBe('The Kid LAROI, Justin Bieber');
+
+    expect(featuredInTitle('Song [ft. A & B]')).toEqual(['A & B']);
+    expect(featuredInTitle('Song (Featuring Someone) - Remix')).toEqual(['Someone']);
+    expect(featuredInTitle('Feathers (Radio Edit)')).toEqual([]);
   });
 });
 

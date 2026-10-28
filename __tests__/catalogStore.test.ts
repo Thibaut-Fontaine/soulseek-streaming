@@ -7,6 +7,7 @@ jest.mock('react-native-track-player', () => ({
     add: jest.fn(async () => {}),
     play: jest.fn(async () => {}),
     reset: jest.fn(async () => {}),
+    updateMetadataForTrack: jest.fn(async () => {}),
   },
 }));
 jest.mock('../src/player/player', () => ({
@@ -30,6 +31,7 @@ import { playbackTimeouts, useAppStore } from '../src/state/store';
 import { setCatalogProvider } from '../src/state/store';
 import type { CatalogProvider } from '../src/core/catalog';
 import type { CatalogTrack } from '../src/core/catalogTypes';
+import TrackPlayer from 'react-native-track-player';
 
 jest.setTimeout(30000);
 
@@ -91,6 +93,11 @@ const fakeCatalog: CatalogProvider = {
     ],
   }),
   artistRadio: async () => [MISSING, STREAM_ME],
+  // Like Deezer's /track: the only answer that names every artist.
+  track: async id => ({
+    ...(id === STREAM_ME.id ? STREAM_ME : MISSING),
+    contributors: [{ id: 'dz:9', name: 'Guest Star' }],
+  }),
 };
 
 async function withNetwork(
@@ -203,6 +210,18 @@ describe('catalog search and playback', () => {
         expect(useAppStore.getState().library.history[0].title).toBe(
           'Stream Me',
         );
+
+        // The notification names the catalog track, not the peer.
+        expect(TrackPlayer.add).toHaveBeenLastCalledWith(
+          expect.objectContaining({ title: 'Stream Me', artist: 'Fake Artist', album: 'Album' }),
+        );
+        // Then every artist, once the full track arrived.
+        await waitFor(() => useAppStore.getState().trackForHit(current.hit)?.contributors.length === 1);
+        expect(TrackPlayer.updateMetadataForTrack).toHaveBeenLastCalledWith(
+          0,
+          expect.objectContaining({ artist: 'Fake Artist, Guest Star' }),
+        );
+        expect(useAppStore.getState().library.history[0].artist).toBe('Fake Artist, Guest Star');
       },
     );
   });

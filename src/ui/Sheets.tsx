@@ -17,6 +17,7 @@ import type { SearchHit } from '../core/types';
 import { trackIdentity } from '../services/library';
 import { useAppStore } from '../state/store';
 import type { PlayContext, Sheet } from '../state/store';
+import { CatalogTrackRow } from './catalog';
 import { trackArtists } from './catalogFormat';
 import { Cover } from './components';
 import { Icon } from './Icon';
@@ -392,14 +393,20 @@ function Queue() {
   const current = useAppStore(state => state.current);
   const queue = useAppStore(state => state.queue);
   const context = useAppStore(state => state.context);
+  const catalogContext = useAppStore(state => state.catalogContext);
   const device = useAppStore(state => state.device);
   const removeFromQueue = useAppStore(state => state.removeFromQueue);
   const playHit = useAppStore(state => state.playHit);
   const playTrack = useAppStore(state => state.playTrack);
+  const playCatalogTrack = useAppStore(state => state.playCatalogTrack);
   const closeSheet = useAppStore(state => state.closeSheet);
 
   const deviceKeys = React.useMemo(() => new Set(device.map(hitKey)), [device]);
   const upNext = context ? context.items.slice(context.index + 1, context.index + 1 + UP_NEXT_LIMIT) : [];
+  // An album, top tracks or radio being played: the tracks after the current one.
+  const catalogUpNext = catalogContext
+    ? catalogContext.tracks.slice(catalogContext.index + 1, catalogContext.index + 1 + UP_NEXT_LIMIT)
+    : [];
 
   return (
     <>
@@ -460,7 +467,24 @@ function Queue() {
           </>
         ) : null}
 
-        {queue.length === 0 && upNext.length === 0 ? (
+        {catalogContext && catalogUpNext.length > 0 ? (
+          <>
+            <Text style={styles.queueSection}>À suivre · {catalogContext.label}</Text>
+            {catalogUpNext.map((track, offset) => (
+              <CatalogTrackRow
+                key={`${track.id}:ctx${offset}`}
+                track={track}
+                showDuration={false}
+                onPress={() => {
+                  closeSheet();
+                  void playCatalogTrack(track, { ...catalogContext, index: catalogContext.index + 1 + offset });
+                }}
+              />
+            ))}
+          </>
+        ) : null}
+
+        {queue.length === 0 && upNext.length === 0 && catalogUpNext.length === 0 ? (
           <Text style={styles.empty}>
             Rien à suivre. Dans le menu ⋮ d’un titre, choisissez « Lire ensuite » ou « Ajouter à la file d’attente ».
           </Text>
