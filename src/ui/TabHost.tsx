@@ -1,5 +1,5 @@
 import React from 'react';
-import { StyleSheet, View } from 'react-native';
+import { Keyboard, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import type { Tab } from '../state/store';
@@ -28,6 +28,11 @@ export function TabHost({ tab, resets }: { tab: Tab; resets: TabResets }) {
   if (tab !== 'settings') {
     visited.current.add(tab);
   }
+
+  // A hidden tab keeps its text field mounted: close the keyboard on leaving.
+  React.useEffect(() => {
+    Keyboard.dismiss();
+  }, [tab]);
 
   return (
     <>

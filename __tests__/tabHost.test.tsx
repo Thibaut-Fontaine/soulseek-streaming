@@ -86,3 +86,12 @@ test('a reset (tapping the current tab again) rebuilds that tab only', () => {
   go('search', { ...NO_RESETS, search: 1 });
   expect(mockMounts).toEqual({ search: 2, library: 1 });
 });
+
+test('leaving a tab closes the keyboard (its text field stays mounted, hidden)', () => {
+  const { Keyboard } = require('react-native');
+  const dismiss = jest.spyOn(Keyboard, 'dismiss').mockImplementation(() => {});
+  const { go } = renderAt('search');
+  dismiss.mockClear();
+  go('home');
+  expect(dismiss).toHaveBeenCalled();
+});
