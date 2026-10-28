@@ -69,6 +69,7 @@ import {
   formatTotalDuration,
   pickArtwork,
   splitDiscography,
+  trackArtists,
 } from '../src/ui/catalogFormat';
 import {
   ALBUM_PAGE,
@@ -522,6 +523,25 @@ describe('catalog track menu', () => {
   test('shows known sources', () => {
     useAppStore.setState({ sheet: { kind: 'catalogActions', track: ONE_MORE_TIME }, groups: SEARCH_GROUPS });
     expect(text(render(<SheetHost />))).toContain('Voir les sources');
+  });
+});
+
+describe('queue', () => {
+  test('shows the rest of the album being played', () => {
+    const [, second, third] = ALBUM_PAGE.tracks;
+    useAppStore.setState({
+      sheet: { kind: 'queue' },
+      catalogContext: { label: 'Discovery', tracks: ALBUM_PAGE.tracks, index: 0 },
+    });
+    const sheet = render(<SheetHost />);
+    const out = text(sheet);
+    expect(out).toContain('"À suivre · ","Discovery"');
+    expect(out).toContain(second.title);
+    expect(out).toContain(third.title);
+    expect(out).not.toContain('Rien à suivre');
+
+    press(sheet, `Écouter ${second.title}, ${trackArtists(second)}`);
+    expect(actions.playCatalogTrack).toHaveBeenCalledWith(second, expect.objectContaining({ index: 1 }));
   });
 });
 
