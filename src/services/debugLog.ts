@@ -1,8 +1,8 @@
 /**
  * In-memory debug journal, shown in Réglages → Journal de débogage.
  *
- * Release builds drop console output, so this is the only way to see what
- * happened when a track does not play. It keeps the last MAX_ENTRIES lines.
+ * Shows what happened when a track does not play; keeps the last MAX_ENTRIES
+ * lines. Each line also goes to logcat (tag ReactNativeJS).
  */
 
 export type LogTag = 'net' | 'peer' | 'transfer' | 'http' | 'player' | 'play' | 'app';
@@ -19,8 +19,6 @@ const entries: LogEntry[] = [];
 const listeners = new Set<() => void>();
 let notifyScheduled = false;
 
-declare const __DEV__: boolean | undefined;
-
 export function debugLog(tag: LogTag, message: string): void {
   entries.push({ at: Date.now(), tag, message });
 
@@ -28,9 +26,9 @@ export function debugLog(tag: LogTag, message: string): void {
     entries.splice(0, entries.length - MAX_ENTRIES);
   }
 
-  if (typeof __DEV__ !== 'undefined' && __DEV__) {
-    console.log(`[${tag}]`, message);
-  }
+  // Release builds too: `adb logcat -s ReactNativeJS` reads the journal from
+  // a phone over Wi-Fi debugging, without opening the journal screen.
+  console.log(`[${tag}]`, message);
 
   // Coalesce bursts (e.g. many search responses) into one UI update.
   if (!notifyScheduled && listeners.size > 0) {

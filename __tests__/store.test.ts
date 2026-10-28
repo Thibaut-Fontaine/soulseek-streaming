@@ -124,6 +124,25 @@ describe('playback with source fallback', () => {
     );
   });
 
+  test('never falls back to another song with a close title', async () => {
+    await withNetwork(
+      [
+        { username: 'no1', filename: 'Music\\Fake Artist\\Album\\03 - Stream Me 3.mp3', behavior: 'deny' },
+        { username: 'part1', filename: 'Music\\Fake Artist\\Album\\01 - Stream Me 1.mp3', behavior: 'ok' },
+      ],
+      async network => {
+        await useAppStore.getState().runSearch('fake artist stream me');
+        const wanted = useAppStore
+          .getState()
+          .results.find(ranked => ranked.hit.username === 'no1')!.hit;
+        await useAppStore.getState().playTrack(wanted);
+        await waitFor(() => useAppStore.getState().current?.phase === 'error');
+
+        expect(network.queueRequests).toEqual(['no1']);
+      },
+    );
+  });
+
   test('reports an error after every source failed', async () => {
     await withNetwork(
       [
@@ -187,5 +206,43 @@ describe('search and library', () => {
         expect(useAppStore.getState().library.history.map(t => t.hit.filename)).toEqual([OTHER, TRACK]);
       },
     );
+  });
+});
+
+describe('login without network', () => {
+  async function closedPort(): Promise<number> {
+    const net = jest.requireActual<typeof import('node:net')>('node:net');
+    const server = net.createServer();
+    await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+    const { port } = server.address() as { port: number };
+    await new Promise<void>(resolve => server.close(() => resolve()));
+    return port;
+  }
+
+  beforeEach(async () => {
+    useAppStore.setState({
+      settings: {
+        ...useAppStore.getState().settings,
+        serverHost: '127.0.0.1',
+        serverPort: await closedPort(),
+        listenPort: 0,
+      },
+    });
+  });
+
+  afterEach(() => useAppStore.getState().logout());
+
+  test('stored credentials keep the user in the app, offline', async () => {
+    expect(await useAppStore.getState().login('tester', 'secret', 'saved')).toBe(false);
+
+    expect(useAppStore.getState().username).toBe('tester');
+    expect(useAppStore.getState().connection).toBe('error');
+  });
+
+  test('credentials typed on the login screen stay there', async () => {
+    expect(await useAppStore.getState().login('tester', 'secret')).toBe(false);
+
+    expect(useAppStore.getState().username).toBeNull();
+    expect(useAppStore.getState().prefillUsername).toBe('tester');
   });
 });

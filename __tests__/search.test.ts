@@ -5,6 +5,7 @@ import {
   pickBestMatch,
   scoreHit,
   rankHits,
+  sameSongTitle,
   similarity,
   soulseekSpellings,
 } from '../src/core/search';
@@ -160,5 +161,19 @@ describe('spellings sent to Soulseek', () => {
     expect(soulseekSpellings('Jungle Jack SYSTÈME')).toEqual(['jungle jack système', 'jungle jack systeme']);
     expect(soulseekSpellings('Daft Punk One More Time')).toEqual(['daft punk one more time']);
     expect(soulseekSpellings('Beyoncé Déjà Vu')).toEqual(['beyoncé déjà vu', 'beyonce deja vu']);
+  });
+});
+
+describe('sameSongTitle', () => {
+  test('a typo or other spelling is the same song', () => {
+    expect(sameSongTitle('Veridis Quo', 'Veridis Quo')).toBe(true);
+    expect(sameSongTitle('Harder Better Faster', 'Harder, Better, Faster')).toBe(true);
+    expect(sameSongTitle('Harder Better Faster Stronger', 'Harder Better Faster Stonger')).toBe(true);
+  });
+
+  test('a different number is another song', () => {
+    expect(sameSongTitle('Fake Song 3', 'Fake Song 1')).toBe(false);
+    expect(sameSongTitle('Gymnopédie No. 1', 'Gymnopédie No. 3')).toBe(false);
+    expect(sameSongTitle('Track 12', 'Track 2')).toBe(false);
   });
 });

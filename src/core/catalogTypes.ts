@@ -12,6 +12,8 @@ export interface Artwork {
   small: string | null;
   /** ~250 px, for rows and cards. */
   medium: string | null;
+  /** ~500 px, for shelf tiles and the album cover (absent from older saved tracks). */
+  big?: string | null;
   /** ~1000 px, for the player and page headers. */
   large: string | null;
 }

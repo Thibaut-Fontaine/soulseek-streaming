@@ -5,20 +5,23 @@ Ordered by priority, highest first. When an item is done, remove it in the
 commit that finishes it (git history keeps the record); add new items where
 they belong in the order, with enough context to start without asking.
 
-## 1. Better Soulseek queries for played titles
+## 1. Open findings from the October 2026 audit (emulator + real network)
 
-Research done: `docs/peer-search-research.md`. Peers match whole words, all
-required, over the full path. Fix, in this order:
+Seen on the emulator (fake network and real Soulseek, test account
+`soulstream_dev`), not fixed yet:
 
-- `meaningfulVersion` judges each part of a version (`Live 1972; Remaster`
-  currently counts as neutral, so `live` is ignored when matching).
-- Clean titles: versions after ` - ` (`- Remastered 2011` sends `2011`),
-  years, quotes, words with apostrophes (`don't` → `don`), at most ~4
-  distinctive words; per-part version handling. Table of tests from real
-  Deezer titles.
-- Query ladder within the 9 s budget: artist + title → title only → artist +
-  album; very short titles go straight to artist + album; exclusions
-  (`-live -karaoke…`) for studio versions.
+- A track from a search-result list with no source skips to the next
+  result ("Get Lucky" → "Veridis Quo"): `playCatalog` applies the album
+  behaviour to every list. Skip only in albums, radios and top tracks.
+- A transfer waiting for the peer's TransferRequest fails 5 s after its P
+  connection closes (`handlePeerSessionClosed`), although uploaders keep
+  queued requests: keep waiting (or reconnect and re-send QueueUpload).
+- Two devices on one account kick each other: after RELOGGED, coming back
+  to the foreground reconnects and logs the other device out.
+- "Réessayer" / `reconnect()` goes through `login()`, which stops a track
+  playing from the device cache (no network needed).
+- Owner report, parked until a screen recording: the full player could
+  not be closed (it still scrolled) around "Autre source"; not reproduced.
 
 ## 2. Audit asynchronous behaviour and responsiveness: device checks
 
@@ -56,7 +59,9 @@ next track's *sources* are looked up in advance (one Soulseek search,
 ## 4. One Soulseek search per album
 
 When an album starts playing, search "artist album" once and match the
-files to every track of the album (`sourcesForTrack` per track): albums are
+files to every track of the album (`sourcesForTrack` per track). The query
+ladder already ends with an "artist album" step (`soulseekLadder`), but per
+track and only when the other steps failed. Albums are
 shared as folders, so one request usually covers them, from the same peer and
 quality. Only tracks still without a source get their own search on play.
 

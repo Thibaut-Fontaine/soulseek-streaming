@@ -71,6 +71,9 @@ cd android && ./gradlew assembleRelease --no-daemon && cd ..
 ## Fonctionnalités
 
 - Connexion au serveur Soulseek avec votre compte (`server.slsknet.org:2242`).
+- Création d'un compte depuis l'écran de connexion (« Créer un compte ») : Soulseek
+  n'a pas de formulaire d'inscription, le serveur enregistre un nom libre et son mot
+  de passe à la première connexion. Le mot de passe ne peut pas être récupéré.
 - Recherche sur le réseau, résultats enrichis (bitrate, durée, taille, nombre
   de personnes en file d'attente, vitesse moyenne du pair).
 - **MP3 uniquement** : les résultats d'autres formats sont ignorés, ce qui
@@ -165,6 +168,14 @@ Le « layer » de pré-recherche est entièrement local (`src/core/search.ts`) :
 normalisation de la requête, suppression du bruit (« official video », bitrate,
 etc.), puis scoring Levenshtein (ordre des mots, accents, petites fautes). Aucun
 service LLM externe n'est appelé avant l'envoi à Soulseek.
+
+Pour un titre du catalogue joué, les pairs ne renvoient un fichier que si chaque
+mot de la requête est un mot entier de son chemin. La requête garde donc
+l'artiste (sans « The ») et au plus quatre mots distinctifs du titre, sans
+versions neutres (« - Remastered 2011 », « Mono »), sans mots à apostrophe
+(« Don't »), et exclut `-live -karaoke -instrumental -remix` sauf si le titre en
+est un. Si rien ne correspond, l'app essaie le titre seul, puis artiste +
+album (`soulseekLadder` dans `src/core/unify.ts`), le tout en 9 s au plus.
 
 ### Flux d'un morceau
 

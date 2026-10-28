@@ -1,7 +1,8 @@
 # Soulseek (peer) search queries — research
 
-Date: 2026-10-25. Status: research only, no code changed yet. Code state:
-`main` at `bda876b` (1.3-beta8).
+Date: 2026-10-25. Research done on `main` at `bda876b` (1.3-beta8); the
+proposed strategy is implemented since (see "Implemented" at the end). The
+sections below describe the code *before* that change.
 
 ## What the app sends today
 
@@ -117,6 +118,37 @@ inside the existing 9 s budget:
 
 Fix independently: `meaningfulVersion` judging each part of the version
 (the `Live 1972; Remaster` bug).
+
+## Implemented
+
+In `src/core/unify.ts` (tests: `__tests__/peerQuery.test.ts`, ladder end to
+end in `__tests__/catalogStore.test.ts` with fake peers that match like real
+ones, `matchQuery` in `test-utils/multiPeerNetwork.ts`):
+
+- `splitTitle` / `trackTitleParts`: versions in brackets **and** after
+  ` - ` are split from the name, part by part (`;`, `,`, `/`). Brackets that
+  are part of the name (`(Don't Fear) The Reaper`) are kept; guests and
+  "from the film" brackets are dropped.
+- `meaningfulVersion` judges each part: a part made only of neutral words and
+  years is neutral; `Live 1972; Remaster` → `Live`. Matching uses the clean
+  name plus that version.
+- `formatSearchQuery` (`search.ts`) drops words with an apostrophe, except
+  French elisions (`l'amour` → `amour`); `'69` → `69`.
+- `soulseekLadder`: artist (without a leading "The") + at most 4 title words
+  (stop words dropped first) + kind of version → title only (2+ words or 6+
+  letters) → artist + album (not for self-titled albums). A one-letter title
+  goes straight to the album. Every step carries `-live -karaoke
+  -instrumental -remix`, minus any word found in the artist, title, version
+  or album. `soulseekQueryFor` stays the plain query (no exclusions) for the
+  local cache and the file list.
+- `findSources` (`store.ts`) runs the steps in order inside the 9 s budget
+  (first step up to 6 s, 2 s kept per later step), stops at the first step
+  with a source, and logs each step with its file and source counts in the
+  journal.
+
+Still open: artist spellings (`Jay-Z`, `AC/DC`, `P!nk`), numbers (`Part 2` /
+`Pt. II`), `&` vs `and`; check in real sessions (journal) whether the
+exclusions ever cost a good file, and tune from the per-step counts.
 
 ## Sources
 

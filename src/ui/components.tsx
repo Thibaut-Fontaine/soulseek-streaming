@@ -113,7 +113,14 @@ export const Cover = React.memo(function Cover({
   style?: StyleProp<ViewStyle>;
 }) {
   const [failed, setFailed] = React.useState<string[]>([]);
-  const candidates = [pickArtwork(artwork, size * PixelRatio.get()), fallbackUri ?? null];
+  // Best size first; when it fails to load, the other sizes, then the fallback.
+  const candidates = [
+    pickArtwork(artwork, size * PixelRatio.get()),
+    artwork?.medium,
+    artwork?.large,
+    artwork?.small,
+    fallbackUri,
+  ];
   const uri = candidates.find((item): item is string => !!item && !failed.includes(item)) ?? null;
   const borderRadius = coverRadius(size, rounded);
 
@@ -134,6 +141,9 @@ export const Cover = React.memo(function Cover({
       source={{ uri }}
       style={[{ width: size, height: size, borderRadius }, styles.coverImage, style as object]}
       resizeMode="cover"
+      // Decode at the shown size: a 1000 px cover is 4 MB of bitmap memory,
+      // and Android's image pool fills up after a few pages otherwise.
+      resizeMethod="resize"
       onError={() => setFailed(list => [...list, uri])}
       accessibilityIgnoresInvertColors
     />
@@ -180,6 +190,36 @@ const GRADIENT_CENTER = { x: 0.4, y: 0.6 };
 const COVER_SHEEN = ['rgba(255,255,255,0.22)', 'rgba(255,255,255,0)'];
 
 /** Full-bleed background tinted by a track (Now Playing, hero cards). */
+/**
+ * The cover, blurred, behind a header (full player, album page), fading into
+ * the page background. Without a cover: the seed's gradient.
+ */
+export function CoverBackdrop({ coverUri, seed }: { coverUri: string | null; seed: string }) {
+  if (!coverUri) {
+    return <TrackGradient seed={seed} />;
+  }
+
+  return (
+    <>
+      <Image
+        source={{ uri: coverUri }}
+        style={StyleSheet.absoluteFill}
+        blurRadius={40}
+        resizeMode="cover"
+        resizeMethod="resize"
+      />
+      <LinearGradient
+        colors={BACKDROP_SHADE}
+        locations={[0, 0.55, 1]}
+        style={StyleSheet.absoluteFill}
+        pointerEvents="none"
+      />
+    </>
+  );
+}
+
+const BACKDROP_SHADE = ['rgba(11,10,15,0.35)', 'rgba(11,10,15,0.7)', colors.bg];
+
 export function TrackGradient({
   seed,
   style,

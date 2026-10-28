@@ -10,19 +10,20 @@ import {
 } from '@react-native-documents/picker';
 
 import { id3TagSize, parseId3 } from '../core/id3';
+import { LoginError } from '../core/soulseekClient';
 import type { ConnectionState } from '../core/soulseekClient';
 import type { TransferSnapshot } from '../core/transfer';
 import {
   formatSearchQuery,
   normalizeForMatch,
   rankHits,
-  similarity,
+  sameSongTitle,
   soulseekSpellings,
 } from '../core/search';
 import type { RankedHit } from '../core/search';
 import { createDeezerCatalog } from '../core/catalog';
 import type { CatalogProvider } from '../core/catalog';
-import { primeHitScores, soulseekQueryFor, sourcesForTrack, unifyResults } from '../core/unify';
+import { primeHitScores, soulseekLadder, soulseekQueryFor, sourcesForTrack, unifyResults } from '../core/unify';
 import type {
   AlbumPageData,
   ArtistPageData,
@@ -102,6 +103,8 @@ export interface CurrentPlayback {
   warning: string | null;
 }
 
+export type LoginSession = 'new' | 'saved' | 'keep';
+
 interface AppState {
   ready: boolean;
   playerReady: boolean;
@@ -111,6 +114,8 @@ interface AppState {
   prefillUsername: string;
   connection: ConnectionState;
   connectionError: string | null;
+  /** The server's reason for refusing the last login (LoginRejection), if it did. */
+  loginRejection: string | null;
   listenPort: number;
   httpPort: number;
 
@@ -177,7 +182,12 @@ interface AppState {
   catalogPending: CatalogTrack | null;
 
   init: () => Promise<void>;
-  login: (username: string, password: string, keepSessionOnFailure?: boolean) => Promise<boolean>;
+  /**
+   * `session`: 'new' (typed on the login screen), 'saved' (stored
+   * credentials: stay in the app unless the server refuses them) or 'keep'
+   * (settings change: the current session stays whatever happens).
+   */
+  login: (username: string, password: string, session?: LoginSession) => Promise<boolean>;
   logout: () => Promise<void>;
   reconnect: () => Promise<void>;
   /** Verifies the server connection still works (after the app slept). */
@@ -312,12 +322,14 @@ const MAX_STREAM_TAG_BYTES = 4 * 1024 * 1024;
 /** First Soulseek search for one catalog track's sources. */
 const RESOLVE_DURATION_MS = 6000;
 /**
- * Whole source lookup, title-only retry included. It used to reach 14 s
+ * Whole source lookup, every step of the query ladder included. It used to reach 14 s
  * with the music stopped and a spinner when a track had no source at all.
  */
 const RESOLVE_BUDGET_MS = 9000;
-/** A retry shorter than this would not find anything useful. */
+/** Time kept for each later step of the query ladder. */
 const MIN_RETRY_MS = 2000;
+/** A step shorter than this would not find anything useful. */
+const MIN_STEP_MS = 1500;
 /** "No source" is remembered this long, so moving on through a list does not search again. */
 const MISSING_TTL_MS = 5 * 60 * 1000;
 /** Stop a source search this long after the first good source arrived. */
@@ -730,14 +742,14 @@ export const useAppStore = create<AppState>((set, get) => {
       return null;
     }
 
-    const title = normalizeForMatch(displayTitle(original.filename));
+    const title = displayTitle(original.filename);
 
     for (const { hit } of get().results) {
       if (tried.has(hitKey(hit)) || deniedPeers.has(hit.username.toLowerCase())) {
         continue;
       }
 
-      if (similarity(title, displayTitle(hit.filename)) >= 0.85) {
+      if (sameSongTitle(title, displayTitle(hit.filename))) {
         return hit;
       }
     }
@@ -1213,21 +1225,33 @@ export const useAppStore = create<AppState>((set, get) => {
       return { status: 'error', sources: [] };
     }
 
-    const query = soulseekQueryFor(track);
-    debugLog('play', `sources pour « ${track.artist.name} – ${track.title} » : recherche « ${query} »`);
+    // Query ladder (artist + title, title only, artist + album), stopping at
+    // the first step that finds a source, all inside one time budget.
+    const steps = soulseekLadder(track);
+    debugLog('play', `sources pour « ${track.artist.name} – ${track.title} » : ${steps.length} requête(s) possibles`);
     const startedAt = Date.now();
-    let sources = sourcesForTrack(track, await searchSources(track, query, RESOLVE_DURATION_MS));
+    let sources: RankedHit[] = [];
 
-    // Files often carry only the title; the length then confirms the match.
-    const titleOnly = formatSearchQuery(track.titleShort);
-    const remaining = RESOLVE_BUDGET_MS - (Date.now() - startedAt);
-    if (
-      sources.length === 0 &&
-      remaining >= MIN_RETRY_MS &&
-      normalizeForMatch(titleOnly).length >= 6 &&
-      titleOnly !== query
-    ) {
-      sources = sourcesForTrack(track, await searchSources(track, titleOnly, remaining));
+    for (const [index, step] of steps.entries()) {
+      const remaining = RESOLVE_BUDGET_MS - (Date.now() - startedAt);
+      const left = steps.length - index;
+      // The first step gets most of the time; later ones share what is left.
+      const duration =
+        index === 0
+          ? Math.min(RESOLVE_DURATION_MS, remaining - MIN_RETRY_MS * (left - 1))
+          : Math.floor(remaining / left);
+      if (duration < MIN_STEP_MS) {
+        break;
+      }
+      const hits = await searchSources(track, step.query, duration);
+      sources = sourcesForTrack(track, hits);
+      debugLog(
+        'play',
+        `étape ${index + 1}/${steps.length} (${step.kind}) « ${step.query} » : ${hits.length} fichier(s), ${sources.length} source(s)`,
+      );
+      if (sources.length > 0 || get().connection !== 'online') {
+        break;
+      }
     }
 
     debugLog('play', `${sources.length} source(s) pour « ${track.title} »`);
@@ -1284,6 +1308,46 @@ export const useAppStore = create<AppState>((set, get) => {
     return context.index + 1 < context.tracks.length ? context.index + 1 : null;
   }
 
+  /** Plays a file (from the device cache when it is there). */
+  async function startHit(hit: SearchHit): Promise<void> {
+    if (!service) {
+      return;
+    }
+
+    if (!isStreamableFile(hit.filename)) {
+      set({ notice: 'Seuls les fichiers MP3 sont proposés par SoulStream.' });
+      return;
+    }
+
+    const cached = trackCache?.findByHit(hit);
+
+    try {
+      lastPlayStartedAt = Date.now();
+
+      if (cached) {
+        await playCached(cached, hit);
+      } else {
+        await playWithFallback(hit);
+      }
+    } catch (error) {
+      set(state => ({
+        current: state.current
+          ? { ...state.current, phase: 'error', error: errorMessage(error) }
+          : null,
+        searchError: state.current ? state.searchError : errorMessage(error),
+      }));
+    }
+  }
+
+  /**
+   * Drops a catalog track still waiting for its sources: anything the user
+   * plays or stops meanwhile wins over it.
+   */
+  function cancelCatalogPlay(): void {
+    catalogPlaySequence++;
+    set({ catalogPending: null });
+  }
+
   /**
    * `byUser`: the user tapped this track (search it again even if it had no
    * source a moment ago). Moving on through a list (end of track, next,
@@ -1311,11 +1375,12 @@ export const useAppStore = create<AppState>((set, get) => {
     const best = resolution.sources[0];
 
     if (best) {
-      await get().playHit(best.hit);
+      await startHit(best.hit);
 
-      // Find the next track's sources while this one plays.
+      // Find the next track's sources while this one plays (not when the
+      // user stopped it or moved on meanwhile).
       const upcoming = context ? context.tracks[context.index + 1] : undefined;
-      if (upcoming && !get().shuffle) {
+      if (upcoming && !get().shuffle && sequence === catalogPlaySequence && get().current) {
         void get().resolveTrack(upcoming);
       }
       return;
@@ -1355,6 +1420,7 @@ export const useAppStore = create<AppState>((set, get) => {
     prefillUsername: '',
     connection: 'idle',
     connectionError: null,
+    loginRejection: null,
     listenPort: 0,
     httpPort: 0,
 
@@ -1452,14 +1518,14 @@ export const useAppStore = create<AppState>((set, get) => {
 
         if (credentials) {
           set({ prefillUsername: credentials.username });
-          await get().login(credentials.username, credentials.password);
+          await get().login(credentials.username, credentials.password, 'saved');
         }
       } finally {
         set({ ready: true });
       }
     },
 
-    login: async (username, password, keepSessionOnFailure = false) => {
+    login: async (username, password, session = 'new') => {
       const settings = get().settings;
       const previousUsername = get().username;
 
@@ -1478,10 +1544,11 @@ export const useAppStore = create<AppState>((set, get) => {
       wire(instance);
 
       set({
-        username: keepSessionOnFailure ? previousUsername : null,
+        username: session === 'keep' ? previousUsername : session === 'saved' ? username : null,
         prefillUsername: username,
         connection: 'connecting',
         connectionError: null,
+        loginRejection: null,
         searching: false,
         searchQuery: '',
         searchEmpty: false,
@@ -1506,7 +1573,7 @@ export const useAppStore = create<AppState>((set, get) => {
           connection: 'online',
           listenPort: instance.listenPort,
           httpPort: instance.httpPort,
-          tab: keepSessionOnFailure ? get().tab : 'home',
+          tab: session === 'new' ? 'home' : get().tab,
         });
         return true;
       } catch (error) {
@@ -1516,10 +1583,20 @@ export const useAppStore = create<AppState>((set, get) => {
           service = null;
         }
 
+        // Without network, stored credentials keep the user in the app (offline
+        // banner, "Réessayer"); only refused credentials go back to login.
+        const keptUsername =
+          session === 'keep'
+            ? previousUsername
+            : session === 'saved' && !(error instanceof LoginError)
+              ? username
+              : null;
+
         set({
-          username: keepSessionOnFailure ? previousUsername : null,
+          username: keptUsername,
           connection: 'error',
           connectionError: errorMessage(error),
+          loginRejection: error instanceof LoginError ? error.reason : null,
         });
 
         return false;
@@ -1578,7 +1655,7 @@ export const useAppStore = create<AppState>((set, get) => {
       const credentials: Credentials | null = await loadCredentials();
 
       if (credentials) {
-        await get().login(credentials.username, credentials.password);
+        await get().login(credentials.username, credentials.password, 'saved');
       }
     },
 
@@ -1622,7 +1699,7 @@ export const useAppStore = create<AppState>((set, get) => {
         return;
       }
 
-      const ok = await get().login(username, password, true);
+      const ok = await get().login(username, password, 'keep');
 
       if (ok) {
         set({ tab: 'settings' });
@@ -1725,33 +1802,8 @@ export const useAppStore = create<AppState>((set, get) => {
     },
 
     playHit: async hit => {
-      if (!service) {
-        return;
-      }
-
-      if (!isStreamableFile(hit.filename)) {
-        set({ notice: 'Seuls les fichiers MP3 sont proposés par SoulStream.' });
-        return;
-      }
-
-      const cached = trackCache?.findByHit(hit);
-
-      try {
-        lastPlayStartedAt = Date.now();
-
-        if (cached) {
-          await playCached(cached, hit);
-        } else {
-          await playWithFallback(hit);
-        }
-      } catch (error) {
-        set(state => ({
-          current: state.current
-            ? { ...state.current, phase: 'error', error: errorMessage(error) }
-            : null,
-          searchError: state.current ? state.searchError : errorMessage(error),
-        }));
-      }
+      cancelCatalogPlay();
+      await startHit(hit);
     },
 
     playNextSource: async () => {
@@ -1780,17 +1832,19 @@ export const useAppStore = create<AppState>((set, get) => {
     },
 
     stopPlayback: async () => {
+      debugLog('play', `arrêt demandé (${get().current?.phase ?? 'rien en cours'})`);
       playSequence++;
+      cancelCatalogPlay();
+      // Clear the UI first: the native reset can take a while.
+      set({ current: null, playerOpen: false });
       await resetPlayer();
       service?.cancelActive();
-      set({ current: null, playerOpen: false });
     },
 
     dismissNotice: () => set({ notice: null }),
 
     playTrack: async (hit, context) => {
-      catalogPlaySequence++;
-      set({ context: context ?? null, catalogContext: null, catalogPending: null });
+      set({ context: context ?? null, catalogContext: null });
       await get().playHit(hit);
     },
 

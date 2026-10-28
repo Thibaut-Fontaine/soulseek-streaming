@@ -34,15 +34,22 @@ export function SheetHost() {
   const progress = React.useRef(new Animated.Value(0)).current;
   const { height } = useWindowDimensions();
 
+  const openRef = React.useRef(sheet !== null);
+  openRef.current = sheet !== null;
+
   React.useEffect(() => {
     if (sheet) {
       setShown(sheet);
       progress.setValue(0);
       Animated.spring(progress, { toValue: 1, useNativeDriver: true, bounciness: 0, speed: 20 }).start();
     } else {
-      Animated.timing(progress, { toValue: 0, duration: 180, useNativeDriver: true }).start(
-        ({ finished }) => finished && setShown(null),
-      );
+      // Unmount even when the slide was interrupted (`finished` false): an
+      // invisible backdrop left on top would swallow every tap in the app.
+      Animated.timing(progress, { toValue: 0, duration: 180, useNativeDriver: true }).start(() => {
+        if (!openRef.current) {
+          setShown(null);
+        }
+      });
     }
   }, [sheet, progress]);
 
@@ -69,7 +76,9 @@ export function SheetHost() {
   const translateY = progress.interpolate({ inputRange: [0, 1], outputRange: [height * 0.6, 0] });
 
   return (
-    <View style={[StyleSheet.absoluteFill, styles.host]}>
+    // While closing, touches go through to the app: native animation
+    // callbacks can come late or never (screen off), so this does not wait.
+    <View style={[StyleSheet.absoluteFill, styles.host]} pointerEvents={sheet ? 'auto' : 'none'}>
       <Animated.View style={[StyleSheet.absoluteFill, styles.backdrop, { opacity: progress }]}>
         <Pressable style={StyleSheet.absoluteFill} onPress={closeSheet} accessibilityLabel="Fermer" />
       </Animated.View>

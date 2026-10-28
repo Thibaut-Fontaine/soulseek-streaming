@@ -14,10 +14,14 @@ import {
 import LinearGradient from 'react-native-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { LoginRejection, usernameProblem } from '../core/protocol';
 import { useAppStore } from '../state/store';
 import { Button, CoverArt } from './components';
 import { Icon } from './Icon';
 import { colors, gutter, radius, spacing, type } from './theme';
+
+const RULES_URL = 'https://www.slsknet.org/rules.html';
+const TERMS_URL = 'https://www.slsknet.org/tos.html';
 
 const MOSAIC_SEEDS = [
   'Teardrop',
@@ -34,20 +38,28 @@ const MOSAIC_SEEDS = [
   'Archangel',
 ];
 
+/**
+ * Sign-in, or account creation: Soulseek has no sign-up form, the server
+ * registers a new name with its password at the first login.
+ */
 export function LoginScreen() {
   const insets = useSafeAreaInsets();
   const login = useAppStore(state => state.login);
   const connecting = useAppStore(state => state.connection === 'connecting');
   const connectionError = useAppStore(state => state.connectionError);
+  const loginRejection = useAppStore(state => state.loginRejection);
   const prefillUsername = useAppStore(state => state.prefillUsername);
   const settings = useAppStore(state => state.settings);
 
+  const [creating, setCreating] = React.useState(false);
   const [username, setUsername] = React.useState(prefillUsername);
   const [password, setPassword] = React.useState('');
+  const [confirm, setConfirm] = React.useState('');
   const [showPassword, setShowPassword] = React.useState(false);
   const [localError, setLocalError] = React.useState<string | null>(null);
   const [serverOpen, setServerOpen] = React.useState(false);
   const passwordRef = React.useRef<TextInput>(null);
+  const confirmRef = React.useRef<TextInput>(null);
 
   React.useEffect(() => {
     if (prefillUsername) {
@@ -55,29 +67,56 @@ export function LoginScreen() {
     }
   }, [prefillUsername]);
 
+  const switchMode = () => {
+    setCreating(value => !value);
+    setConfirm('');
+    setLocalError(null);
+  };
+
   const submit = async () => {
     const nick = username.trim();
 
-    if (!nick) {
-      setLocalError("Indiquez votre nom d'utilisateur Soulseek");
-      return;
-    }
+    if (creating) {
+      const problem = usernameProblem(username);
+      if (problem) {
+        setLocalError(problem);
+        return;
+      }
+      if (!password) {
+        setLocalError('Choisissez un mot de passe');
+        return;
+      }
+      if (password !== confirm) {
+        setLocalError('Les deux mots de passe ne sont pas identiques');
+        return;
+      }
+    } else {
+      if (!nick) {
+        setLocalError("Indiquez votre nom d'utilisateur Soulseek");
+        return;
+      }
 
-    if (nick.length > 30) {
-      setLocalError("Le nom d'utilisateur ne peut pas dépasser 30 caractères");
-      return;
-    }
+      if (nick.length > 30) {
+        setLocalError("Le nom d'utilisateur ne peut pas dépasser 30 caractères");
+        return;
+      }
 
-    if (!password) {
-      setLocalError('Indiquez votre mot de passe');
-      return;
+      if (!password) {
+        setLocalError('Indiquez votre mot de passe');
+        return;
+      }
     }
 
     setLocalError(null);
     await login(nick, password);
   };
 
-  const error = localError ?? connectionError;
+  // For a new account, "wrong password" means someone already has the name.
+  const serverError =
+    creating && loginRejection === LoginRejection.INVALIDPASS
+      ? 'Ce nom est déjà utilisé par un autre compte : choisissez-en un autre.'
+      : connectionError;
+  const error = localError ?? serverError;
 
   return (
     <View style={styles.root}>
@@ -102,11 +141,19 @@ export function LoginScreen() {
           <View style={styles.logo}>
             <Icon name="wave" size={34} color={colors.onAccent} strokeWidth={2.6} />
           </View>
-          <Text style={styles.title}>SoulStream</Text>
-          <Text style={styles.subtitle}>
-            Streaming musical pair-à-pair sur le réseau Soulseek. Vos identifiants restent
-            dans le trousseau sécurisé de l’appareil.
-          </Text>
+          <Text style={styles.title}>{creating ? 'Créer un compte' : 'SoulStream'}</Text>
+          {creating ? (
+            <Text style={styles.subtitle}>
+              Le compte Soulseek est créé dès la première connexion avec ce nom et ce mot de
+              passe. Notez le mot de passe : il ne peut pas être récupéré. Un nom inutilisé
+              pendant 30 jours est libéré.
+            </Text>
+          ) : (
+            <Text style={styles.subtitle}>
+              Streaming musical pair-à-pair sur le réseau Soulseek. Vos identifiants restent
+              dans le trousseau sécurisé de l’appareil.
+            </Text>
+          )}
 
           <Text style={styles.label}>Nom d'utilisateur</Text>
           <TextInput
@@ -115,7 +162,7 @@ export function LoginScreen() {
               setUsername(value);
               setLocalError(null);
             }}
-            placeholder="votre_pseudo"
+            placeholder={creating ? 'nom_choisi' : 'votre_pseudo'}
             placeholderTextColor={colors.textDim}
             autoCapitalize="none"
             autoCorrect={false}
@@ -146,10 +193,34 @@ export function LoginScreen() {
             autoCorrect={false}
             editable={!connecting}
             style={styles.input}
-            onSubmitEditing={submit}
-            returnKeyType="go"
+            onSubmitEditing={creating ? () => confirmRef.current?.focus() : submit}
+            returnKeyType={creating ? 'next' : 'go'}
             accessibilityLabel="Mot de passe"
           />
+
+          {creating ? (
+            <>
+              <Text style={styles.label}>Confirmer le mot de passe</Text>
+              <TextInput
+                ref={confirmRef}
+                value={confirm}
+                onChangeText={value => {
+                  setConfirm(value);
+                  setLocalError(null);
+                }}
+                placeholder="••••••••"
+                placeholderTextColor={colors.textDim}
+                secureTextEntry={!showPassword}
+                autoCapitalize="none"
+                autoCorrect={false}
+                editable={!connecting}
+                style={styles.input}
+                onSubmitEditing={submit}
+                returnKeyType="go"
+                accessibilityLabel="Confirmer le mot de passe"
+              />
+            </>
+          ) : null}
 
           {error ? (
             <View style={styles.errorBox}>
@@ -161,7 +232,7 @@ export function LoginScreen() {
           {/* TODO(wire): show Serveur → Auth → Port steps once the store exposes
               login sub-states; `connection` is only "connecting" today. */}
           <Button
-            label={connecting ? 'Connexion au serveur…' : 'Se connecter'}
+            label={connecting ? 'Connexion au serveur…' : creating ? 'Créer le compte' : 'Se connecter'}
             onPress={submit}
             loading={connecting}
             block
@@ -178,8 +249,24 @@ export function LoginScreen() {
             </Text>
           </Pressable>
 
-          <Pressable onPress={() => Linking.openURL('https://www.slsknet.org/')} style={styles.create}>
-            <Text style={styles.link}>Pas encore de compte ? Créer un compte sur slsknet.org</Text>
+          {creating ? (
+            <Text style={styles.rules}>
+              En créant un compte, vous acceptez les{' '}
+              <Text style={styles.inlineLink} onPress={() => Linking.openURL(RULES_URL)} accessibilityRole="link">
+                règles
+              </Text>{' '}
+              et les{' '}
+              <Text style={styles.inlineLink} onPress={() => Linking.openURL(TERMS_URL)} accessibilityRole="link">
+                conditions d’utilisation
+              </Text>{' '}
+              de Soulseek.
+            </Text>
+          ) : null}
+
+          <Pressable onPress={switchMode} disabled={connecting} style={styles.create} accessibilityRole="button">
+            <Text style={styles.link}>
+              {creating ? 'Déjà un compte ? Se connecter' : 'Pas encore de compte ? Créer un compte'}
+            </Text>
           </Pressable>
 
           <Text style={styles.legal}>
@@ -390,6 +477,16 @@ const styles = StyleSheet.create({
   create: {
     marginTop: spacing.md,
     paddingVertical: spacing.sm,
+  },
+  rules: {
+    ...type.caption,
+    color: colors.textMuted,
+    textAlign: 'center',
+    marginTop: spacing.lg,
+  },
+  inlineLink: {
+    color: colors.accent,
+    fontWeight: '700',
   },
   legal: {
     ...type.caption,

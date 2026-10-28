@@ -69,8 +69,10 @@ showcase/, releases/ public landing page, QR code, published APK
 
 Data flow of a search: with the catalog on, a typed search only asks the
 catalog (no Soulseek request). Soulseek is searched for a title when it is
-played (`playCatalogTrack` → `resolveTrack`), which then plays the best source
-with automatic fallback to the next ones. A Soulseek file search for the query
+played (`playCatalogTrack` → `resolveTrack`) with a query ladder
+(`soulseekLadder` in `unify.ts`: artist + title, then title only, then
+artist + album, each tried only if the previous found no source, 9 s in all),
+which then plays the best source with automatic fallback to the next ones. A Soulseek file search for the query
 runs only when the catalog is off, finds nothing or is unreachable, or when
 the user taps "Chercher les fichiers sur Soulseek" (`searchFilesToo`); then
 the catalog's spelling is searched too (fixes typos) and `unify.ts` groups the
@@ -86,7 +88,8 @@ an accent-free copy when they have accents.
   200 hits); the HTTP proxy yields every 2 × 64 KiB. Tabs must stay usable
   while a track loads.
 - **Minimise Soulseek requests**: no Soulseek search while browsing the
-  catalog; one search per played title (plus the accent-free spelling);
+  catalog; one search per played title (plus the accent-free spelling),
+  the next ladder step only when it found no source;
   peer address cache, queue polling at most once a minute, no
   distributed search tree, no chat or user watching.
 - Nothing plays until the user taps a result. Short files (< 45 s) are
@@ -154,5 +157,5 @@ an accent-free copy when they have accents.
 | `docs/unified-catalog-research.md` | Why and how the catalog works (sources, matching) |
 | `docs/catalog-ui-design.md` | Catalog screens, components and states |
 | `docs/performance-audit.md` | Responsiveness audit: measurements, fixes, open checks |
-| `docs/peer-search-research.md` | How peers match queries; query problems and the planned ladder |
+| `docs/peer-search-research.md` | How peers match queries; query problems and the query ladder |
 | `docs/library-import-research.md` | Importing a library from other music apps (parked) |

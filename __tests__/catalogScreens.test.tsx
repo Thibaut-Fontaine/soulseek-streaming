@@ -4,6 +4,7 @@
  * store state with realistic catalog data.
  */
 import React from 'react';
+import { StyleSheet } from 'react-native';
 import ReactTestRenderer, { act } from 'react-test-renderer';
 
 jest.mock('react-native-track-player', () => ({
@@ -189,6 +190,9 @@ describe('catalog formatting', () => {
     expect(pickArtwork(art('x'), 40)).toContain('56x56');
     expect(pickArtwork(art('x'), 200)).toContain('250x250');
     expect(pickArtwork(art('x'), 900)).toContain('1000x1000');
+    // Shelf tiles and the album cover (≈ 400–600 px on a phone) get 500 px, not 1000.
+    expect(pickArtwork(art('x'), 400)).toContain('500x500');
+    expect(pickArtwork({ small: null, medium: 'M', large: 'L' }, 400)).toBe('L');
     expect(pickArtwork({ small: null, medium: null, large: 'L' }, 40)).toBe('L');
   });
 
@@ -238,6 +242,23 @@ describe('page host', () => {
     expect(out).not.toContain('Around the World');
     press(page, 'Afficher plus');
     expect(text(page)).toContain('Around the World');
+  });
+
+  test('a page fills the screen up to its top edge, under the status bar', () => {
+    useAppStore.setState({
+      pages: [{ kind: 'artist', id: DAFT_PUNK.id }],
+      artistPages: { [DAFT_PUNK.id]: { status: 'ready', data: ARTIST_PAGE } },
+    });
+    const page = render(<PageHost />);
+    const styles = page.root
+      .findAll(node => (node.type as unknown) === 'View')
+      .map(node => StyleSheet.flatten(node.props.style) ?? {});
+
+    // Insets are mocked with a 24 pt status bar.
+    expect(styles.some(style => style.position === 'absolute' && style.top === 0 && style.paddingTop === 24)).toBe(
+      true,
+    );
+    expect(styles.some(style => style.height === Math.min(750 * 0.8, 340) + 24)).toBe(true);
   });
 
   test('artist page actions: play, shuffle, radio, related artist, back', () => {
@@ -298,6 +319,8 @@ describe('page host', () => {
     ]) {
       expect(out).toContain(label);
     }
+    // The header shows the cover blurred, like the full player.
+    expect(page.root.findAll(node => node.props.blurRadius === 40 && node.props.source?.uri)).not.toHaveLength(0);
     press(page, 'Aller à l’artiste Daft Punk');
     expect(actions.openPage).toHaveBeenCalledWith({ kind: 'artist', id: DAFT_PUNK.id, name: 'Daft Punk' });
     press(page, `Écouter ${DIGITAL_LOVE.title}, Daft Punk`);
@@ -548,5 +571,20 @@ describe('player with a matched file', () => {
       library: { ...EMPTY_LIBRARY, history: [saved], liked: [saved] },
     });
     expect(text(render(<HomeScreen />))).toContain('cdn.example/discovery');
+  });
+});
+
+describe('cover images', () => {
+  test('a size that fails to load falls back to another size', () => {
+    const { Cover } = jest.requireActual('../src/ui/components') as typeof import('../src/ui/components');
+    const artwork = { small: 's.jpg', medium: 'm.jpg', large: 'l.jpg' };
+    const cover = render(<Cover artwork={artwork} seed="x" title="Funk" size={220} />);
+    const image = () => cover.root.findAll(node => node.props.source?.uri)[0];
+
+    expect(image().props.source.uri).toBe('l.jpg');
+    act(() => image().props.onError());
+    expect(image().props.source.uri).toBe('m.jpg');
+    act(() => image().props.onError());
+    expect(image().props.source.uri).toBe('s.jpg');
   });
 });

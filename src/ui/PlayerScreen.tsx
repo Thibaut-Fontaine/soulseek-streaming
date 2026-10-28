@@ -3,7 +3,6 @@ import {
   ActivityIndicator,
   Alert,
   Animated,
-  Image,
   PanResponder,
   Pressable,
   ScrollView,
@@ -12,14 +11,13 @@ import {
   useWindowDimensions,
   View,
 } from 'react-native';
-import LinearGradient from 'react-native-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import TrackPlayer, { State, usePlaybackState, useProgress } from 'react-native-track-player';
 
 import type { TransferSnapshot } from '../core/transfer';
 import type { SearchHit } from '../core/types';
 import { useAppStore } from '../state/store';
-import { Dot, IconButton, StatusCard, TrackGradient } from './components';
+import { CoverBackdrop, Dot, IconButton, StatusCard } from './components';
 import type { CardAction } from './components';
 import { ACTION_LABELS, SHARING_EXPLANATION, describePlaybackError } from './errors';
 import type { ErrorAction } from './errors';
@@ -44,6 +42,8 @@ export function PlayerSheet() {
   const { height } = useWindowDimensions();
   const translateY = React.useRef(new Animated.Value(height)).current;
   const [mounted, setMounted] = React.useState(open);
+  const openRef = React.useRef(open);
+  openRef.current = open;
 
   React.useEffect(() => {
     if (open) {
@@ -55,9 +55,13 @@ export function PlayerSheet() {
         speed: 18,
       }).start();
     } else {
-      Animated.timing(translateY, { toValue: height, duration: 240, useNativeDriver: true }).start(
-        ({ finished }) => finished && setMounted(false),
-      );
+      // Unmount even when the slide was interrupted (`finished` false), as
+      // long as the player is still meant to be closed.
+      Animated.timing(translateY, { toValue: height, duration: 240, useNativeDriver: true }).start(() => {
+        if (!openRef.current) {
+          setMounted(false);
+        }
+      });
     }
   }, [open, height, translateY]);
 
@@ -68,6 +72,8 @@ export function PlayerSheet() {
   return (
     <Animated.View
       style={[StyleSheet.absoluteFill, styles.sheet, { transform: [{ translateY }] }]}
+      // A closing player never catches touches meant for the app below.
+      pointerEvents={open ? 'auto' : 'none'}
       accessibilityViewIsModal>
       <PlayerContent translateY={translateY} />
     </Animated.View>
@@ -233,7 +239,7 @@ function PlayerContent({ translateY }: { translateY: Animated.Value }) {
 
   return (
     <View style={[styles.root, { paddingTop: insets.top + spacing.xs, paddingBottom: insets.bottom + spacing.md }]}>
-      <Backdrop coverUri={largeCoverUri(info)} seed={coverSeed(hit)} />
+      <CoverBackdrop coverUri={largeCoverUri(info)} seed={coverSeed(hit)} />
 
       <View {...responder.panHandlers}>
         <View style={styles.grabber} />
@@ -384,26 +390,6 @@ function PlayerContent({ translateY }: { translateY: Animated.Value }) {
 }
 
 /** Blurred cover behind the player, like the big streaming apps. */
-function Backdrop({ coverUri, seed }: { coverUri: string | null; seed: string }) {
-  if (!coverUri) {
-    return <TrackGradient seed={seed} />;
-  }
-
-  return (
-    <>
-      <Image source={{ uri: coverUri }} style={StyleSheet.absoluteFill} blurRadius={40} resizeMode="cover" />
-      <LinearGradient
-        colors={BACKDROP_SHADE}
-        locations={[0, 0.55, 1]}
-        style={StyleSheet.absoluteFill}
-        pointerEvents="none"
-      />
-    </>
-  );
-}
-
-const BACKDROP_SHADE = ['rgba(11,10,15,0.35)', 'rgba(11,10,15,0.7)', colors.bg];
-
 function Toggle({
   icon,
   label,

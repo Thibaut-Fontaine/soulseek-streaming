@@ -3,8 +3,10 @@ import { ActivityIndicator, AppState, BackHandler, StatusBar, StyleSheet, Text, 
 import LinearGradient from 'react-native-linear-gradient';
 import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { debugLog } from './src/services/debugLog';
 import { useAppStore } from './src/state/store';
-import { IconButton, Toast } from './src/ui/components';
+import { IconButton } from './src/ui/components';
+import { Banners } from './src/ui/Banners';
 import { ErrorBoundary } from './src/ui/ErrorBoundary';
 import { HomeScreen } from './src/ui/HomeScreen';
 import { LibraryScreen } from './src/ui/LibraryScreen';
@@ -17,7 +19,37 @@ import { SettingsScreen } from './src/ui/SettingsScreen';
 import { SheetHost } from './src/ui/Sheets';
 import { TabBar } from './src/ui/TabBar';
 import { AppLogo } from './src/ui/track';
-import { colors, gutter, spacing, type } from './src/ui/theme';
+import { colors, spacing, type } from './src/ui/theme';
+
+/** A JS-thread gap longer than this is written to the journal. */
+const STALL_LOG_MS = 1000;
+const STALL_TICK_MS = 250;
+
+/**
+ * Journal lines to tell a dead UI apart (taps that do nothing): a tap that
+ * reaches JS is logged, and so is any long stall of the JS thread. No tap
+ * logged means something native caught it or JS was busy.
+ */
+function logTouch(event: { nativeEvent: { pageX: number; pageY: number } }): boolean {
+  debugLog('app', `toucher ${Math.round(event.nativeEvent.pageX)},${Math.round(event.nativeEvent.pageY)}`);
+  return false;
+}
+
+function useStallWatchdog(): void {
+  React.useEffect(() => {
+    let last = Date.now();
+    const timer = setInterval(() => {
+      const now = Date.now();
+      const gap = now - last - STALL_TICK_MS;
+      last = now;
+      // A gap while in the background is the OS pausing timers, not a stall.
+      if (gap > STALL_LOG_MS && AppState.currentState === 'active') {
+        debugLog('app', `fil JS bloqué ${gap} ms`);
+      }
+    }, STALL_TICK_MS);
+    return () => clearInterval(timer);
+  }, []);
+}
 
 /** After this long in the background, check the server connection on return. */
 const CHECK_AFTER_BACKGROUND_MS = 60_000;
@@ -45,6 +77,7 @@ function Root() {
   const reconnect = useAppStore(state => state.reconnect);
 
   const insets = useSafeAreaInsets();
+  useStallWatchdog();
   const backgroundSince = React.useRef<number | null>(null);
 
   React.useEffect(() => {
@@ -126,27 +159,31 @@ function Root() {
   }
 
   return (
-    <View style={styles.root}>
-      <View style={[styles.main, { paddingTop: insets.top }]}>
-        <Banners />
+    <View style={styles.root} onStartShouldSetResponderCapture={logTouch}>
+      <View style={styles.main}>
         <View style={styles.content}>
-          {tab === 'home' ? (
-            <HomeScreen />
-          ) : tab === 'search' ? (
-            <SearchScreen />
-          ) : tab === 'library' ? (
-            <LibraryScreen />
-          ) : (
-            <>
-              <View style={styles.settingsBar}>
-                <IconButton icon="left" accessibilityLabel="Retour" onPress={() => setTab('home')} />
-                <Text style={styles.settingsTitle} accessibilityRole="header">
-                  Réglages
-                </Text>
-              </View>
-              <SettingsScreen />
-            </>
-          )}
+          {/* Tabs stay below the status bar; pages (PageHost) fill up to the
+              top edge of the screen, like the full player. */}
+          <View style={[styles.content, { paddingTop: insets.top }]}>
+            <Banners />
+            {tab === 'home' ? (
+              <HomeScreen />
+            ) : tab === 'search' ? (
+              <SearchScreen />
+            ) : tab === 'library' ? (
+              <LibraryScreen />
+            ) : (
+              <>
+                <View style={styles.settingsBar}>
+                  <IconButton icon="left" accessibilityLabel="Retour" onPress={() => setTab('home')} />
+                  <Text style={styles.settingsTitle} accessibilityRole="header">
+                    Réglages
+                  </Text>
+                </View>
+                <SettingsScreen />
+              </>
+            )}
+          </View>
           <PageHost />
         </View>
 
@@ -164,63 +201,6 @@ function Root() {
 }
 
 const DOCK_FADE = ['rgba(11,10,15,0)', colors.bg];
-const NOTICE_MS = 4000;
-
-/** Connection state and network notices, shown above the current screen. */
-function Banners() {
-  const connection = useAppStore(state => state.connection);
-  const connectionError = useAppStore(state => state.connectionError);
-  const notice = useAppStore(state => state.notice);
-  const dismissNotice = useAppStore(state => state.dismissNotice);
-  const reconnect = useAppStore(state => state.reconnect);
-
-  // Notices ("Sera lu ensuite", "Fin de la liste"…) go away on their own.
-  React.useEffect(() => {
-    if (!notice) {
-      return;
-    }
-    const timer = setTimeout(dismissNotice, NOTICE_MS);
-    return () => clearTimeout(timer);
-  }, [notice, dismissNotice]);
-
-  const reconnecting = connection === 'connecting' || connection === 'reconnecting';
-  const offline = connection === 'disconnected' || connection === 'error';
-
-  if (!notice && !reconnecting && !offline) {
-    return null;
-  }
-
-  return (
-    <View style={styles.banners}>
-      {reconnecting ? (
-        <Toast
-          key="reconnecting"
-          tone="warn"
-          icon="server"
-          message={
-            connection === 'reconnecting'
-              ? 'Reconnexion au serveur Soulseek…'
-              : 'Connexion au serveur Soulseek…'
-          }
-        />
-      ) : null}
-      {offline ? (
-        <Toast
-          key="offline"
-          tone="bad"
-          icon="offline"
-          message={connectionError ?? 'Déconnecté du réseau Soulseek'}
-          actionLabel="Réessayer"
-          onAction={() => void reconnect()}
-        />
-      ) : null}
-      {notice ? (
-        <Toast key={notice} tone="warn" icon="info" message={notice} onDismiss={dismissNotice} />
-      ) : null}
-    </View>
-  );
-}
-
 function Splash() {
   return (
     <View style={styles.splash}>
@@ -253,11 +233,6 @@ const styles = StyleSheet.create({
   },
   content: {
     flex: 1,
-  },
-  banners: {
-    paddingTop: spacing.sm,
-    paddingHorizontal: gutter,
-    gap: spacing.sm,
   },
   dock: {
     backgroundColor: colors.bg,

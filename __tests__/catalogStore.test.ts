@@ -207,6 +207,46 @@ describe('catalog search and playback', () => {
     );
   });
 
+  test('stopping while sources are searched cancels the track', async () => {
+    await withNetwork(
+      [{ username: 'peer_a', filename: TRACK, behavior: 'ok' }],
+      async () => {
+        const playing = useAppStore.getState().playCatalogTrack(STREAM_ME);
+        await waitFor(() => useAppStore.getState().resolutions[STREAM_ME.id]?.status === 'searching');
+
+        await useAppStore.getState().stopPlayback();
+        await playing;
+
+        expect(useAppStore.getState().current).toBeNull();
+        expect(useAppStore.getState().catalogPending).toBeNull();
+      },
+    );
+  });
+
+  test('stopping a list track does not search the next one', async () => {
+    await withNetwork(
+      [{ username: 'peer_a', filename: TRACK, behavior: 'ok' }],
+      async network => {
+        // Known sources: playing needs no search, so any search is the next track's.
+        await useAppStore.getState().runSearch('fake artist stream me');
+        await useAppStore.getState().searchFilesToo();
+        const searches = network.searches.length;
+
+        const playing = useAppStore.getState().playCatalogTrack(STREAM_ME, {
+          label: 'Album',
+          tracks: [STREAM_ME, MISSING],
+          index: 0,
+        });
+        await waitFor(() => useAppStore.getState().current?.phase === 'preparing');
+        await useAppStore.getState().stopPlayback();
+        await playing;
+
+        expect(useAppStore.getState().resolutions[MISSING.id]?.status).not.toBe('searching');
+        expect(network.searches).toHaveLength(searches);
+      },
+    );
+  });
+
   test('an album plays track by track, skipping tracks nobody shares', async () => {
     await withNetwork(
       [{ username: 'peer_a', filename: TRACK, behavior: 'ok' }],
@@ -225,8 +265,8 @@ describe('catalog search and playback', () => {
         expect(state.resolutions[STREAM_ME.id].status).toBe('found');
         expect(state.catalogContext?.index).toBe(1);
         expect(state.current?.hit.filename).toBe(TRACK);
-        expect(network.searches).toContain('fake artist nowhere to be found');
-        expect(network.searches).toContain('fake artist stream me');
+        expect(network.searches).toContain('fake artist nowhere to be found -live -karaoke -instrumental -remix');
+        expect(network.searches).toContain('fake artist stream me -live -karaoke -instrumental -remix');
       },
     );
   });
@@ -275,7 +315,7 @@ describe('catalog search and playback', () => {
 
           const state = useAppStore.getState();
           expect(Date.now() - started).toBeLessThan(3000);
-          expect(network.searches.slice(searchesBefore)).not.toContain('fake artist nowhere to be found');
+          expect(network.searches.slice(searchesBefore)).not.toContain('fake artist nowhere to be found -live -karaoke -instrumental -remix');
           expect(state.catalogPending).toBeNull();
           expect(state.resolutions[MISSING.id].status).toBe('none');
           expect(state.current?.hit.filename).toBe(OTHER);
@@ -296,7 +336,46 @@ describe('catalog search and playback', () => {
       [{ username: 'peer_a', filename: 'Music\\Jungle Jack\\Jungle des illusions vol 2\\05 - Systeme D.mp3', behavior: 'ok' }],
       async network => {
         const resolution = await useAppStore.getState().resolveTrack(SYSTEME);
-        expect(network.searches).toEqual(expect.arrayContaining(['jungle jack système', 'jungle jack systeme']));
+        expect(network.searches).toEqual(expect.arrayContaining([
+          'jungle jack système -live -karaoke -instrumental -remix',
+          'jungle jack systeme -live -karaoke -instrumental -remix',
+        ]));
+        expect(resolution.status).toBe('found');
+      },
+    );
+  });
+
+  test('a dash version and an apostrophe do not hide the file', async () => {
+    // The old query was "queen don stop me now 2011": no file has "2011",
+    // and "don" is not a word of "Dont".
+    const SONG = {
+      ...track('dz:15', "Don't Stop Me Now - Remastered 2011", 209, 'Queen'),
+      album: { id: 'dz:101', title: 'Jazz (2011 Remaster)', cover: ART },
+    };
+    await withNetwork(
+      [{ username: 'peer_a', filename: 'Music\\Queen\\Jazz\\12 - Dont Stop Me Now.mp3', behavior: 'ok', durationSec: 210, matchQuery: true }],
+      async network => {
+        const resolution = await useAppStore.getState().resolveTrack(SONG);
+        expect(network.searches).toEqual(['queen stop me now -live -karaoke -instrumental -remix']);
+        expect(resolution.status).toBe('found');
+      },
+    );
+  });
+
+  test('the album step finds a file whose title is misspelled', async () => {
+    const SONG = {
+      ...track('dz:16', 'Stream Me', 200),
+      album: { id: 'dz:102', title: 'Night Session', cover: ART },
+    };
+    await withNetwork(
+      [{ username: 'peer_a', filename: 'Music\\Fake Artist\\Night Session\\01 - Streem Me.mp3', behavior: 'ok', matchQuery: true }],
+      async network => {
+        const resolution = await useAppStore.getState().resolveTrack(SONG);
+        expect(network.searches).toEqual([
+          'fake artist stream me -live -karaoke -instrumental -remix',
+          'stream me -live -karaoke -instrumental -remix',
+          'fake artist night session -live -karaoke -instrumental -remix',
+        ]);
         expect(resolution.status).toBe('found');
       },
     );

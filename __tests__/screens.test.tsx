@@ -172,3 +172,23 @@ test('every bottom sheet renders', () => {
   useAppStore.setState({ sheet: { kind: 'sources', hits: [ONE], title: 'One More Time' } });
   expect(text(render(<SheetHost />))).toContain('Écouter depuis other');
 });
+
+test('closing layers let taps through before their animation ends', () => {
+  // A closing sheet or player that stayed on top (interrupted or lost
+  // animation callback) made the tab bar and the player's buttons dead after
+  // switching to another source.
+  useAppStore.setState({ sheet: { kind: 'sources', hits: [ONE], title: 'One More Time' } });
+  const sheet = render(<SheetHost />);
+  const sheetHost = () => sheet.root.findAll(node => typeof node.type === 'string' && 'pointerEvents' in node.props)[0];
+  expect(sheetHost().props.pointerEvents).toBe('auto');
+  act(() => useAppStore.getState().closeSheet());
+  expect(sheet.toJSON()).not.toBeNull();
+  expect(sheetHost().props.pointerEvents).toBe('none');
+
+  useAppStore.setState({ playerOpen: true });
+  const player = render(<PlayerSheet />);
+  const playerHost = () => player.root.findAll(node => typeof node.type === 'string' && node.props.accessibilityViewIsModal)[0];
+  expect(playerHost().props.pointerEvents).toBe('auto');
+  act(() => useAppStore.getState().closePlayer());
+  expect(playerHost().props.pointerEvents).toBe('none');
+});
