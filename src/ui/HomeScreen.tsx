@@ -8,13 +8,14 @@ import type { SearchHit } from '../core/types';
 import type { SavedTrack } from '../services/library';
 import { useAppStore } from '../state/store';
 import type { PlayContext } from '../state/store';
-import { ForYouSections } from './ForYou';
+import { CatalogCredit, ForYouSections } from './ForYou';
 import { Button, Cover, EmptyState } from './components';
 import { Icon } from './Icon';
 import { AppLogo, DeviceMark, TrackCover, useIsCurrent, useTrackInfo } from './track';
 import { colors, gutter, spacing, type } from './theme';
 
-const QUICK_COUNT = 6;
+/** Two columns; music lovers go through many albums, so show a good number. */
+const QUICK_COUNT = 10;
 const SHELF_COUNT = 12;
 
 type QuickItem = { kind: 'album'; album: CatalogAlbumRef } | { kind: 'track'; hit: SearchHit };
@@ -58,6 +59,10 @@ export function HomeScreen() {
   const insets = useSafeAreaInsets();
 
   const quick = React.useMemo(() => quickItems(history, catalogEnabled), [history, catalogEnabled]);
+  const tileAlbums = React.useMemo(
+    () => new Set(quick.flatMap(item => (item.kind === 'album' ? [item.album.id] : []))),
+    [quick],
+  );
   const quickHits = React.useMemo(
     () => quick.flatMap(item => (item.kind === 'track' ? [item.hit] : [])),
     [quick],
@@ -125,18 +130,6 @@ export function HomeScreen() {
         </View>
       ) : null}
 
-      {deviceHits.length > 0 ? (
-        <Shelf
-          title="Sur votre appareil"
-          subtitle="Démarrage instantané, même sans réseau"
-          hits={deviceHits}
-          onDevice
-          onPress={play(device, 'Sur votre appareil')}
-          onLongPress={more}
-          onAll={() => setTab('library')}
-        />
-      ) : null}
-
       {likedHits.length > 0 ? (
         <Shelf
           title="Vos titres likés"
@@ -146,6 +139,8 @@ export function HomeScreen() {
           onAll={() => setTab('library')}
         />
       ) : null}
+
+      <ForYouSections hideAlbums={tileAlbums} />
 
       {recentSearches.length > 0 ? (
         <>
@@ -173,7 +168,19 @@ export function HomeScreen() {
         </>
       ) : null}
 
-      <ForYouSections />
+      {deviceHits.length > 0 ? (
+        <Shelf
+          title="Sur votre appareil"
+          subtitle="Démarrage instantané, même sans réseau"
+          hits={deviceHits}
+          onDevice
+          onPress={play(device, 'Sur votre appareil')}
+          onLongPress={more}
+          onAll={() => setTab('library')}
+        />
+      ) : null}
+
+      <CatalogCredit />
     </ScrollView>
   );
 }

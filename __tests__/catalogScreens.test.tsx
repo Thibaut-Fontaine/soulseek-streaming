@@ -470,14 +470,28 @@ describe('home from the listening history', () => {
     const home = render(<HomeScreen />);
     const out = text(home);
     expect(actions.loadHome).toHaveBeenCalled();
-    for (const label of ['Vos artistes', 'Albums de vos écoutes', 'Parce que vous écoutez Daft Punk', 'Cassius']) {
+    for (const label of ['Vos artistes', 'Parce que vous écoutez Daft Punk', 'Cassius']) {
       expect(out).toContain(label);
     }
+    // Its only album is already a tile at the top: no shelf repeating it.
+    expect(out).not.toContain('Albums de vos écoutes');
     expect(out).not.toContain('Top titres');
     press(home, 'Artiste Cassius');
     expect(actions.openPage).toHaveBeenCalledWith({ kind: 'artist', id: 'dz:1563', name: 'Cassius' });
-    press(home, 'Album Discovery, Daft Punk');
-    expect(actions.openPage).toHaveBeenCalledWith({ kind: 'album', id: DISCOVERY.id, title: 'Discovery' });
+  });
+
+  test('sections: album tiles, liked titles, artists, then the device', () => {
+    useAppStore.setState({
+      library: { ...EMPTY_LIBRARY, history: [played], liked: [played] },
+      device: [BOOTLEG_FILE],
+      home: { status: 'ready', data: HOME },
+    });
+    const out = text(render(<HomeScreen />));
+    const order = ['Ouvrir l’album Discovery', 'Vos titres likés', 'Vos artistes', 'Sur votre appareil'].map(label =>
+      out.indexOf(label),
+    );
+    expect(order.every(index => index >= 0)).toBe(true);
+    expect([...order].sort((a, b) => a - b)).toEqual(order);
   });
 
   test('top tiles show the albums of recent tracks, once each', () => {
