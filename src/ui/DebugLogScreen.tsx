@@ -22,6 +22,7 @@ const TAG_COLORS: Record<LogTag, string> = {
   player: colors.warning,
   play: colors.text,
   app: colors.textDim,
+  perf: colors.danger,
 };
 
 const MONO = Platform.select({ ios: 'Menlo', default: 'monospace' });

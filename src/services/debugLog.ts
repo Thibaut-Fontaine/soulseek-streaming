@@ -5,7 +5,7 @@
  * lines. Each line also goes to logcat (tag ReactNativeJS).
  */
 
-export type LogTag = 'net' | 'peer' | 'transfer' | 'http' | 'player' | 'play' | 'app';
+export type LogTag = 'net' | 'peer' | 'transfer' | 'http' | 'player' | 'play' | 'app' | 'perf';
 
 export interface LogEntry {
   at: number;

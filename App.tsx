@@ -5,6 +5,7 @@ import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-cont
 
 import { parseShareLink } from './src/core/share';
 import { debugLog } from './src/services/debugLog';
+import { startStallWatcher } from './src/services/stallWatcher';
 import { useAppStore } from './src/state/store';
 import { IconButton } from './src/ui/components';
 import { Banners } from './src/ui/Banners';
@@ -22,14 +23,11 @@ import { TabBar } from './src/ui/TabBar';
 import { AppLogo } from './src/ui/track';
 import { colors, spacing, type } from './src/ui/theme';
 
-/** A JS-thread gap longer than this is written to the journal. */
-const STALL_LOG_MS = 1000;
-const STALL_TICK_MS = 250;
-
 /**
  * Journal lines to tell a dead UI apart (taps that do nothing): a tap that
- * reaches JS is logged, and so is any long stall of the JS thread. No tap
- * logged means something native caught it or JS was busy.
+ * reaches JS is logged, and so is any long stall of the JS thread
+ * (stallWatcher). No tap logged means something native caught it or JS was
+ * busy.
  */
 function logTouch(event: { nativeEvent: { pageX: number; pageY: number } }): boolean {
   debugLog('app', `toucher ${Math.round(event.nativeEvent.pageX)},${Math.round(event.nativeEvent.pageY)}`);
@@ -37,19 +35,24 @@ function logTouch(event: { nativeEvent: { pageX: number; pageY: number } }): boo
 }
 
 function useStallWatchdog(): void {
-  React.useEffect(() => {
-    let last = Date.now();
-    const timer = setInterval(() => {
-      const now = Date.now();
-      const gap = now - last - STALL_TICK_MS;
-      last = now;
-      // A gap while in the background is the OS pausing timers, not a stall.
-      if (gap > STALL_LOG_MS && AppState.currentState === 'active') {
-        debugLog('app', `fil JS bloqué ${gap} ms`);
-      }
-    }, STALL_TICK_MS);
-    return () => clearInterval(timer);
-  }, []);
+  React.useEffect(
+    () =>
+      startStallWatcher({
+        isActive: () => AppState.currentState === 'active',
+        context: () => {
+          const state = useAppStore.getState();
+          return [
+            `onglet ${state.tab}`,
+            state.playerOpen ? 'lecteur ouvert' : '',
+            state.current ? `titre ${state.current.phase}` : '',
+            state.searching ? 'recherche' : '',
+          ]
+            .filter(Boolean)
+            .join(', ');
+        },
+      }),
+    [],
+  );
 }
 
 /**
