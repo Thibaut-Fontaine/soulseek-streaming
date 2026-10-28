@@ -1,5 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
+import { trackArtists } from '../core/catalog';
 import type { CatalogTrack } from '../core/catalogTypes';
 import { normalizeForMatch } from '../core/search';
 import { displayArtist, displayTitle } from '../core/types';
@@ -45,7 +46,7 @@ export function savedTrack(
   return {
     key: trackIdentity(hit),
     title: catalog?.title ?? meta?.title ?? displayTitle(hit.filename),
-    artist: catalog?.artist.name ?? meta?.artist ?? displayArtist(hit),
+    artist: (catalog ? trackArtists(catalog) : null) ?? meta?.artist ?? displayArtist(hit),
     hit,
     ...(catalog ? { catalog } : {}),
     at: Date.now(),
@@ -75,6 +76,15 @@ export function addToHistory(library: Library, track: SavedTrack): Library {
     ...library,
     history: [track, ...library.history.filter(item => item.key !== track.key)].slice(0, MAX_HISTORY),
   };
+}
+
+/** Saved copies of a catalog track take its newer details (e.g. every artist). */
+export function withCatalogTrack(library: Library, track: CatalogTrack): Library {
+  const update = (tracks: SavedTrack[]) =>
+    tracks.map(saved =>
+      saved.catalog?.id === track.id ? { ...saved, catalog: track, artist: trackArtists(track) } : saved,
+    );
+  return { ...library, liked: update(library.liked), history: update(library.history) };
 }
 
 export function addRecentSearch(library: Library, query: string): Library {

@@ -14,6 +14,7 @@ import type {
   TrackGroup,
 } from '../core/catalogTypes';
 import { normalizeForMatch } from '../core/search';
+export { trackArtists } from '../core/catalog';
 
 /** Narrow no-break space, the French thousands separator. */
 const THIN = ' ';
@@ -110,17 +111,6 @@ export function albumMetaLine(album: CatalogAlbum, tracks: CatalogTrack[] = []):
 /** "2001 · Single" under an album card. */
 export function albumCardSubtitle(album: CatalogAlbum, withArtist = false): string {
   return [withArtist ? album.artist.name : albumYear(album), albumKindLabel(album.kind)].filter(Boolean).join(' · ');
-}
-
-/** Artist line of a track: main artist, then featured artists. */
-export function trackArtists(track: CatalogTrack): string {
-  const names = [track.artist.name];
-  for (const contributor of track.contributors) {
-    if (!names.includes(contributor.name)) {
-      names.push(contributor.name);
-    }
-  }
-  return names.join(', ');
 }
 
 /** Albums (and compilations) vs. singles and EPs, order kept. */
