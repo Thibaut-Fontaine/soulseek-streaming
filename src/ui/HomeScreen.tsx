@@ -1,18 +1,47 @@
 import React from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import LinearGradient from 'react-native-linear-gradient';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import type { CatalogAlbumRef } from '../core/catalogTypes';
 import type { SearchHit } from '../core/types';
+import type { SavedTrack } from '../services/library';
 import { useAppStore } from '../state/store';
 import type { PlayContext } from '../state/store';
 import { ForYouSections } from './ForYou';
-import { Button, EmptyState } from './components';
+import { Button, Cover, EmptyState } from './components';
 import { Icon } from './Icon';
 import { AppLogo, DeviceMark, TrackCover, useIsCurrent, useTrackInfo } from './track';
 import { colors, gutter, spacing, type } from './theme';
 
 const QUICK_COUNT = 6;
 const SHELF_COUNT = 12;
+
+type QuickItem = { kind: 'album'; album: CatalogAlbumRef } | { kind: 'track'; hit: SearchHit };
+
+/**
+ * The top tiles: albums of the recent tracks, like Spotify. A track no
+ * catalog album is known for (or with the catalog off) gets its own tile.
+ */
+export function quickItems(history: SavedTrack[], catalogEnabled: boolean, max = QUICK_COUNT): QuickItem[] {
+  const items: QuickItem[] = [];
+  const seen = new Set<string>();
+
+  for (const saved of history) {
+    const album = catalogEnabled ? saved.catalog?.album : null;
+    const key = album?.id ? `album:${album.id}` : `track:${saved.key}`;
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    items.push(album?.id ? { kind: 'album', album } : { kind: 'track', hit: saved.hit });
+    if (items.length >= max) {
+      break;
+    }
+  }
+
+  return items;
+}
 
 export function HomeScreen() {
   const username = useAppStore(state => state.username);
@@ -24,8 +53,15 @@ export function HomeScreen() {
   const playTrack = useAppStore(state => state.playTrack);
   const runSearch = useAppStore(state => state.runSearch);
   const openSheet = useAppStore(state => state.openSheet);
+  const openPage = useAppStore(state => state.openPage);
+  const catalogEnabled = useAppStore(state => state.settings.catalogEnabled !== false);
+  const insets = useSafeAreaInsets();
 
-  const recent = React.useMemo(() => history.slice(0, QUICK_COUNT).map(t => t.hit), [history]);
+  const quick = React.useMemo(() => quickItems(history, catalogEnabled), [history, catalogEnabled]);
+  const quickHits = React.useMemo(
+    () => quick.flatMap(item => (item.kind === 'track' ? [item.hit] : [])),
+    [quick],
+  );
   const likedHits = React.useMemo(() => liked.slice(0, SHELF_COUNT).map(t => t.hit), [liked]);
   const deviceHits = React.useMemo(() => device.slice(0, SHELF_COUNT), [device]);
 
@@ -35,12 +71,19 @@ export function HomeScreen() {
   };
   const more = (hit: SearchHit) => openSheet({ kind: 'actions', hit });
 
-  const nothingYet = recent.length === 0 && deviceHits.length === 0 && likedHits.length === 0;
+  const openAlbum = (album: CatalogAlbumRef) => openPage({ kind: 'album', id: album.id, title: album.title });
+
+  const nothingYet = quick.length === 0 && deviceHits.length === 0 && likedHits.length === 0;
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-      <LinearGradient colors={HEADER_FADE} style={styles.headerFade} pointerEvents="none" />
-      <View style={styles.header}>
+      {/* Drawn up to the top edge, under the status bar, like the pages. */}
+      <LinearGradient
+        colors={HEADER_FADE}
+        style={[styles.headerFade, { height: HEADER_FADE_HEIGHT + insets.top }]}
+        pointerEvents="none"
+      />
+      <View style={[styles.header, { paddingTop: insets.top + spacing.lg }]}>
         <Pressable
           accessibilityRole="button"
           accessibilityLabel="Profil et réglages"
@@ -65,11 +108,20 @@ export function HomeScreen() {
         </View>
       ) : null}
 
-      {recent.length > 0 ? (
+      {quick.length > 0 ? (
         <View style={styles.quickGrid}>
-          {recent.map(hit => (
-            <QuickTile key={`${hit.username}:${hit.filename}`} hit={hit} onPress={play(recent, 'Écoutés récemment')} onLongPress={more} />
-          ))}
+          {quick.map(item =>
+            item.kind === 'album' ? (
+              <AlbumTile key={`album:${item.album.id}`} album={item.album} onPress={openAlbum} />
+            ) : (
+              <QuickTile
+                key={`${item.hit.username}:${item.hit.filename}`}
+                hit={item.hit}
+                onPress={play(quickHits, 'Écoutés récemment')}
+                onLongPress={more}
+              />
+            ),
+          )}
         </View>
       ) : null}
 
@@ -161,6 +213,27 @@ const QuickTile = React.memo(function QuickTile({
   );
 });
 
+const AlbumTile = React.memo(function AlbumTile({
+  album,
+  onPress,
+}: {
+  album: CatalogAlbumRef;
+  onPress: (album: CatalogAlbumRef) => void;
+}) {
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={`Ouvrir l’album ${album.title}`}
+      onPress={() => onPress(album)}
+      style={({ pressed }) => [styles.quick, pressed && styles.pressed]}>
+      <Cover artwork={album.cover} seed={album.id} title={album.title} size={56} rounded="xs" style={styles.quickCover} />
+      <Text style={styles.quickTitle} numberOfLines={2}>
+        {album.title}
+      </Text>
+    </Pressable>
+  );
+});
+
 function Shelf({
   title,
   subtitle,
@@ -238,6 +311,7 @@ const ShelfCard = React.memo(function ShelfCard({
 });
 
 const HEADER_FADE = ['rgba(255,182,39,0.2)', 'rgba(11,10,15,0)'];
+const HEADER_FADE_HEIGHT = 260;
 
 const styles = StyleSheet.create({
   container: {
@@ -251,14 +325,12 @@ const styles = StyleSheet.create({
     top: 0,
     left: 0,
     right: 0,
-    height: 260,
   },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.md,
     paddingHorizontal: gutter,
-    paddingTop: spacing.lg,
     paddingBottom: spacing.lg,
   },
   avatar: {

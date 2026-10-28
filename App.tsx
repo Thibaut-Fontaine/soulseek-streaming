@@ -162,12 +162,17 @@ function Root() {
     <View style={styles.root} onStartShouldSetResponderCapture={logTouch}>
       <View style={styles.main}>
         <View style={styles.content}>
-          {/* Tabs stay below the status bar; pages (PageHost) fill up to the
-              top edge of the screen, like the full player. */}
-          <View style={[styles.content, { paddingTop: insets.top }]}>
-            <Banners />
+          {/* Tabs stay below the status bar; Accueil and the pages (PageHost)
+              fill up to the top edge of the screen, like the full player. */}
+          <View style={[styles.content, { paddingTop: tab === 'home' ? 0 : insets.top }]}>
+            {tab === 'home' ? null : <Banners />}
             {tab === 'home' ? (
-              <HomeScreen />
+              <>
+                <HomeScreen />
+                <View style={[styles.overlayBanners, { top: insets.top }]} pointerEvents="box-none">
+                  <Banners />
+                </View>
+              </>
             ) : tab === 'search' ? (
               <SearchScreen />
             ) : tab === 'library' ? (
@@ -233,6 +238,11 @@ const styles = StyleSheet.create({
   },
   content: {
     flex: 1,
+  },
+  overlayBanners: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
   },
   dock: {
     backgroundColor: colors.bg,

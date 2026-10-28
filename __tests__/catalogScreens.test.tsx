@@ -53,7 +53,7 @@ jest.mock('../src/player/player', () => ({
 import { hitKey } from '../src/core/types';
 import { EMPTY_LIBRARY, savedTrack } from '../src/services/library';
 import { useAppStore } from '../src/state/store';
-import { HomeScreen } from '../src/ui/HomeScreen';
+import { HomeScreen, quickItems } from '../src/ui/HomeScreen';
 import { MiniPlayer } from '../src/ui/MiniPlayer';
 import { PageHost } from '../src/ui/pages';
 import { PlayerSheet } from '../src/ui/PlayerScreen';
@@ -72,8 +72,10 @@ import {
   trackArtists,
 } from '../src/ui/catalogFormat';
 import {
+  AERODYNAMIC,
   ALBUM_PAGE,
   ARTIST_PAGE,
+  BOOTLEG_FILE,
   DAFT_PUNK,
   DIGITAL_LOVE,
   DISCOVERY,
@@ -83,6 +85,7 @@ import {
   OMT_RADIO,
   ONE_MORE_TIME,
   SEARCH_GROUPS,
+  soulseekHit,
   SEARCH_RESULT,
   TOP_TRACKS,
   art,
@@ -474,6 +477,24 @@ describe('home from the listening history', () => {
     press(home, 'Artiste Cassius');
     expect(actions.openPage).toHaveBeenCalledWith({ kind: 'artist', id: 'dz:1563', name: 'Cassius' });
     press(home, 'Album Discovery, Daft Punk');
+    expect(actions.openPage).toHaveBeenCalledWith({ kind: 'album', id: DISCOVERY.id, title: 'Discovery' });
+  });
+
+  test('top tiles show the albums of recent tracks, once each', () => {
+    const aerodynamic = savedTrack(
+      soulseekHit('Music\\Daft Punk\\Discovery\\02 - Aerodynamic.mp3', 'dj_mark'),
+      undefined,
+      AERODYNAMIC,
+    );
+    const bootleg = savedTrack(BOOTLEG_FILE);
+    const history = [played, aerodynamic, bootleg];
+    expect(quickItems(history, true).map(item => item.kind)).toEqual(['album', 'track']);
+    // Catalog off: no album page to open, one tile per track.
+    expect(quickItems(history, false).map(item => item.kind)).toEqual(['track', 'track', 'track']);
+
+    useAppStore.setState({ library: { ...EMPTY_LIBRARY, history } });
+    const home = render(<HomeScreen />);
+    press(home, 'Ouvrir l’album Discovery');
     expect(actions.openPage).toHaveBeenCalledWith({ kind: 'album', id: DISCOVERY.id, title: 'Discovery' });
   });
 
