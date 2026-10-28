@@ -264,3 +264,12 @@ test('a long library list builds only the rows near the screen, and plays in ord
     expect.objectContaining({ index: 3, label: 'Historique', items: many.map(track => track.hit) }),
   );
 });
+
+test('the player backdrop blurs a small cover, not the 1000 px one', () => {
+  const { backdropCoverUri } = require('../src/ui/track');
+  const artwork = { small: 's.jpg', medium: 'm.jpg', big: 'b.jpg', large: 'l.jpg' };
+  expect(backdropCoverUri({ artwork, coverUri: null })).toBe('m.jpg');
+  expect(backdropCoverUri({ artwork: null, coverUri: 'data:image/jpeg;base64,AAAA' })).toBe(
+    'data:image/jpeg;base64,AAAA',
+  );
+});

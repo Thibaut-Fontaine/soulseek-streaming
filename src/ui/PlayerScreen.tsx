@@ -24,7 +24,7 @@ import { useByteRate, useCurrentTransfer, useReceivedRatio } from './hooks';
 import { Icon } from './Icon';
 import { QUEUE_WARN_POSITION, peerAvailability, sourceSummary } from './p2p';
 import { Scrubber, TransferSteps } from './peer';
-import { TrackCover, largeCoverUri, useIsLiked, useTrackInfo } from './track';
+import { TrackCover, backdropCoverUri, useIsLiked, useTrackInfo } from './track';
 import { colors, coverSeed, radius, spacing, type } from './theme';
 
 const SIDE = spacing.xl;
@@ -231,7 +231,7 @@ function PlayerContent({ translateY }: { translateY: Animated.Value }) {
 
   return (
     <View style={[styles.root, { paddingTop: insets.top + spacing.xs, paddingBottom: insets.bottom + spacing.md }]}>
-      <CoverBackdrop coverUri={largeCoverUri(info)} seed={coverSeed(hit)} />
+      <CoverBackdrop coverUri={backdropCoverUri(info)} seed={coverSeed(hit)} />
 
       <View {...responder.panHandlers}>
         <View style={styles.grabber} />
