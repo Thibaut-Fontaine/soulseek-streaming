@@ -41,17 +41,23 @@ export function ensurePlayer(): Promise<void> {
           appKilledPlaybackBehavior: AppKilledPlaybackBehavior.ContinuePlayback,
           stopForegroundGracePeriod: 10,
         },
+        // Previous / play-pause / next, like other music apps. The native
+        // queue holds one track: the store handles the skip buttons
+        // (Event.RemoteNext / RemotePrevious in state/store.ts).
         capabilities: [
           Capability.Play,
           Capability.Pause,
+          Capability.SkipToNext,
+          Capability.SkipToPrevious,
           Capability.Stop,
           Capability.SeekTo,
         ],
-        compactCapabilities: [Capability.Play, Capability.Pause],
+        compactCapabilities: [Capability.SkipToPrevious, Capability.Play, Capability.Pause, Capability.SkipToNext],
         notificationCapabilities: [
+          Capability.SkipToPrevious,
           Capability.Play,
           Capability.Pause,
-          Capability.Stop,
+          Capability.SkipToNext,
           Capability.SeekTo,
         ],
         progressUpdateEventInterval: 0.5,

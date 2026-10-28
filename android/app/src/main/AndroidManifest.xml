@@ -24,6 +24,32 @@
             <action android:name="android.intent.action.MAIN" />
             <category android:name="android.intent.category.LAUNCHER" />
         </intent-filter>
+        <!-- Shared tracks: soulstream:// links (src/core/share.ts). -->
+        <intent-filter>
+            <action android:name="android.intent.action.VIEW" />
+            <category android:name="android.intent.category.DEFAULT" />
+            <category android:name="android.intent.category.BROWSABLE" />
+            <data android:scheme="soulstream" />
+        </intent-filter>
+        <!-- Deezer track links, once the user lets SoulStream open them
+             (Android settings, "Open supported links"). -->
+        <intent-filter>
+            <action android:name="android.intent.action.VIEW" />
+            <category android:name="android.intent.category.DEFAULT" />
+            <category android:name="android.intent.category.BROWSABLE" />
+            <data android:scheme="https" />
+            <data android:host="www.deezer.com" />
+            <data android:host="deezer.com" />
+            <data android:pathPattern="/track/.*" />
+            <data android:pathPattern="/.*/track/.*" />
+        </intent-filter>
+        <!-- A message sent to SoulStream from the share sheet; MainActivity
+             turns it into a link. -->
+        <intent-filter>
+            <action android:name="android.intent.action.SEND" />
+            <category android:name="android.intent.category.DEFAULT" />
+            <data android:mimeType="text/plain" />
+        </intent-filter>
       </activity>
     </application>
 </manifest>

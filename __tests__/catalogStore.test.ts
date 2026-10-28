@@ -226,6 +226,24 @@ describe('catalog search and playback', () => {
     );
   });
 
+  test('a shared link plays its track; without the catalog it searches', async () => {
+    await withNetwork([{ username: 'peer_a', filename: TRACK, behavior: 'ok' }], async network => {
+      await useAppStore.getState().openShared({ kind: 'track', id: STREAM_ME.id, query: 'fake artist stream me' });
+      await waitFor(() => useAppStore.getState().current?.phase === 'playing');
+      const current = useAppStore.getState().current!;
+      expect(useAppStore.getState().trackForHit(current.hit)?.id).toBe(STREAM_ME.id);
+      // Fetched in full by the link: every artist, no second request needed.
+      expect(useAppStore.getState().trackForHit(current.hit)?.contributors).toHaveLength(1);
+
+      await useAppStore.getState().stopPlayback();
+      useAppStore.setState({ settings: { ...useAppStore.getState().settings, catalogEnabled: false } });
+      await useAppStore.getState().openShared({ kind: 'track', id: STREAM_ME.id, query: 'fake artist stream me' });
+      expect(useAppStore.getState().tab).toBe('search');
+      expect(network.searches).toContain('fake artist stream me');
+      useAppStore.setState({ settings: { ...useAppStore.getState().settings, catalogEnabled: true } });
+    });
+  });
+
   test('stopping while sources are searched cancels the track', async () => {
     await withNetwork(
       [{ username: 'peer_a', filename: TRACK, behavior: 'ok' }],

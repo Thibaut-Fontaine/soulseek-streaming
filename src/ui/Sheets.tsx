@@ -4,6 +4,7 @@ import {
   PanResponder,
   Pressable,
   ScrollView,
+  Share,
   StyleSheet,
   Text,
   useWindowDimensions,
@@ -12,6 +13,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import type { CatalogPlayContext, CatalogTrack, Page } from '../core/catalogTypes';
+import { shareMessage } from '../core/share';
 import { hitKey } from '../core/types';
 import type { SearchHit } from '../core/types';
 import { trackIdentity } from '../services/library';
@@ -203,11 +205,21 @@ function TrackActions({ hit, context }: { hit: SearchHit; context?: PlayContext 
             })}
           />
         ) : null}
+        <ActionRow
+          icon="share"
+          label="Partager"
+          onPress={run(() => shareTrack({ title: catalog?.title ?? info.title, artist, catalogId: catalog?.id }))}
+        />
         {isCurrent ? <ActionRow icon="stop" label="Arrêter la lecture" onPress={run(() => void stopPlayback())} /> : null}
         <SheetFooter />
       </ScrollView>
     </>
   );
+}
+
+/** Opens the system share sheet with a link that plays the track in SoulStream. */
+function shareTrack(track: { title: string; artist: string | null; catalogId?: string | null }): void {
+  Share.share({ message: shareMessage(track) }).catch(() => {});
 }
 
 function GoToRows({ track, onOpen }: { track: CatalogTrack; onOpen: (page: Page) => void }) {
@@ -305,6 +317,11 @@ function CatalogActions({ track, context }: { track: CatalogTrack; context?: Cat
             onPress={findSources}
           />
         )}
+        <ActionRow
+          icon="share"
+          label="Partager"
+          onPress={run(() => shareTrack({ title: track.title, artist: trackArtists(track), catalogId: track.id }))}
+        />
         <SheetFooter />
       </ScrollView>
     </>

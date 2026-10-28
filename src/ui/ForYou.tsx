@@ -35,7 +35,8 @@ export function recentAlbums(history: SavedTrack[], max = MAX_ALBUMS): CatalogAl
   return albums;
 }
 
-export function ForYouSections() {
+/** `hideAlbums`: albums already on screen (the home tiles), left out of the shelf. */
+export function ForYouSections({ hideAlbums }: { hideAlbums?: Set<string> }) {
   const enabled = useAppStore(state => state.settings.catalogEnabled !== false);
   const history = useAppStore(state => state.library.history);
   const home = useAppStore(state => state.home);
@@ -47,7 +48,13 @@ export function ForYouSections() {
     () => recentArtists({ history, liked: [], recentSearches: [] }).map(artist => artist.id).join(','),
     [history],
   );
-  const albums = React.useMemo(() => recentAlbums(history), [history]);
+  const albums = React.useMemo(
+    () =>
+      recentAlbums(history, MAX_ALBUMS + (hideAlbums?.size ?? 0))
+        .filter(album => !hideAlbums?.has(album.id))
+        .slice(0, MAX_ALBUMS),
+    [history, hideAlbums],
+  );
 
   React.useEffect(() => {
     if (enabled) {
@@ -102,10 +109,18 @@ export function ForYouSections() {
           style={styles.error}
         />
       ) : null}
-
-      {home || albums.length > 0 ? <Text style={styles.credit}>Pochettes et artistes : Deezer</Text> : null}
     </>
   );
+}
+
+/** Deezer's credit, at the bottom of the home page when it shows catalog content. */
+export function CatalogCredit() {
+  const shown = useAppStore(
+    state =>
+      state.settings.catalogEnabled !== false &&
+      (state.home !== null || recentAlbums(state.library.history, 1).length > 0),
+  );
+  return shown ? <Text style={styles.credit}>Pochettes et artistes : Deezer</Text> : null;
 }
 
 const styles = StyleSheet.create({

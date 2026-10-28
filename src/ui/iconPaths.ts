@@ -82,6 +82,7 @@ export const ICONS = {
   music: [path('M9 18V5l12-2v13'), circle(6, 18, 3), circle(18, 16, 3)],
   user: [circle(12, 8, 4), path('M4 21a8 8 0 0 1 16 0')],
   disc: [circle(12, 12, 9), circle(12, 12, 2.5)],
+  share: [circle(18, 5, 2.6), circle(6, 12, 2.6), circle(18, 19, 2.6), path('m8.4 13.3 7.2 4.4M15.6 6.3l-7.2 4.4')],
 } satisfies Record<string, IconShape[]>;
 
 export type IconName = keyof typeof ICONS;

@@ -1,8 +1,9 @@
 import React from 'react';
-import { ActivityIndicator, AppState, BackHandler, StatusBar, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, AppState, BackHandler, Linking, StatusBar, StyleSheet, Text, View } from 'react-native';
 import LinearGradient from 'react-native-linear-gradient';
 import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { parseShareLink } from './src/core/share';
 import { debugLog } from './src/services/debugLog';
 import { useAppStore } from './src/state/store';
 import { IconButton } from './src/ui/components';
@@ -51,6 +52,38 @@ function useStallWatchdog(): void {
   }, []);
 }
 
+/**
+ * Shared track links (see src/core/share.ts), from a cold start or while the
+ * app runs. Kept until the user is logged in and online: finding the track's
+ * sources needs the Soulseek server.
+ */
+function useSharedLinks(online: boolean) {
+  const [link, setLink] = React.useState<string | null>(null);
+  const openShared = useAppStore(state => state.openShared);
+
+  React.useEffect(() => {
+    Linking.getInitialURL()
+      .then(url => url && setLink(url))
+      .catch(() => {});
+    const subscription = Linking.addEventListener('url', event => setLink(event.url));
+    return () => subscription.remove();
+  }, []);
+
+  React.useEffect(() => {
+    if (!link || !online) {
+      return;
+    }
+    setLink(null);
+    const target = parseShareLink(link);
+    debugLog('app', `lien reçu : ${link}`);
+    if (target) {
+      void openShared(target);
+    } else {
+      useAppStore.setState({ notice: 'Ce lien ne correspond à aucun titre.' });
+    }
+  }, [link, online, openShared]);
+}
+
 /** After this long in the background, check the server connection on return. */
 const CHECK_AFTER_BACKGROUND_MS = 60_000;
 
@@ -78,6 +111,7 @@ function Root() {
 
   const insets = useSafeAreaInsets();
   useStallWatchdog();
+  useSharedLinks(ready && !!username && connection === 'online');
   const backgroundSince = React.useRef<number | null>(null);
 
   React.useEffect(() => {
