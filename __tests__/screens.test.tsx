@@ -273,3 +273,19 @@ test('the player backdrop blurs a small cover, not the 1000 px one', () => {
     'data:image/jpeg;base64,AAAA',
   );
 });
+
+test('the library shows its overview again after the tab was left', () => {
+  const { FilterChip } = require('../src/ui/components');
+  useAppStore.setState({ tab: 'library' });
+  const renderer = render(<LibraryScreen />);
+  const overviewShown = () =>
+    renderer.root.findAll(node => (node.type as unknown) === 'Text' && node.props.children === 'Écoutés récemment').length > 0;
+  const chip = renderer.root.findAllByType(FilterChip).find(item => item.props.label === 'Sur l’appareil')!;
+  act(() => chip.props.onPress());
+  expect(overviewShown()).toBe(false);
+
+  act(() => useAppStore.setState({ tab: 'home' }));
+  act(() => useAppStore.setState({ tab: 'library' }));
+
+  expect(overviewShown()).toBe(true);
+});

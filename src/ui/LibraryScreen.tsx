@@ -33,6 +33,14 @@ export function LibraryScreen() {
   const playTrack = useAppStore(state => state.playTrack);
   const openSheet = useAppStore(state => state.openSheet);
   const [filter, setFilter] = React.useState<Filter>('all');
+  // The tab stays mounted (TabHost); links from Accueil ("Tout voir") expect
+  // the overview, so a filter does not outlive a visit.
+  const tab = useAppStore(state => state.tab);
+  React.useEffect(() => {
+    if (tab !== 'library') {
+      setFilter('all');
+    }
+  }, [tab]);
 
   const likedHits = React.useMemo(() => liked.map(track => track.hit), [liked]);
   const historyHits = React.useMemo(() => history.map(track => track.hit), [history]);
