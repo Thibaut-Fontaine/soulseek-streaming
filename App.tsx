@@ -33,24 +33,32 @@ function logTouch(event: { nativeEvent: { pageX: number; pageY: number } }): boo
 }
 
 function useStallWatchdog(): void {
-  React.useEffect(
-    () =>
-      startStallWatcher({
-        isActive: () => AppState.currentState === 'active',
-        context: () => {
-          const state = useAppStore.getState();
-          return [
-            `onglet ${state.tab}`,
-            state.playerOpen ? 'lecteur ouvert' : '',
-            state.current ? `titre ${state.current.phase}` : '',
-            state.searching ? 'recherche' : '',
-          ]
-            .filter(Boolean)
-            .join(', ');
-        },
-      }),
-    [],
-  );
+  React.useEffect(() => {
+    const watcher = startStallWatcher({
+      isActive: () => AppState.currentState === 'active',
+      context: () => {
+        const state = useAppStore.getState();
+        return [
+          `onglet ${state.tab}`,
+          state.playerOpen ? 'lecteur ouvert' : '',
+          state.current ? `titre ${state.current.phase}` : '',
+          state.searching ? 'recherche' : '',
+        ]
+          .filter(Boolean)
+          .join(', ');
+      },
+    });
+    // Timers pause in the background: the time away is not a stall.
+    const subscription = AppState.addEventListener('change', next => {
+      if (next === 'active') {
+        watcher.reset();
+      }
+    });
+    return () => {
+      subscription.remove();
+      watcher.stop();
+    };
+  }, []);
 }
 
 /**

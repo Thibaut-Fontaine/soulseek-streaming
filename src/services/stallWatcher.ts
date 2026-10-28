@@ -16,13 +16,20 @@ export interface StallWatcherOptions {
   context?: () => string;
 }
 
+export interface StallWatcher {
+  stop(): void;
+  /** Call when the app comes back to the foreground: timers were paused. */
+  reset(): void;
+}
+
 export function startStallWatcher({
-  intervalMs = 100,
+  // 250 ms is enough to catch 300 ms stalls; each tick is a bridge call.
+  intervalMs = 250,
   thresholdMs = 300,
   now = Date.now,
   isActive = () => true,
   context = () => '',
-}: StallWatcherOptions = {}): () => void {
+}: StallWatcherOptions = {}): StallWatcher {
   let last = now();
   let wasActive = isActive();
 
@@ -40,5 +47,10 @@ export function startStallWatcher({
     wasActive = active;
   }, intervalMs);
 
-  return () => clearInterval(timer);
+  return {
+    stop: () => clearInterval(timer),
+    reset: () => {
+      last = now();
+    },
+  };
 }

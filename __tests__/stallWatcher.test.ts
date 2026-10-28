@@ -4,7 +4,7 @@ import { startStallWatcher } from '../src/services/stallWatcher';
 describe('stall watcher', () => {
   let clock = 0;
   let active = true;
-  let stop: () => void = () => {};
+  let watcher: ReturnType<typeof startStallWatcher> | null = null;
 
   // Moves the fake clock and the timers together; `extra` is time the JS
   // thread spent blocked before the next tick could run.
@@ -19,7 +19,8 @@ describe('stall watcher', () => {
     clearDebugLog();
     clock = 0;
     active = true;
-    stop = startStallWatcher({
+    watcher = startStallWatcher({
+      intervalMs: 100,
       now: () => clock,
       isActive: () => active,
       context: () => 'onglet search, titre preparing',
@@ -27,7 +28,7 @@ describe('stall watcher', () => {
   });
 
   afterEach(() => {
-    stop();
+    watcher?.stop();
     jest.useRealTimers();
   });
 
@@ -51,8 +52,16 @@ describe('stall watcher', () => {
   });
 
   test('stop() ends the watching', () => {
-    stop();
+    watcher?.stop();
     tick(1000);
+    expect(perfLines()).toHaveLength(0);
+  });
+
+  test('a resume with no tick seen in the background is not a stall, once reset', () => {
+    // Timers pause in the background: no tick sees the app inactive.
+    clock += 60_000;
+    watcher?.reset();
+    tick();
     expect(perfLines()).toHaveLength(0);
   });
 
