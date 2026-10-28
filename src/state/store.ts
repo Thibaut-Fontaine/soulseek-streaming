@@ -291,6 +291,8 @@ let homeKey = '';
 const resolving = new Map<string, Promise<Resolution>>();
 /** When each resolution was made, by catalog track id. */
 const resolvedAt = new Map<string, number>();
+/** First query-ladder step not searched yet, by catalog track id. */
+const ladderNext = new Map<string, number>();
 /**
  * Played catalog tracks fetched in full (lists leave out featured artists),
  * by id; null while the request runs.
@@ -953,6 +955,7 @@ export const useAppStore = create<AppState>((set, get) => {
     let hit: SearchHit | null = first;
     let fallback: CurrentPlayback['fallback'] = null;
     let lastError = 'Lecture impossible';
+    let searchedMore = false;
 
     await ensurePlayer();
     set({ playerReady: true });
@@ -994,6 +997,16 @@ export const useAppStore = create<AppState>((set, get) => {
         service?.cancelActive();
         fallback = { username: hit.username, reason: lastError };
         hit = nextCandidate(first, tried);
+
+        const track = hit ? undefined : get().hitTracks[hitKey(first)];
+        if (track && !searchedMore) {
+          searchedMore = true;
+          await searchMoreSources(track, tried);
+          if (sequence !== playSequence) {
+            return;
+          }
+          hit = nextCandidate(first, tried);
+        }
       }
     }
 
@@ -1295,13 +1308,24 @@ export const useAppStore = create<AppState>((set, get) => {
     return collected;
   }
 
-  async function findSources(track: CatalogTrack): Promise<Resolution> {
-    const known = knownSources(track);
-    const local = localSources(track);
+  /**
+   * `fromStep` > 0 resumes the ladder after the steps already searched;
+   * `usable` tells which sources count (when resuming: not tried, not
+   * refused), so a step whose only sources are unusable does not stop it.
+   */
+  async function findSources(
+    track: CatalogTrack,
+    fromStep = 0,
+    usable: (source: RankedHit) => boolean = () => true,
+  ): Promise<Resolution> {
+    if (fromStep === 0) {
+      const known = knownSources(track);
+      const local = localSources(track);
 
-    // Sources from the search the user just ran are enough to start.
-    if (known.length > 0 || local.length > 0) {
-      return { status: 'found', sources: mergeSources(local, known) };
+      // Sources from the search the user just ran are enough to start.
+      if (known.length > 0 || local.length > 0) {
+        return { status: 'found', sources: mergeSources(local, known) };
+      }
     }
 
     if (!service || get().connection !== 'online') {
@@ -1316,18 +1340,22 @@ export const useAppStore = create<AppState>((set, get) => {
     let sources: RankedHit[] = [];
 
     for (const [index, step] of steps.entries()) {
+      if (index < fromStep) {
+        continue;
+      }
       const remaining = RESOLVE_BUDGET_MS - (Date.now() - startedAt);
       const left = steps.length - index;
       // The first step gets most of the time; later ones share what is left.
       const duration =
-        index === 0
+        index === fromStep
           ? Math.min(RESOLVE_DURATION_MS, remaining - MIN_RETRY_MS * (left - 1))
           : Math.floor(remaining / left);
       if (duration < MIN_STEP_MS) {
         break;
       }
       const hits = await searchSources(track, step.query, duration);
-      sources = sourcesForTrack(track, hits);
+      sources = sourcesForTrack(track, hits).filter(usable);
+      ladderNext.set(track.id, index + 1);
       debugLog(
         'play',
         `étape ${index + 1}/${steps.length} (${step.kind}) « ${step.query} » : ${hits.length} fichier(s), ${sources.length} source(s)`,
@@ -1339,6 +1367,27 @@ export const useAppStore = create<AppState>((set, get) => {
 
     debugLog('play', `${sources.length} source(s) pour « ${track.title} »`);
     return { status: sources.length > 0 ? 'found' : 'none', sources };
+  }
+
+  /**
+   * Every source found for a catalog track failed (refused, queue full,
+   * unreachable): search the ladder steps not tried yet, once, and add what
+   * they find. One more search only after a total failure, like the ladder.
+   */
+  async function searchMoreSources(track: CatalogTrack, tried: Set<string>): Promise<void> {
+    const fromStep = ladderNext.get(track.id) ?? 0;
+    if (fromStep >= soulseekLadder(track).length || !service || get().connection !== 'online') {
+      return;
+    }
+    debugLog('play', `toutes les sources ont échoué : recherche à partir de l’étape ${fromStep + 1}`);
+    const more = await findSources(
+      track,
+      fromStep,
+      source => !tried.has(hitKey(source.hit)) && !deniedPeers.has(source.hit.username.toLowerCase()),
+    );
+    if (more.sources.length > 0) {
+      setResolution(track, { status: 'found', sources: mergeSources(knownSources(track), more.sources) });
+    }
   }
 
   function mergeSources(...lists: RankedHit[][]): RankedHit[] {
