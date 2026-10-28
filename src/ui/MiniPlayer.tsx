@@ -5,6 +5,7 @@ import TrackPlayer, { State, usePlaybackState, useProgress } from 'react-native-
 
 import { useAppStore } from '../state/store';
 import { MarqueeText, ProgressBar } from './components';
+import { useCurrentTransfer, useReceivedRatio } from './hooks';
 import { Icon } from './Icon';
 import { TrackCover, useIsLiked, useTrackInfo } from './track';
 import { colors, coverPalette, coverSeed, formatBytes, percent, radius, spacing } from './theme';
@@ -18,9 +19,6 @@ const SWIPE_OPEN = 30;
  */
 export function MiniPlayer() {
   const current = useAppStore(state => state.current);
-  const transfer = useAppStore(state =>
-    state.current ? state.transfers[state.current.transferId] : undefined,
-  );
   const openPlayer = useAppStore(state => state.openPlayer);
   const stopPlayback = useAppStore(state => state.stopPlayback);
   const toggleLike = useAppStore(state => state.toggleLike);
@@ -29,13 +27,12 @@ export function MiniPlayer() {
   const playerReady = useAppStore(state => state.playerReady);
 
   const playbackState = usePlaybackState();
-  const progress = useProgress(500);
   const info = useTrackInfo(current?.hit);
   const liked = useIsLiked(current?.hit);
 
   const shift = React.useRef(new Animated.Value(0)).current;
-  const latest = React.useRef({ openPlayer, playNext, playPrevious, position: 0 });
-  latest.current = { openPlayer, playNext, playPrevious, position: progress.position };
+  const latest = React.useRef({ openPlayer, playNext, playPrevious });
+  latest.current = { openPlayer, playNext, playPrevious };
 
   const responder = React.useMemo(
     () =>
@@ -79,13 +76,6 @@ export function MiniPlayer() {
   const error = current.phase === 'error';
   const playing = playbackState.state === State.Playing;
 
-  const received = transfer?.received ?? 0;
-  const receivedRatio =
-    current.source === 'cache' || transfer?.state === 'complete'
-      ? 1
-      : percent(received, transfer?.size || hit.size);
-  const playbackRatio = progress.duration > 0 ? percent(progress.position, progress.duration) : 0;
-
   const toggle = async () => {
     if (preparing) {
       await stopPlayback();
@@ -106,18 +96,6 @@ export function MiniPlayer() {
     }
   };
 
-  const subtitle = error
-    ? 'Lecture interrompue · touchez pour les détails'
-    : preparing
-      ? transfer?.state === 'queued'
-        ? transfer.queuePosition
-          ? `En file chez ${hit.username} · position ${transfer.queuePosition}`
-          : `En file chez ${hit.username}…`
-        : transfer?.state === 'streaming'
-          ? `Mise en mémoire · ${formatBytes(Math.min(received, current.bufferTarget))} / ${formatBytes(current.bufferTarget)}`
-          : `Connexion à ${hit.username}…`
-      : info.artist;
-
   return (
     <View style={styles.wrap} {...responder.panHandlers}>
       <LinearGradient colors={[palette.deep, palette.bgTop]} start={START} end={END} style={StyleSheet.absoluteFill} />
@@ -131,11 +109,13 @@ export function MiniPlayer() {
           <TrackCover hit={hit} size={40} rounded="xs" />
           <View style={styles.textBlock}>
             <MarqueeText style={styles.title}>{info.title}</MarqueeText>
-            <Text
-              style={[styles.subtitle, preparing && styles.subtitleWait, error && styles.subtitleError]}
-              numberOfLines={1}>
-              {subtitle}
-            </Text>
+            <MiniSubtitle
+              username={hit.username}
+              artist={info.artist}
+              preparing={preparing}
+              error={error}
+              bufferTarget={current.bufferTarget}
+            />
           </View>
         </Pressable>
       </Animated.View>
@@ -157,9 +137,55 @@ export function MiniPlayer() {
         <Icon name={preparing ? 'x' : playing ? 'pause' : 'play'} size={24} filled={!preparing} color={colors.text} />
       </Pressable>
 
-      <ProgressBar value={preparing ? 0 : playbackRatio} buffered={receivedRatio} height={2} style={styles.progress} />
+      <MiniProgress preparing={preparing} />
     </View>
   );
+}
+
+// The two parts below change several times a second (download progress,
+// playback position): they subscribe on their own so the rest of the bar
+// does not redraw with them.
+
+function MiniSubtitle({
+  username,
+  artist,
+  preparing,
+  error,
+  bufferTarget,
+}: {
+  username: string;
+  artist: string;
+  preparing: boolean;
+  error: boolean;
+  bufferTarget: number;
+}) {
+  const transfer = useCurrentTransfer();
+  const received = transfer?.received ?? 0;
+  const subtitle = error
+    ? 'Lecture interrompue · touchez pour les détails'
+    : preparing
+      ? transfer?.state === 'queued'
+        ? transfer.queuePosition
+          ? `En file chez ${username} · position ${transfer.queuePosition}`
+          : `En file chez ${username}…`
+        : transfer?.state === 'streaming'
+          ? `Mise en mémoire · ${formatBytes(Math.min(received, bufferTarget))} / ${formatBytes(bufferTarget)}`
+          : `Connexion à ${username}…`
+      : artist;
+
+  return (
+    <Text style={[styles.subtitle, preparing && styles.subtitleWait, error && styles.subtitleError]} numberOfLines={1}>
+      {subtitle}
+    </Text>
+  );
+}
+
+function MiniProgress({ preparing }: { preparing: boolean }) {
+  const receivedRatio = useReceivedRatio();
+  const progress = useProgress(500);
+  const playbackRatio = progress.duration > 0 ? percent(progress.position, progress.duration) : 0;
+
+  return <ProgressBar value={preparing ? 0 : playbackRatio} buffered={receivedRatio} height={2} style={styles.progress} />;
 }
 
 const START = { x: 0, y: 0 };
