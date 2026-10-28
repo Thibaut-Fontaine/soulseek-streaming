@@ -74,7 +74,9 @@ catalog (no Soulseek request). Soulseek is searched for a title when it is
 played (`playCatalogTrack` → `resolveTrack`) with a query ladder
 (`soulseekLadder` in `unify.ts`: artist + title, then title only, then
 artist + album, each tried only if the previous found no source, 9 s in all),
-which then plays the best source with automatic fallback to the next ones. A Soulseek file search for the query
+which then plays the best source with automatic fallback to the next ones;
+if every source fails (refused, queue full, unreachable), the ladder steps
+not searched yet run once more (`searchMoreSources`). A Soulseek file search for the query
 runs only when the catalog is off, finds nothing or is unreachable, or when
 the user taps "Chercher les fichiers sur Soulseek" (`searchFilesToo`); then
 the catalog's spelling is searched too (fixes typos) and `unify.ts` groups the
@@ -96,7 +98,8 @@ an accent-free copy when they have accents.
   release builds use R8. JS stalls ≥ 300 ms are journaled (`perf` tag).
 - **Minimise Soulseek requests**: no Soulseek search while browsing the
   catalog; one search per played title (plus the accent-free spelling),
-  the next ladder step only when it found no source;
+  the next ladder step only when it found no source (or, once, when every
+  source found failed);
   peer address cache, queue polling at most once a minute, no
   distributed search tree, no chat or user watching.
 - Nothing plays until the user taps a result. Short files (< 45 s) are

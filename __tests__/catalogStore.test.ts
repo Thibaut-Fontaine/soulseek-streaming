@@ -418,6 +418,31 @@ describe('catalog search and playback', () => {
     );
   });
 
+  test('when every source found refuses, the next ladder steps are searched', async () => {
+    const SONG = {
+      ...track('dz:17', 'Stream Me', 200),
+      album: { id: 'dz:103', title: 'Night Session', cover: ART },
+    };
+    await withNetwork(
+      [
+        // The only artist + title source: its queue for our account is full.
+        { username: 'peer_full', filename: TRACK, behavior: 'deny', matchQuery: true },
+        { username: 'peer_b', filename: 'Music\\Fake Artist\\Night Session\\01 - Streem Me.mp3', behavior: 'ok', matchQuery: true },
+      ],
+      async network => {
+        await useAppStore.getState().playCatalogTrack(SONG);
+        await waitFor(() => useAppStore.getState().current?.phase === 'playing');
+
+        expect(useAppStore.getState().current?.hit.username).toBe('peer_b');
+        expect(network.searches).toEqual([
+          'fake artist stream me -live -karaoke -instrumental -remix',
+          'stream me -live -karaoke -instrumental -remix',
+          'fake artist night session -live -karaoke -instrumental -remix',
+        ]);
+      },
+    );
+  });
+
   test('a search the catalog cannot answer searches the files', async () => {
     setCatalogProvider({
       ...fakeCatalog,
