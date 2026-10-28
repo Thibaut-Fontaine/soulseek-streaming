@@ -16,6 +16,10 @@ Seen on the emulator (fake network and real Soulseek, test account
 - A transfer waiting for the peer's TransferRequest fails 5 s after its P
   connection closes (`handlePeerSessionClosed`), although uploaders keep
   queued requests: keep waiting (or reconnect and re-send QueueUpload).
+- During a ConnectToPeer storm (popular title, audit #12) the 12-connection
+  cap can decline the P connection of an uploader we queued (it wants to
+  send TransferRequest): exempt users with a pending or queued transfer
+  from the cap in `acceptIndirectConnection`.
 - Two devices on one account kick each other: after RELOGGED, coming back
   to the foreground reconnects and logs the other device out.
 - "Réessayer" / `reconnect()` goes through `login()`, which stops a track
