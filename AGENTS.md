@@ -87,8 +87,13 @@ an accent-free copy when they have accents.
   search parsing and transfers.
 - **Never block the JS thread / UI**: late search replies are dropped before
   zlib inflation; search caps (512 KiB compressed, 4 MiB inflated, 500 files,
-  200 hits); the HTTP proxy yields every 2 × 64 KiB. Tabs must stay usable
-  while a track loads.
+  200 hits); the HTTP proxy yields every 2 × 64 KiB; ConnectToPeer requests
+  past the cap are dropped silently (no log, no reply). Tabs must stay usable
+  while a track loads. Target a low-end phone (~4 GB RAM): playback position
+  and transfer progress are read only by small leaf components
+  (`useCurrentTransfer`, `useReceivedRatio` in `src/ui/hooks.ts`), visited
+  tabs stay mounted (`src/ui/TabHost.tsx`), long lists use `FlatList`,
+  release builds use R8. JS stalls ≥ 300 ms are journaled (`perf` tag).
 - **Minimise Soulseek requests**: no Soulseek search while browsing the
   catalog; one search per played title (plus the accent-free spelling),
   the next ladder step only when it found no source;

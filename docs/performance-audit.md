@@ -40,13 +40,43 @@ times slower (no JIT on most paths), so every number below should be read as
   network comes back (NetInfo) or the app returns to the foreground.
 - Library save (`JSON.stringify` of 200 history entries): 0.3 ms.
 
+## Low-end phone run (2026-10-28, 1.3-beta15)
+
+Target: the co-founder's low-end Redmi (~4 GB RAM), which lags where a
+flagship does not. Measured on the laptop emulator (Android 14, software
+rendering: frame numbers are meaningless there, JS stalls and start times
+are still comparable) and on the real network with the test account and
+free-to-share music only. Plan: `docs/superpowers/plans/2026-10-28-low-end-performance.md`.
+
+| # | Problem | Before | After | Commit |
+| --- | --- | --- | --- | --- |
+| 12 | Playing a popular title brought a storm of ConnectToPeer requests (peers holding the file, unable to reach us behind NAT); past the 12-connection cap each still wrote a journal line and sent CantConnectToPeer (a bridge write). Mostly from the next-track source lookup falling back to a title-only query ("crusade") | ~9,500 requests in 2 min; JS thread frozen 3–7 s at a time (emulator) | declined requests cost a parse and a counter; 500-request test: 0 server writes (was 488), ≤ 13 journal lines | `perf(network)` |
+| 13 | Mini player and full player re-rendered whole 2–4×/s for the playback position, and twice per download update (snapshot + speed hook) | 6 renders of the player body for 5 position ticks; 13 for 5 download steps | scrubber, progress bar, transfer card and source chip subscribe on their own: 0 body renders | `perf(player)` |
+| 14 | Every tab switch unmounted the screen and rebuilt the next one (covers, shelves, gradients) | full rebuild per switch | Accueil / Rechercher / Bibliothèque stay mounted once visited (`TabHost`); re-tapping the tab rebuilds it at its root | `perf(ui)` |
+| 15 | Bibliothèque built every row of liked titles / history (200) / device tracks in a ScrollView | 150 rows built for a 150-track list | FlatList, ~12 rows first; stable row callbacks | `perf(library)` |
+| 16 | Full player blurred the 1000 px cover (software blur on Android) | 1000 px decoded and blurred per track | 250 px cover, same look | `perf(player)` |
+| 17 | Release build had no R8: 26 MB of bytecode in 3 dex files, loaded at each cold start | APK 61.5 MB; cold start median ~3.3 s (emulator) | one 6.4 MB dex, APK 54.1 MB; cold start median ~2.0 s | `build(android)` |
+| 18 | JS stalls only logged above 1 s, without context, and the background pause could be logged on resume | — | `stallWatcher`: stalls ≥ 300 ms go to the journal as `perf` lines with tab, player and search state | `feat(diagnostics)` |
+
+Checked and dropped: inflating search replies in Kotlin. `pako` takes
+≈ 5.7 ms for a 500-file reply with `node --jitless` (close to Hermes),
+< 1 ms for a typical one; a bridge round trip would cost about as much.
+Animations already use the native driver.
+
+Still seen on the emulator after the fixes: repeated 300–900 ms stalls on
+Accueil during start-up (library load, home shelves, catalog answers);
+worth a look once the Redmi journal confirms them.
+
 ## Still open
 
-- **Measure on a real device** (needs a phone or emulator, not available in
-  the cloud sandbox): frame drops during a search and at the end of a
-  download (`adb shell dumpsys gfxinfo com.soulstream.app`), time to first
-  sound, and the background case (screen off 5+ minutes without playback,
-  then search; and Wi-Fi → mobile data while playing).
+- **Report from the low-end Redmi** on 1.3-beta15: share Réglages →
+  Journal de débogage after normal use; `perf` lines say how long the JS
+  thread was blocked and where. Also the background case (screen off 5+
+  minutes without playback, then search; Wi-Fi → mobile data while playing).
+- **Next-track source lookup**: its title-only fallback query is the main
+  source of ConnectToPeer storms (#12); consider skipping the title-only
+  step for look-ahead searches, or moving the look-ahead behind the
+  pre-download setting (TODO §3).
 - **Audio still flows through JS** (now with native base64): the thorough
   fix is a native (Kotlin) data path peer → file → local server, if device
   tests still show stutters when a track starts.
