@@ -216,3 +216,16 @@ test('a title too long for its line scrolls, a short one stays still', () => {
   expect(copies()).toBe(2);
   jest.useRealTimers();
 });
+
+test('a new search scrolls the kept search tab back to the top', () => {
+  const renderer = render(<SearchScreen />);
+  const { ScrollView } = require('react-native');
+  const scroll = renderer.root.findAllByType(ScrollView)[0].instance;
+  const scrollTo = jest.spyOn(scroll, 'scrollTo').mockImplementation(() => {});
+
+  act(() => {
+    useAppStore.setState({ searchQuery: 'm83' });
+  });
+
+  expect(scrollTo).toHaveBeenCalledWith({ y: 0, animated: false });
+});
