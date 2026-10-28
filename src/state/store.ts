@@ -868,6 +868,18 @@ export const useAppStore = create<AppState>((set, get) => {
       debugLog('player', `piste active : ${event.track?.url ?? 'aucune'}`);
     });
 
+    // Notification, lock screen and headset buttons.
+    TrackPlayer.addEventListener(Event.RemoteNext, () => {
+      void get().playNext();
+    });
+
+    TrackPlayer.addEventListener(Event.RemotePrevious, () => {
+      void TrackPlayer.getProgress()
+        .then(progress => progress.position)
+        .catch(() => 0)
+        .then(position => get().playPrevious(position));
+    });
+
     // One track at a time in the native player: at its end, play what's next.
     TrackPlayer.addEventListener(Event.PlaybackQueueEnded, event => {
       // Ignore the end of a track we are replacing anyway.
