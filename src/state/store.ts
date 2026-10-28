@@ -23,6 +23,7 @@ import {
 import type { RankedHit } from '../core/search';
 import { createDeezerCatalog, trackArtists } from '../core/catalog';
 import type { CatalogProvider } from '../core/catalog';
+import type { ShareTarget } from '../core/share';
 import { primeHitScores, soulseekLadder, soulseekQueryFor, sourcesForTrack, unifyResults } from '../core/unify';
 import type {
   AlbumPageData,
@@ -267,6 +268,8 @@ interface AppState {
   trackForHit: (hit: SearchHit) => CatalogTrack | null;
   /** Plays tracks similar to an artist's ("Radio <artist>"). */
   playArtistRadio: (artistId: string, name: string) => Promise<void>;
+  /** A track someone shared (see `core/share.ts`): play it, or search for it. */
+  openShared: (target: ShareTarget) => Promise<void>;
 }
 
 let service: StreamingService | null = null;
@@ -2184,6 +2187,31 @@ export const useAppStore = create<AppState>((set, get) => {
       } catch (error) {
         set({ notice: errorMessage(error) });
       }
+    },
+
+    openShared: async target => {
+      set({ sheet: null, pages: [] });
+
+      if (target.kind === 'track' && get().settings.catalogEnabled) {
+        try {
+          const track = await catalog.track(target.id);
+          fullTracks.set(track.id, track);
+          set({ notice: `Lien reçu : « ${track.title} »` });
+          await get().playCatalogTrack(track);
+          return;
+        } catch (error) {
+          debugLog('app', `lien partagé : ${errorMessage(error)}`);
+        }
+      }
+
+      if (!target.query) {
+        set({ notice: 'Impossible d’ouvrir ce lien : activez le catalogue en ligne dans les Réglages.' });
+        return;
+      }
+
+      set({ playerOpen: false });
+      get().setTab('search');
+      await get().runSearch(target.query);
     },
 
     importTracks: async () => {

@@ -52,6 +52,8 @@ src/core/            pure TypeScript, no React Native imports, unit-tested in No
   catalog.ts         CatalogProvider interface + Deezer provider (throttled, cached)
   catalogTypes.ts    catalog entities and store contract (tracks, artists, albums, pages)
   unify.ts           match Soulseek files to catalog tracks (title, artist, duration)
+  share.ts           shared track links (soulstream://, Deezer URLs); MainActivity
+                     turns text shared to the app into a link
   types.ts           SearchHit, MP3-only policy, path parsing
 src/services/        streaming orchestration, settings + Keychain, track cache, library, debug log
 src/stream/          local HTTP Range proxy for the native player

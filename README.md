@@ -91,7 +91,12 @@ cd android && ./gradlew assembleRelease --no-daemon && cd ..
   - Lecteur : tirer vers le bas pour le refermer, glisser la pochette pour
     changer de titre, aléatoire, répétition, file d'attente, sources.
   - Menu ⋮ (ou appui long) sur un titre : liker, lire ensuite, ajouter à la
-    file, voir les sources, rechercher l'artiste.
+    file, voir les sources, rechercher l'artiste, partager.
+- **Partager un titre** : « Partager » envoie un message avec un lien
+  `soulstream://track/…` et la page Deezer du titre. Chez un ami qui a
+  SoulStream, toucher le lien (si sa messagerie le rend cliquable) ou
+  partager le message vers SoulStream ouvre l'application et lance le
+  titre. Un titre hors catalogue est partagé comme une recherche.
 - **Recherche sans lecture automatique** : la liste des titres se remplit à
   mesure que les pairs répondent (meilleur résultat en tête, pastille verte
   si un slot est libre, orange si file d'attente) ; rien ne joue tant que
