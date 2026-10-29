@@ -91,9 +91,13 @@ export function useTrackInfo(hit: SearchHit | null | undefined): TrackInfo {
   };
 }
 
-/** Best cover URL for big surfaces (player backdrop). */
-export function largeCoverUri(info: TrackInfo): string | null {
-  return pickArtwork(info.artwork, 1000) ?? info.coverUri;
+/**
+ * Cover for the blurred player backdrop. Android blurs the decoded bitmap in
+ * software: a 250 px cover looks the same once blurred and costs ~16× fewer
+ * pixels than the 1000 px one (noticeable on low-end phones).
+ */
+export function backdropCoverUri(info: Pick<TrackInfo, 'artwork' | 'coverUri'>): string | null {
+  return pickArtwork(info.artwork, 250) ?? info.coverUri;
 }
 
 /** Whether the store holds this hit's song in the liked tracks. */

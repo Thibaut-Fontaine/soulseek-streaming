@@ -571,4 +571,47 @@ describe('connections peers ask us to open (ConnectToPeer)', () => {
     expect(connects.filter(host => host.startsWith('10.0.0.'))).toHaveLength(12);
     expect(connects).toContain('10.0.1.1');
   });
+
+  test('a storm of P requests past the cap costs no server writes and no journal line each', () => {
+    const hanging: import('../src/transport/types').Transport = {
+      connect: async () => new Promise<never>(() => {}),
+      listen: async () => ({ port: 0, close: () => {} }),
+    };
+    const client = new SoulseekClient({
+      transport: hanging,
+      username: 'test-user',
+      password: 'test-pass',
+      listenPort: 0,
+      serverHost: '127.0.0.1',
+      serverPort: 1,
+    });
+    const writes: Uint8Array[] = [];
+    const internals = client as unknown as {
+      serverSocket: { write(data: Uint8Array): void };
+      handleServerFrame(code: number, payload: Uint8Array): void;
+    };
+    internals.serverSocket = { write: data => writes.push(data) };
+    const logs: string[] = [];
+    client.on('log', message => logs.push(message));
+
+    // A popular title: thousands of peers holding it ask us to connect (we
+    // are behind NAT). Seen on the real network: ~9,500 in two minutes.
+    for (let i = 0; i < 500; i++) {
+      const payload = new ByteWriter()
+        .string(`peer${i}`)
+        .string('P')
+        .u32(0x0a000001 + i)
+        .u32(2234)
+        .u32(i)
+        .bool(false)
+        .u32(0)
+        .u32(0)
+        .toBytes();
+      internals.handleServerFrame(18, payload);
+    }
+
+    expect(writes).toHaveLength(0);
+    expect(logs.length).toBeLessThanOrEqual(13);
+  });
 });
+

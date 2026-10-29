@@ -16,6 +16,10 @@ Seen on the emulator (fake network and real Soulseek, test account
 - A transfer waiting for the peer's TransferRequest fails 5 s after its P
   connection closes (`handlePeerSessionClosed`), although uploaders keep
   queued requests: keep waiting (or reconnect and re-send QueueUpload).
+- During a ConnectToPeer storm (popular title, audit #12) the 12-connection
+  cap can decline the P connection of an uploader we queued (it wants to
+  send TransferRequest): exempt users with a pending or queued transfer
+  from the cap in `acceptIndirectConnection`.
 - Two devices on one account kick each other: after RELOGGED, coming back
   to the foreground reconnects and logs the other device out.
 - "Réessayer" / `reconnect()` goes through `login()`, which stops a track
@@ -29,16 +33,18 @@ Code audit and fixes done (`docs/performance-audit.md`): search scoring
 (534 ms → 5.5 ms per update), chunked download writes, cover decoding,
 catalog request priority, dead-connection detection after sleep. Left:
 
-- Measure on a real phone/emulator: frame drops during a search and when a
-  download finishes (`adb shell dumpsys gfxinfo com.soulstream.app`), time
-  to first sound.
+- Get the low-end Redmi's journal on 1.3-beta15 (Réglages → Journal de
+  débogage → Partager, after a day of normal use): `perf` lines show each
+  JS-thread stall ≥ 300 ms with the tab and what was loading. Fix what it
+  points at; still-open emulator hint: stalls on Accueil at start-up.
 - Background: screen off 5+ minutes without playback, then search; Wi-Fi →
   mobile data while playing. Check the app reconnects on its own.
 - Done since: search scoring in 8 ms slices, catalog-only search (Soulseek
   searched on play), native base64 for audio bytes, 64 MB stream cap and
-  copy-free cache writes, exit-reason diagnostics. After a crash or freeze,
-  read Réglages → Journal de débogage. If tracks still stutter when they
-  start on modest phones: native (Kotlin) data path (see the audit).
+  copy-free cache writes, exit-reason diagnostics; 1.3-beta15 low-end run
+  (audit rows 12–18: ConnectToPeer storm, player redraws, kept tabs,
+  virtualized library, small backdrop blur, R8). If tracks still stutter
+  when they start on modest phones: native (Kotlin) data path (see the audit).
 
 ## 3. Optional pre-download of the next track (setting, off by default)
 
@@ -54,7 +60,9 @@ next track's *sources* are looked up in advance (one Soulseek search,
 - Respect the existing limits: one transfer at a time per peer, cache size,
   Wi-Fi-only option, cancel the pre-download when the user skips elsewhere.
 - Decide whether the automatic source lookup for the next track should also
-  move behind this setting.
+  move behind this setting. Its title-only fallback query (e.g. "crusade")
+  caused ~9,500 peer connection requests in two minutes on the real
+  network (audit #12); at least skip that step for look-ahead searches.
 
 ## 4. One Soulseek search per album
 

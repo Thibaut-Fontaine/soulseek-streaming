@@ -5,31 +5,27 @@ import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-cont
 
 import { parseShareLink } from './src/core/share';
 import { debugLog } from './src/services/debugLog';
+import { startStallWatcher } from './src/services/stallWatcher';
 import { useAppStore } from './src/state/store';
 import { IconButton } from './src/ui/components';
 import { Banners } from './src/ui/Banners';
 import { ErrorBoundary } from './src/ui/ErrorBoundary';
-import { HomeScreen } from './src/ui/HomeScreen';
-import { LibraryScreen } from './src/ui/LibraryScreen';
 import { LoginScreen } from './src/ui/LoginScreen';
 import { MiniPlayer } from './src/ui/MiniPlayer';
 import { PageHost } from './src/ui/pages';
 import { PlayerSheet } from './src/ui/PlayerScreen';
-import { SearchScreen } from './src/ui/SearchScreen';
 import { SettingsScreen } from './src/ui/SettingsScreen';
 import { SheetHost } from './src/ui/Sheets';
 import { TabBar } from './src/ui/TabBar';
+import { TabHost, type TabResets } from './src/ui/TabHost';
 import { AppLogo } from './src/ui/track';
 import { colors, spacing, type } from './src/ui/theme';
 
-/** A JS-thread gap longer than this is written to the journal. */
-const STALL_LOG_MS = 1000;
-const STALL_TICK_MS = 250;
-
 /**
  * Journal lines to tell a dead UI apart (taps that do nothing): a tap that
- * reaches JS is logged, and so is any long stall of the JS thread. No tap
- * logged means something native caught it or JS was busy.
+ * reaches JS is logged, and so is any long stall of the JS thread
+ * (stallWatcher). No tap logged means something native caught it or JS was
+ * busy.
  */
 function logTouch(event: { nativeEvent: { pageX: number; pageY: number } }): boolean {
   debugLog('app', `toucher ${Math.round(event.nativeEvent.pageX)},${Math.round(event.nativeEvent.pageY)}`);
@@ -38,17 +34,30 @@ function logTouch(event: { nativeEvent: { pageX: number; pageY: number } }): boo
 
 function useStallWatchdog(): void {
   React.useEffect(() => {
-    let last = Date.now();
-    const timer = setInterval(() => {
-      const now = Date.now();
-      const gap = now - last - STALL_TICK_MS;
-      last = now;
-      // A gap while in the background is the OS pausing timers, not a stall.
-      if (gap > STALL_LOG_MS && AppState.currentState === 'active') {
-        debugLog('app', `fil JS bloqué ${gap} ms`);
+    const watcher = startStallWatcher({
+      isActive: () => AppState.currentState === 'active',
+      context: () => {
+        const state = useAppStore.getState();
+        return [
+          `onglet ${state.tab}`,
+          state.playerOpen ? 'lecteur ouvert' : '',
+          state.current ? `titre ${state.current.phase}` : '',
+          state.searching ? 'recherche' : '',
+        ]
+          .filter(Boolean)
+          .join(', ');
+      },
+    });
+    // Timers pause in the background: the time away is not a stall.
+    const subscription = AppState.addEventListener('change', next => {
+      if (next === 'active') {
+        watcher.reset();
       }
-    }, STALL_TICK_MS);
-    return () => clearInterval(timer);
+    });
+    return () => {
+      subscription.remove();
+      watcher.stop();
+    };
   }, []);
 }
 
@@ -124,13 +133,18 @@ function Root() {
     closeAllPages();
   }, [tab, closeAllPages]);
 
-  // Tapping a tab, even the current one, goes back to its root.
+  // Tapping a tab, even the current one, goes back to its root: the tab
+  // already shown is rebuilt (other tabs stay as they were left).
+  const [resets, setResets] = React.useState<TabResets>({ home: 0, search: 0, library: 0 });
   const changeTab = React.useCallback(
     (next: typeof tab) => {
       closeAllPages();
+      if (next === tab && next !== 'settings') {
+        setResets(current => ({ ...current, [next]: current[next] + 1 }));
+      }
       setTab(next);
     },
-    [closeAllPages, setTab],
+    [closeAllPages, setTab, tab],
   );
 
   // Android back: close the sheet, then the player, then the top page, then
@@ -200,18 +214,8 @@ function Root() {
               fill up to the top edge of the screen, like the full player. */}
           <View style={[styles.content, { paddingTop: tab === 'home' ? 0 : insets.top }]}>
             {tab === 'home' ? null : <Banners />}
-            {tab === 'home' ? (
-              <>
-                <HomeScreen />
-                <View style={[styles.overlayBanners, { top: insets.top }]} pointerEvents="box-none">
-                  <Banners />
-                </View>
-              </>
-            ) : tab === 'search' ? (
-              <SearchScreen />
-            ) : tab === 'library' ? (
-              <LibraryScreen />
-            ) : (
+            <TabHost tab={tab} resets={resets} />
+            {tab === 'settings' ? (
               <>
                 <View style={styles.settingsBar}>
                   <IconButton icon="left" accessibilityLabel="Retour" onPress={() => setTab('home')} />
@@ -221,7 +225,7 @@ function Root() {
                 </View>
                 <SettingsScreen />
               </>
-            )}
+            ) : null}
           </View>
           <PageHost />
         </View>
@@ -272,11 +276,6 @@ const styles = StyleSheet.create({
   },
   content: {
     flex: 1,
-  },
-  overlayBanners: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
   },
   dock: {
     backgroundColor: colors.bg,

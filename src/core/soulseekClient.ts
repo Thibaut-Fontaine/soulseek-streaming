@@ -861,11 +861,9 @@ export class SoulseekClient extends Emitter<SoulseekClientEvents> {
       }
 
       case ServerCode.CONNECT_TO_PEER: {
-        const request = parseConnectToPeer(payload);
-        this.log(
-          `[peer] ${request.username} demande une connexion ${request.connectionType} vers ${request.ipAddress}:${request.port} (token ${request.token})`,
-        );
-        void this.acceptIndirectConnection(request);
+        // Logged in acceptIndirectConnection, only for requests we act on: a
+        // popular title brings thousands of them (one per peer holding it).
+        void this.acceptIndirectConnection(parseConnectToPeer(payload));
         break;
       }
 
@@ -923,17 +921,18 @@ export class SoulseekClient extends Emitter<SoulseekClientEvents> {
     const isPeer = request.connectionType === ConnectionType.PEER;
 
     if (isPeer && this.indirectPeerConnects >= MAX_INDIRECT_PEER_CONNECTS) {
-      // One journal line per burst, not one per declined peer.
+      // One journal line per burst, not one per declined peer. No
+      // CantConnectToPeer reply either: the peer gives up on its own, and
+      // thousands of replies cost a bridge write each on the JS thread.
       if (this.declinedIndirectPeers++ === 0) {
         this.log(`[peer] trop de connexions en cours : demandes P suivantes refusées (${request.username}…)`);
       }
-      try {
-        this.sendServer(encodeCantConnectToPeer(request.token, request.username));
-      } catch {
-        // Ignore: the server connection may be gone.
-      }
       return;
     }
+
+    this.log(
+      `[peer] ${request.username} demande une connexion ${request.connectionType} vers ${request.ipAddress}:${request.port} (token ${request.token})`,
+    );
 
     if (isPeer) {
       this.indirectPeerConnects++;

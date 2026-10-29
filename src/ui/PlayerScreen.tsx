@@ -14,19 +14,18 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import TrackPlayer, { State, usePlaybackState, useProgress } from 'react-native-track-player';
 
-import type { TransferSnapshot } from '../core/transfer';
 import type { SearchHit } from '../core/types';
 import { useAppStore } from '../state/store';
 import { CoverBackdrop, Dot, IconButton, MarqueeText, StatusCard } from './components';
 import type { CardAction } from './components';
 import { ACTION_LABELS, SHARING_EXPLANATION, describePlaybackError } from './errors';
 import type { ErrorAction } from './errors';
-import { useByteRate } from './hooks';
+import { useByteRate, useCurrentTransfer, useReceivedRatio } from './hooks';
 import { Icon } from './Icon';
 import { QUEUE_WARN_POSITION, peerAvailability, sourceSummary } from './p2p';
 import { Scrubber, TransferSteps } from './peer';
-import { TrackCover, largeCoverUri, useIsLiked, useTrackInfo } from './track';
-import { colors, coverSeed, percent, radius, spacing, type } from './theme';
+import { TrackCover, backdropCoverUri, useIsLiked, useTrackInfo } from './track';
+import { colors, coverSeed, radius, spacing, type } from './theme';
 
 const SIDE = spacing.xl;
 const CLOSE_DISTANCE = 150;
@@ -82,9 +81,6 @@ export function PlayerSheet() {
 
 function PlayerContent({ translateY }: { translateY: Animated.Value }) {
   const current = useAppStore(state => state.current);
-  const transfer = useAppStore(state =>
-    state.current ? state.transfers[state.current.transferId] : undefined,
-  );
   const context = useAppStore(state => state.context);
   const catalogContext = useAppStore(state => state.catalogContext);
   const openPage = useAppStore(state => state.openPage);
@@ -107,15 +103,17 @@ function PlayerContent({ translateY }: { translateY: Animated.Value }) {
 
   const insets = useSafeAreaInsets();
   const { width, height } = useWindowDimensions();
-  const progress = useProgress(250);
   const playbackState = usePlaybackState();
-  const speed = useByteRate(transfer?.received ?? 0, transfer?.id);
+  // Only error and cut-source cards show it: no redraw on every download step.
+  const receivedRatio = useReceivedRatio(
+    current?.phase === 'error' || playbackState.state === State.Error || !!current?.warning,
+  );
   const info = useTrackInfo(current?.hit);
   const liked = useIsLiked(current?.hit);
   const artShift = React.useRef(new Animated.Value(0)).current;
 
-  const latest = React.useRef({ closePlayer, playNext, playPrevious, position: 0 });
-  latest.current = { closePlayer, playNext, playPrevious, position: progress.position };
+  const latest = React.useRef({ closePlayer, playNext, playPrevious });
+  latest.current = { closePlayer, playNext, playPrevious };
 
   const responder = React.useMemo(
     () =>
@@ -166,21 +164,15 @@ function PlayerContent({ translateY }: { translateY: Animated.Value }) {
   const preparing = current.phase === 'preparing';
   const hasError = current.phase === 'error' || state === State.Error;
 
-  const duration =
-    progress.duration && Number.isFinite(progress.duration) && progress.duration > 0
-      ? progress.duration
-      : hit.durationSec ?? 0;
-  const position = Number.isFinite(progress.position) ? progress.position : 0;
-  const total = transfer?.size || hit.size || 0;
-  const receivedRatio =
-    current.source === 'cache' || transfer?.state === 'complete' ? 1 : percent(transfer?.received ?? 0, total);
-
-  const seekTo = async (seconds: number) => {
+  // Read when tapped: the position is not kept in this component's state.
+  const previous = async () => {
+    let position = 0;
     try {
-      await TrackPlayer.seekTo(seconds);
+      position = (await TrackPlayer.getProgress()).position;
     } catch {
-      // The player reports failures through its state.
+      // Unknown position: go to the previous track.
     }
+    await playPrevious(Number.isFinite(position) ? position : 0);
   };
 
   const togglePlayback = async () => {
@@ -239,7 +231,7 @@ function PlayerContent({ translateY }: { translateY: Animated.Value }) {
 
   return (
     <View style={[styles.root, { paddingTop: insets.top + spacing.xs, paddingBottom: insets.bottom + spacing.md }]}>
-      <CoverBackdrop coverUri={largeCoverUri(info)} seed={coverSeed(hit)} />
+      <CoverBackdrop coverUri={backdropCoverUri(info)} seed={coverSeed(hit)} />
 
       <View {...responder.panHandlers}>
         <View style={styles.grabber} />
@@ -304,20 +296,13 @@ function PlayerContent({ translateY }: { translateY: Animated.Value }) {
         {preparing ? (
           <PreparingCard
             hit={hit}
-            transfer={transfer}
             bufferTarget={current.bufferTarget}
-            speed={speed}
             onCancel={stopPlayback}
             onOtherSource={() => void playNextSource()}
           />
         ) : (
           <View style={styles.scrubber}>
-            <Scrubber
-              position={position}
-              duration={duration}
-              receivedRatio={receivedRatio}
-              onSeek={seconds => void seekTo(seconds)}
-            />
+            <PlayerScrubber fallbackDuration={hit.durationSec ?? 0} />
           </View>
         )}
 
@@ -329,7 +314,7 @@ function PlayerContent({ translateY }: { translateY: Animated.Value }) {
             iconSize={30}
             size={52}
             accessibilityLabel="Précédent"
-            onPress={() => void playPrevious(position)}
+            onPress={() => void previous()}
           />
           <IconButton
             icon={preparing ? 'x' : playing ? 'pause' : 'play'}
@@ -370,8 +355,6 @@ function PlayerContent({ translateY }: { translateY: Animated.Value }) {
           <SourceChip
             hit={hit}
             fromDevice={current.source === 'cache'}
-            transfer={transfer}
-            speed={speed}
             onPress={() => openSheet({ kind: 'sources', hits: [hit], title: info.title })}
           />
           <IconButton
@@ -411,21 +394,50 @@ function Toggle({
   );
 }
 
+// The scrubber, the preparation card and the source chip follow values that
+// change several times a second (position, download progress, speed): each
+// subscribes on its own so the rest of the player does not redraw with them.
+
+function PlayerScrubber({ fallbackDuration }: { fallbackDuration: number }) {
+  const progress = useProgress(250);
+  const receivedRatio = useReceivedRatio();
+  const duration =
+    progress.duration && Number.isFinite(progress.duration) && progress.duration > 0
+      ? progress.duration
+      : fallbackDuration;
+  const position = Number.isFinite(progress.position) ? progress.position : 0;
+
+  const seekTo = async (seconds: number) => {
+    try {
+      await TrackPlayer.seekTo(seconds);
+    } catch {
+      // The player reports failures through its state.
+    }
+  };
+
+  return (
+    <Scrubber
+      position={position}
+      duration={duration}
+      receivedRatio={receivedRatio}
+      onSeek={seconds => void seekTo(seconds)}
+    />
+  );
+}
+
 function PreparingCard({
   hit,
-  transfer,
   bufferTarget,
-  speed,
   onCancel,
   onOtherSource,
 }: {
   hit: SearchHit;
-  transfer: TransferSnapshot | undefined;
   bufferTarget: number;
-  speed: number;
   onCancel: () => void;
   onOtherSource: () => void;
 }) {
+  const transfer = useCurrentTransfer();
+  const speed = useByteRate(transfer?.received ?? 0, transfer?.id);
   const queuePosition = transfer?.state === 'queued' ? transfer.queuePosition ?? 0 : 0;
 
   return (
@@ -455,16 +467,14 @@ function PreparingCard({
 function SourceChip({
   hit,
   fromDevice,
-  transfer,
-  speed,
   onPress,
 }: {
   hit: SearchHit;
   fromDevice: boolean;
-  transfer: TransferSnapshot | undefined;
-  speed: number;
   onPress: () => void;
 }) {
+  const transfer = useCurrentTransfer();
+  const speed = useByteRate(transfer?.received ?? 0, transfer?.id);
   const availability = peerAvailability(hit);
   const live = transfer?.state === 'streaming' ? speed : undefined;
 

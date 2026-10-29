@@ -49,6 +49,12 @@ export function SearchScreen() {
   // Hundreds of rows are slow to build on modest phones: show a first page.
   const [allFiles, setAllFiles] = React.useState(false);
   React.useEffect(() => setAllFiles(false), [searchQuery]);
+  // The tab stays mounted (TabHost): a new search, even started from another
+  // screen, starts at the top.
+  const scrollRef = React.useRef<ScrollView>(null);
+  React.useEffect(() => {
+    scrollRef.current?.scrollTo({ y: 0, animated: false });
+  }, [searchQuery]);
   const shownGroups = allFiles ? groups : groups.slice(0, FILES_SHOWN);
   const label = `Recherche « ${query.trim() || searchQuery} »`;
   const hasSearched = searchQuery.length > 0 || searching;
@@ -73,6 +79,7 @@ export function SearchScreen() {
 
   return (
     <ScrollView
+      ref={scrollRef}
       style={styles.container}
       contentContainerStyle={styles.content}
       keyboardShouldPersistTaps="handled"

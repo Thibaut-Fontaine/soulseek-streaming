@@ -126,7 +126,17 @@ afterEach(() => {
 });
 
 function text(renderer: ReactTestRenderer.ReactTestRenderer): string {
-  return JSON.stringify(renderer.toJSON());
+  // Lists (FlatList) pass circular objects down to their host views.
+  const seen = new WeakSet<object>();
+  return JSON.stringify(renderer.toJSON(), (_key, value) => {
+    if (typeof value === 'object' && value !== null) {
+      if (seen.has(value)) {
+        return undefined;
+      }
+      seen.add(value);
+    }
+    return value;
+  });
 }
 
 beforeEach(seed);
@@ -215,4 +225,67 @@ test('a title too long for its line scrolls, a short one stays still', () => {
   });
   expect(copies()).toBe(2);
   jest.useRealTimers();
+});
+
+test('a new search scrolls the kept search tab back to the top', () => {
+  const renderer = render(<SearchScreen />);
+  const { ScrollView } = require('react-native');
+  const scroll = renderer.root.findAllByType(ScrollView)[0].instance;
+  const scrollTo = jest.spyOn(scroll, 'scrollTo').mockImplementation(() => {});
+
+  act(() => {
+    useAppStore.setState({ searchQuery: 'm83' });
+  });
+
+  expect(scrollTo).toHaveBeenCalledWith({ y: 0, animated: false });
+});
+
+test('a long library list builds only the rows near the screen, and plays in order', () => {
+  const { TrackRow } = require('../src/ui/track');
+  const { FilterChip } = require('../src/ui/components');
+  const many = Array.from({ length: 150 }, (_, index) =>
+    savedTrack(hit(`Music\\Artist\\Album\\${String(index).padStart(3, '0')} - Song ${index}.mp3`)),
+  );
+  const playTrack = jest.fn(async () => {});
+  useAppStore.setState(state => ({ library: { ...state.library, history: many }, playTrack }));
+  const renderer = render(<LibraryScreen />);
+
+  const chip = renderer.root.findAllByType(FilterChip).find(item => item.props.label === 'Historique')!;
+  act(() => chip.props.onPress());
+
+  // TrackRow is a React.memo: the test tree holds its inner component.
+  const rows = renderer.root.findAll(node => node.type === TrackRow.type);
+  expect(rows.length).toBeGreaterThan(0);
+  expect(rows.length).toBeLessThan(150);
+
+  act(() => rows[3].props.onPress(rows[3].props.hit));
+  expect(playTrack).toHaveBeenCalledWith(
+    many[3].hit,
+    expect.objectContaining({ index: 3, label: 'Historique', items: many.map(track => track.hit) }),
+  );
+});
+
+test('the player backdrop blurs a small cover, not the 1000 px one', () => {
+  const { backdropCoverUri } = require('../src/ui/track');
+  const artwork = { small: 's.jpg', medium: 'm.jpg', big: 'b.jpg', large: 'l.jpg' };
+  expect(backdropCoverUri({ artwork, coverUri: null })).toBe('m.jpg');
+  expect(backdropCoverUri({ artwork: null, coverUri: 'data:image/jpeg;base64,AAAA' })).toBe(
+    'data:image/jpeg;base64,AAAA',
+  );
+});
+
+test('the library shows its overview again after the tab was left', () => {
+  const { FilterChip } = require('../src/ui/components');
+  useAppStore.setState({ tab: 'library' });
+  const renderer = render(<LibraryScreen />);
+  const overviewShown = () =>
+    renderer.root.findAll(node => (node.type as unknown) === 'Text' && node.props.children === 'Écoutés récemment').length > 0;
+  const chip = renderer.root.findAllByType(FilterChip).find(item => item.props.label === 'Sur l’appareil')!;
+  act(() => chip.props.onPress());
+  expect(overviewShown()).toBe(false);
+
+  act(() => useAppStore.setState({ tab: 'home' }));
+  act(() => useAppStore.setState({ tab: 'library' }));
+
+  expect(overviewShown()).toBe(true);
 });
