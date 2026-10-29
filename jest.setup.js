@@ -1,8 +1,8 @@
 /* global jest */
 // Keep debug logs silent in tests; a late transfer log otherwise runs after
-// Jest teardown and makes the process exit with code 1. The journal also logs
-// in release builds now (for `adb logcat`), so jest.after-env.js mutes the
-// console after Jest installs it.
+// Jest teardown and makes the process exit with code 1. The journal still logs
+// in release builds (for `adb logcat`); this flag only silences Jest.
+global.__JEST__ = true;
 global.__DEV__ = false;
 // Native modules have no implementation under Jest.
 jest.mock('@react-native-community/netinfo', () =>

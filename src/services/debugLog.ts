@@ -27,8 +27,11 @@ export function debugLog(tag: LogTag, message: string): void {
   }
 
   // Release builds too: `adb logcat -s ReactNativeJS` reads the journal from
-  // a phone over Wi-Fi debugging, without opening the journal screen.
-  console.log(`[${tag}]`, message);
+  // a phone over Wi-Fi debugging, without opening the journal screen. Jest
+  // sets __JEST__: a transfer that finishes after teardown must not log then.
+  if (!(globalThis as typeof globalThis & { __JEST__?: boolean }).__JEST__) {
+    console.log(`[${tag}]`, message);
+  }
 
   // Coalesce bursts (e.g. many search responses) into one UI update.
   if (!notifyScheduled && listeners.size > 0) {
