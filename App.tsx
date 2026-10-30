@@ -178,6 +178,8 @@ function Root() {
     const subscription = AppState.addEventListener('change', nextState => {
       if (nextState !== 'active') {
         backgroundSince.current ??= Date.now();
+        // Keep the resume point up to date even if the app is killed next.
+        void useAppStore.getState().flushPlaybackSession();
         return;
       }
 

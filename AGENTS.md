@@ -56,6 +56,7 @@ src/core/            pure TypeScript, no React Native imports, unit-tested in No
                      turns text shared to the app into a link
   types.ts           SearchHit, MP3-only policy, path parsing
 src/services/        streaming orchestration, settings + Keychain, track cache, library, debug log
+                     playback session persistence (resume after a crash or close)
 src/stream/          local HTTP Range proxy for the native player
 src/state/store.ts   zustand store: search, catalog, pages, playback, fallback, library
 src/ui/              screens, pages (artist/album), sheets, components, theme
