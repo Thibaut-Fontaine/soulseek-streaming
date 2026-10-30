@@ -1,4 +1,4 @@
-import { PermissionsAndroid, Platform } from 'react-native';
+import { AppState as RNAppState, PermissionsAndroid, Platform } from 'react-native';
 import TrackPlayer, { Event } from 'react-native-track-player';
 import { create } from 'zustand';
 import {
@@ -307,6 +307,42 @@ const fullTracks = new Map<string, CatalogTrack | null>();
 /** Tests replace the online catalog with recorded answers. */
 export function setCatalogProvider(provider: CatalogProvider): void {
   catalog = provider;
+}
+
+/**
+ * The app came back to the foreground: phone sockets are often dead after a
+ * sleep, and the state can still say "online". Check an online connection;
+ * otherwise skip the backoff and reconnect now. Nothing runs before a login.
+ */
+export function onAppForeground(): void {
+  const state = useAppStore.getState();
+
+  if (!state.username) {
+    return;
+  }
+
+  if (!service) {
+    void state.reconnect();
+    return;
+  }
+
+  if (state.connection === 'online') {
+    void state.checkConnection();
+    return;
+  }
+
+  service.reconnectNow();
+}
+
+/** Listens for foreground returns. Returns an unsubscribe function for tests. */
+export function watchAppState(): () => void {
+  const subscription = RNAppState.addEventListener('change', next => {
+    if (next === 'active') {
+      onAppForeground();
+    }
+  });
+
+  return () => subscription.remove();
 }
 
 /** Peers that refused us during this session, by lower-cased username. */
@@ -1554,6 +1590,10 @@ export const useAppStore = create<AppState>((set, get) => {
 
       initStarted = true;
 
+      // The phone may sleep for a long time: on return, verify or restore the
+      // Soulseek connection instead of waiting for a socket to time out.
+      watchAppState();
+
       try {
         const lastCrash = await takeLastCrash();
         if (lastCrash) {
@@ -1666,10 +1706,18 @@ export const useAppStore = create<AppState>((set, get) => {
         });
         return true;
       } catch (error) {
-        await instance.stop();
+        const refused = error instanceof LoginError;
+        // A network failure must leave the client alive: it backs off, the
+        // NetworkInfo listener and the foreground handler can reconnect it.
+        // Typed credentials on the login screen have no session to keep yet.
+        const keepClient = !refused && session !== 'new';
 
-        if (service === instance) {
-          service = null;
+        if (!keepClient) {
+          await instance.stop();
+
+          if (service === instance) {
+            service = null;
+          }
         }
 
         // Without network, stored credentials keep the user in the app (offline
@@ -1677,15 +1725,15 @@ export const useAppStore = create<AppState>((set, get) => {
         const keptUsername =
           session === 'keep'
             ? previousUsername
-            : session === 'saved' && !(error instanceof LoginError)
+            : session === 'saved' && !refused
               ? username
               : null;
 
         set({
           username: keptUsername,
-          connection: 'error',
+          connection: keepClient ? instance.state : 'error',
           connectionError: errorMessage(error),
-          loginRejection: error instanceof LoginError ? error.reason : null,
+          loginRejection: refused ? error.reason : null,
         });
 
         return false;
@@ -1736,7 +1784,7 @@ export const useAppStore = create<AppState>((set, get) => {
 
       // The client is already retrying: skip its backoff instead of tearing
       // everything down (that would stop the current track).
-      if (service && get().connection === 'reconnecting') {
+      if (service) {
         service.reconnectNow();
         return;
       }
