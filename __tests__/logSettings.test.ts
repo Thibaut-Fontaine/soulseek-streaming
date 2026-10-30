@@ -10,9 +10,13 @@ describe('remote log setting', () => {
   test('is off by default and survives a round trip', async () => {
     expect(DEFAULT_SETTINGS.logUploadEnabled).toBe(false);
     expect((await loadSettings()).logUploadEnabled).toBe(false);
+    expect(DEFAULT_SETTINGS.autoplayEnabled).toBe(false);
+    expect((await loadSettings()).autoplayEnabled).toBe(false);
 
-    await saveSettings({ ...DEFAULT_SETTINGS, logUploadEnabled: true });
-    expect((await loadSettings()).logUploadEnabled).toBe(true);
+    await saveSettings({ ...DEFAULT_SETTINGS, logUploadEnabled: true, autoplayEnabled: true });
+    const saved = await loadSettings();
+    expect(saved.logUploadEnabled).toBe(true);
+    expect(saved.autoplayEnabled).toBe(true);
   });
 
   test('a malformed stored value falls back to off', async () => {

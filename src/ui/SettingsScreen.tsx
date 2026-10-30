@@ -226,6 +226,20 @@ function MainSettings({
             />
           ) : null}
         </View>
+        <ListRow
+          icon="playNext"
+          title="Lecture automatique"
+          subtitle="Après une liste, enchaîne des titres proches via le catalogue. Désactivé par défaut."
+          last
+          right={
+            <Toggle
+              value={settings.autoplayEnabled}
+              onValueChange={value => toggle({ autoplayEnabled: value })}
+              disabled={!settings.catalogEnabled}
+              accessibilityLabel="Lecture automatique"
+            />
+          }
+        />
       </View>
 
       <Text style={styles.groupTitle}>Catalogue</Text>

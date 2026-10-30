@@ -26,6 +26,8 @@ export interface Settings {
    * default; anonymous installation id, no account or peer details.
    */
   logUploadEnabled: boolean;
+  /** Continue a finished list with catalog recommendations. Off by default. */
+  autoplayEnabled: boolean;
 }
 
 export interface Credentials {
@@ -44,6 +46,7 @@ export const DEFAULT_SETTINGS: Settings = {
   cacheMb: 1024,
   catalogEnabled: true,
   logUploadEnabled: false,
+  autoplayEnabled: false,
 };
 
 const SETTINGS_KEY = '@soulstream/settings/v1';
@@ -89,6 +92,10 @@ export async function loadSettings(): Promise<Settings> {
         typeof parsed.logUploadEnabled === 'boolean'
           ? parsed.logUploadEnabled
           : DEFAULT_SETTINGS.logUploadEnabled,
+      autoplayEnabled:
+        typeof parsed.autoplayEnabled === 'boolean'
+          ? parsed.autoplayEnabled
+          : DEFAULT_SETTINGS.autoplayEnabled,
     };
   } catch {
     return { ...DEFAULT_SETTINGS };

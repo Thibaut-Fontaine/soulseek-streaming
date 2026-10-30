@@ -23,6 +23,9 @@ import {
 import type { RankedHit } from '../core/search';
 import { createDeezerCatalog, trackArtists } from '../core/catalog';
 import type { CatalogProvider } from '../core/catalog';
+import { buildMusicMap } from '../core/musicMap';
+import { recommendTracks, recommendationKey } from '../core/autoplay';
+import type { MusicMap } from '../core/musicMap';
 import type { ShareTarget } from '../core/share';
 import { primeHitScores, soulseekLadder, soulseekQueryFor, sourcesForTrack, unifyResults } from '../core/unify';
 import type {
@@ -174,6 +177,8 @@ interface AppState {
   pages: Page[];
   artistPages: Record<string, Loadable<ArtistPageData>>;
   albumPages: Record<string, Loadable<AlbumPageData>>;
+  /** Music Map graphs, keyed by the artist id that seeds them. */
+  musicMaps: Record<string, Loadable<MusicMap>>;
   /**
    * Home content from the listening history only (recent artists and
    * artists like them); null when the catalog is off or nothing was played.
@@ -254,6 +259,8 @@ interface AppState {
   closeAllPages: () => void;
   loadArtistPage: (id: string, force?: boolean) => Promise<void>;
   loadAlbumPage: (id: string, force?: boolean) => Promise<void>;
+  /** Builds the Music Map of an artist (related artists, bounded). */
+  loadMusicMap: (id: string, force?: boolean) => Promise<void>;
   /** Builds `home` from the recently played artists; no-op when unchanged. */
   loadHome: (force?: boolean) => Promise<void>;
   /**
@@ -273,6 +280,11 @@ interface AppState {
   trackForHit: (hit: SearchHit) => CatalogTrack | null;
   /** Plays tracks similar to an artist's ("Radio <artist>"). */
   playArtistRadio: (artistId: string, name: string) => Promise<void>;
+  /**
+   * Appends and plays catalog recommendations after a list ends. No-op when
+   * the catalog is off or Soulseek is offline; stops cleanly when exhausted.
+   */
+  startAutoplay: (seed?: CatalogTrack) => Promise<void>;
   /** A track someone shared (see `core/share.ts`): play it, or search for it. */
   openShared: (target: ShareTarget) => Promise<void>;
 }
@@ -292,6 +304,9 @@ let searchAbort: AbortController | null = null;
 let catalogPlaySequence = 0;
 /** Recent artist ids the current `home` was built from. */
 let homeKey = '';
+/** Catalog tracks already offered by autoplay in this session. */
+const autoplaySeen = new Set<string>();
+let autoplayRunning = false;
 /** Source searches in flight, by catalog track id. */
 const resolving = new Map<string, Promise<Resolution>>();
 /** When each resolution was made, by catalog track id. */
@@ -1362,7 +1377,7 @@ export const useAppStore = create<AppState>((set, get) => {
   }
 
   async function loadPage<T>(
-    field: 'artistPages' | 'albumPages',
+    field: 'artistPages' | 'albumPages' | 'musicMaps',
     id: string,
     force: boolean,
     fetchPage: () => Promise<T>,
@@ -1508,6 +1523,7 @@ export const useAppStore = create<AppState>((set, get) => {
       cacheMb: 1024,
       catalogEnabled: true,
       logUploadEnabled: false,
+      autoplayEnabled: false,
     },
 
     username: null,
@@ -1545,6 +1561,7 @@ export const useAppStore = create<AppState>((set, get) => {
     pages: [],
     artistPages: {},
     albumPages: {},
+    musicMaps: {},
     home: null,
     resolutions: {},
     hitTracks: {},
@@ -1946,6 +1963,7 @@ export const useAppStore = create<AppState>((set, get) => {
     dismissNotice: () => set({ notice: null }),
 
     playTrack: async (hit, context) => {
+      autoplaySeen.clear();
       set({ context: context ?? null, catalogContext: null });
       await get().playHit(hit);
     },
@@ -1964,6 +1982,10 @@ export const useAppStore = create<AppState>((set, get) => {
       if (catalogContext) {
         const index = nextCatalogIndex(catalogContext);
         if (index === null) {
+          if (get().settings.autoplayEnabled) {
+            await get().startAutoplay(catalogContext.tracks[catalogContext.index]);
+            return;
+          }
           set({ notice: 'Fin de la liste de lecture.' });
           return;
         }
@@ -1985,6 +2007,15 @@ export const useAppStore = create<AppState>((set, get) => {
         const index = context.index + 1;
         set({ context: { ...context, index } });
         await get().playHit(context.items[index]);
+        return;
+      }
+
+      // A single track or a file list also ends with recommendations when the
+      // user opted in and the file is matched to a catalog track.
+      const current = get().current;
+      const currentTrack = current ? get().trackForHit(current.hit) : null;
+      if (currentTrack && get().settings.autoplayEnabled) {
+        await get().startAutoplay(currentTrack);
         return;
       }
 
@@ -2083,8 +2114,10 @@ export const useAppStore = create<AppState>((set, get) => {
       set(state => ({ pages: [...state.pages, page], playerOpen: false, sheet: null }));
       if (page.kind === 'artist') {
         void get().loadArtistPage(page.id);
-      } else {
+      } else if (page.kind === 'album') {
         void get().loadAlbumPage(page.id);
+      } else {
+        void get().loadMusicMap(page.id);
       }
     },
 
@@ -2100,6 +2133,8 @@ export const useAppStore = create<AppState>((set, get) => {
 
     loadArtistPage: (id, force = false) => loadPage('artistPages', id, force, () => catalog.artist(id)),
     loadAlbumPage: (id, force = false) => loadPage('albumPages', id, force, () => catalog.album(id)),
+    loadMusicMap: (id, force = false) =>
+      loadPage('musicMaps', id, force, () => buildMusicMap({ id }, catalog)),
     loadHome: async (force = false) => {
       const artists = get().settings.catalogEnabled ? recentArtists(get().library) : [];
 
@@ -2184,7 +2219,11 @@ export const useAppStore = create<AppState>((set, get) => {
       return promise;
     },
 
-    playCatalogTrack: (track, context) => playCatalog(track, context, 0, true),
+    playCatalogTrack: (track, context) => {
+      autoplaySeen.clear();
+      autoplaySeen.add(recommendationKey(track));
+      return playCatalog(track, context, 0, true);
+    },
 
     enqueueCatalogTrack: (track, first = false) => {
       set({ notice: 'Recherche de sources…' });
@@ -2201,6 +2240,79 @@ export const useAppStore = create<AppState>((set, get) => {
     },
 
     trackForHit: hit => get().hitTracks[hitKey(hit)] ?? null,
+
+    startAutoplay: async (seed?: CatalogTrack) => {
+      const context = get().catalogContext;
+      const current = get().current;
+      const source =
+        seed ??
+        (context ? context.tracks[context.index] : null) ??
+        (current ? get().trackForHit(current.hit) : null);
+
+      if (!source) {
+        set({ notice: 'Fin de la liste de lecture.' });
+        return;
+      }
+      if (!get().settings.catalogEnabled) {
+        set({ notice: 'Catalogue en ligne désactivé : pas de recommandations.' });
+        return;
+      }
+      if (get().connection !== 'online') {
+        set({ notice: 'Hors ligne : lecture automatique arrêtée.' });
+        return;
+      }
+      if (autoplayRunning) {
+        return;
+      }
+
+      autoplayRunning = true;
+      const sequence = catalogPlaySequence;
+
+      try {
+        const excluded = new Set(autoplaySeen);
+        excluded.add(recommendationKey(source));
+        const result = await recommendTracks(catalog, source, excluded, {
+          limit: 10,
+          maxRelatedArtists: 4,
+        });
+
+        // The user played something else while we asked the catalog.
+        if (sequence !== catalogPlaySequence) {
+          return;
+        }
+
+        if (result.tracks.length === 0) {
+          set({
+            notice:
+              result.reason === 'error'
+                ? 'Recommandations indisponibles.'
+                : 'Fin de la lecture automatique.',
+          });
+          return;
+        }
+
+        for (const track of result.tracks) {
+          autoplaySeen.add(recommendationKey(track));
+        }
+        // Bounded session memory: old entries stop protecting against repeats,
+        // which is fine after hundreds of tracks.
+        while (autoplaySeen.size > 300) {
+          const oldest = autoplaySeen.values().next().value;
+          if (oldest === undefined) {
+            break;
+          }
+          autoplaySeen.delete(oldest);
+        }
+
+        debugLog('play', `lecture automatique : ${result.tracks.length} recommandation(s)`);
+        await playCatalog(result.tracks[0], { label: 'Recommandations', tracks: result.tracks, index: 0 }, 0, false);
+      } catch (error) {
+        debugLog('play', `lecture automatique indisponible : ${errorMessage(error)}`);
+        set({ notice: 'Recommandations indisponibles.' });
+      } finally {
+        autoplayRunning = false;
+      }
+    },
 
     playArtistRadio: async (artistId, name) => {
       try {
