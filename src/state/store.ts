@@ -9,6 +9,7 @@ import {
   types,
 } from '@react-native-documents/picker';
 
+import { bufferTargetFor } from '../core/buffer';
 import { id3TagSize, parseId3 } from '../core/id3';
 import { LoginError } from '../core/soulseekClient';
 import type { ConnectionState } from '../core/soulseekClient';
@@ -373,16 +374,6 @@ const DENIED_PATTERN = /refus|denied|banned|not shared|ne partage/i;
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
-}
-
-function bufferTargetFor(size: number, bufferMb: number): number {
-  if (size <= 0) {
-    return 256 * 1024;
-  }
-
-  const cap = Math.max(256 * 1024, bufferMb * 1024 * 1024);
-  const proportional = Math.floor(size * 0.15);
-  return Math.min(size, Math.max(256 * 1024, Math.min(cap, proportional)));
 }
 
 function rememberTransfers(
@@ -1497,7 +1488,7 @@ export const useAppStore = create<AppState>((set, get) => {
       serverPort: 2242,
       listenPort: 22345,
       streamPort: 0,
-      bufferMb: 2,
+      bufferMb: 0.5,
       shareEnabled: true,
       shareWifiOnly: true,
       cacheMb: 1024,
