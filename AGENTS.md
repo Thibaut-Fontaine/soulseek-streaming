@@ -166,3 +166,4 @@ an accent-free copy when they have accents.
 | `docs/performance-audit.md` | Responsiveness audit: measurements, fixes, open checks |
 | `docs/peer-search-research.md` | How peers match queries; query problems and the query ladder |
 | `docs/library-import-research.md` | Importing a library from other music apps (parked) |
+| `docs/vps-apis.md` | VPS log ingest API, version manifest, deployment and update procedure |

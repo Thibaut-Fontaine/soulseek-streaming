@@ -1,0 +1,16 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "outDir": "dist",
+    "rootDir": "../..",
+    "module": "node16",
+    "moduleResolution": "node16",
+    "target": "es2022",
+    "allowImportingTsExtensions": false,
+    "skipLibCheck": true,
+    "types": ["node"]
+  },
+  "include": ["**/*.ts", "../../src/core/logPrivacy.ts"],
+  "exclude": ["**/*.test.ts", "dist"]
+}

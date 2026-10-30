@@ -5,6 +5,10 @@
 - `AGENTS.md` (imported above) is the source of truth, shared with other
   agents such as DeepSeek. Put project rules there, not here; keep this file
   for Claude-specific notes only.
+- VPS APIs and the app update manifest: read `docs/vps-apis.md`. The log
+  ingest endpoint is `https://thibautfontaine.space/logs/v1/logs`; the version
+  manifest is `https://thibautfontaine.space/api/app/version`. Server code is
+  on `main`; the app-side log uploader/updater is on `dev`.
 - Cloud sessions run `.claude/hooks/session-start.sh` (registered in
   `.claude/settings.json`) before starting: dependencies, Android SDK and the
   Maven mirror are ready, so `cd android && ./gradlew assembleRelease` works
