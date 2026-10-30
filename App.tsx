@@ -4,6 +4,7 @@ import LinearGradient from 'react-native-linear-gradient';
 import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { parseShareLink } from './src/core/share';
+import { startAndroidAuto } from './src/services/androidAuto';
 import { debugLog } from './src/services/debugLog';
 import { startStallWatcher } from './src/services/stallWatcher';
 import { useAppStore } from './src/state/store';
@@ -126,6 +127,10 @@ function Root() {
   React.useEffect(() => {
     void init();
   }, [init]);
+
+  // Android Auto browses a snapshot of the library and sends transport
+  // commands back through the same store actions as the in-app controls.
+  React.useEffect(() => startAndroidAuto(), []);
 
   // Artist/album pages belong to the tab they were opened from: switching
   // tab (from the bar or from code, e.g. "Rechercher « artiste »") clears them.
