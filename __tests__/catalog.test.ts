@@ -247,6 +247,15 @@ describe('matching Soulseek files to catalog tracks', () => {
     expect(Object.keys(hitTracks).length).toBe(3);
   });
 
+  test('sources for a track prefer a lighter file when the peers are equivalent', () => {
+    const hits = [
+      hit('a/Daft Punk - One More Time.mp3', { username: 'heavy', bitrate: 320 }),
+      hit('b/Daft Punk - One More Time.mp3', { username: 'light', bitrate: 128 }),
+    ];
+
+    expect(sourcesForTrack(album, hits).map(source => source.hit.username)).toEqual(['light', 'heavy']);
+  });
+
   test('sources for a track and the query sent to Soulseek', () => {
     const hits = [
       hit('x/Daft Punk - One More Time.mp3', { username: 'slow', slotFree: false, queueLength: 30 }),
