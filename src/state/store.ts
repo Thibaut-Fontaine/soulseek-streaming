@@ -1,4 +1,4 @@
-import { PermissionsAndroid, Platform } from 'react-native';
+import { AppState as RNAppState, PermissionsAndroid, Platform } from 'react-native';
 import TrackPlayer, { Event } from 'react-native-track-player';
 import { create } from 'zustand';
 import {
@@ -923,6 +923,10 @@ export const useAppStore = create<AppState>((set, get) => {
       if (get().current?.phase !== 'playing' || Date.now() - lastPlayStartedAt < 3000 || !(event.position > 0)) {
         return;
       }
+
+      // Journal whether the app was in the background (screen locked):
+      // next-track failures there are hard to reproduce.
+      debugLog('play', `fin du morceau, suivant (application ${RNAppState.currentState})`);
 
       if (get().repeat) {
         void TrackPlayer.seekTo(0)

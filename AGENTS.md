@@ -167,6 +167,12 @@ Each was a real bug; the commit body has the details.
   `1fbc99b`). Long work in ≤ 8 ms slices (`d6ab8ff`).
 - **Stall watcher**: timers pause in background, so reset it on resume or
   the time away is logged as a stall (`9a535d8`).
+- **JS timers fire in the background only while a headless task runs**
+  (React Native's `JavaTimerManager`): the track-player service
+  (`src/player/service.ts`) never resolves, or with the screen locked a
+  timed source search never ends and the next song never starts. Keep
+  `stopForegroundGracePeriod` longer than a slow next-track lookup: Android
+  12+ won't let the service return to the foreground from the background.
 - **"No source" is cached 5 min while moving through a list**, and a whole
   source lookup is capped at 9 s; a slow re-search with music stopped
   preceded a crash report (`6bb2ab1`).

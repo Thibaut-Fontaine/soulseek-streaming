@@ -14,7 +14,7 @@ installCrashHandler();
 
 AppRegistry.registerComponent(appName, () => App);
 
-// Runs in a separate JS context while audio plays in the background.
+// Headless task that keeps JS timers running in the background (see the file).
 TrackPlayer.registerPlaybackService(
   () => require('./src/player/service').playbackService,
 );

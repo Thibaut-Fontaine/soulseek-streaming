@@ -39,7 +39,11 @@ export function ensurePlayer(): Promise<void> {
       await TrackPlayer.updateOptions({
         android: {
           appKilledPlaybackBehavior: AppKilledPlaybackBehavior.ContinuePlayback,
-          stopForegroundGracePeriod: 10,
+          // Between two tracks the player is idle while the next one's
+          // sources are found and buffered. Past this grace the service
+          // leaves the foreground, and Android 12+ will not let it come back
+          // with the screen locked: cover a slow lookup with fallbacks.
+          stopForegroundGracePeriod: 60,
         },
         // Previous / play-pause / next, like other music apps. The native
         // queue holds one track: the store handles the skip buttons
