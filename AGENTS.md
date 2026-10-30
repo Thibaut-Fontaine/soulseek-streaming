@@ -56,7 +56,10 @@ src/core/            pure TypeScript, no React Native imports, unit-tested in No
                      turns text shared to the app into a link
   types.ts           SearchHit, MP3-only policy, path parsing
 src/services/        streaming orchestration, settings + Keychain, track cache, library, debug log
-                     playback session persistence (resume after a crash or close)
+                     playback session persistence (resume after a crash or close),
+                     update manifest check and APK verification
+src/state/updateStore.ts  update prompt state (check, download progress, install)
+server/version-api/  GET /api/app/version contract + fixture (not deployed by app releases)
 src/stream/          local HTTP Range proxy for the native player
 src/state/store.ts   zustand store: search, catalog, pages, playback, fallback, library
 src/ui/              screens, pages (artist/album), sheets, components, theme
@@ -115,6 +118,11 @@ an accent-free copy when they have accents.
   debug journals show a neutral "Pair". Réglages → Confidentialité reveals
   them. The network is not named in the interface; user-facing sentences live
   in `src/strings.ts`.
+- **Updates**: checked in the background from `GET /api/app/version` on the
+  VPS; only a strictly greater `versionCode` prompts. The APK link must be
+  HTTPS and the file's SHA-256 must match the manifest before the system
+  installer is opened (never a silent install). `server/version-api/` is a
+  contract and fixture, not deployed by app releases.
 - No other external service (analytics, LLM APIs, paid APIs) without an
   explicit decision from the owner.
 - UI stays simple, Spotify-like: one clear action per surface, mini player,
