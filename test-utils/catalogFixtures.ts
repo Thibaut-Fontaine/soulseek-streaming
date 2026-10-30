@@ -13,6 +13,7 @@ import type {
   HomeData,
   TrackGroup,
 } from '../src/core/catalogTypes';
+import type { MusicMap } from '../src/core/musicMap';
 import type { SearchHit } from '../src/core/types';
 
 export function art(name: string): Artwork {
@@ -160,6 +161,29 @@ export const ALBUM_PAGE: AlbumPageData = {
 export const HOME: HomeData = {
   artists: [DAFT_PUNK, JUSTICE],
   similar: [{ artist: DAFT_PUNK, related: [CASSIUS] }],
+};
+
+export const MUSIC_MAP: MusicMap = {
+  root: DAFT_PUNK,
+  nodes: [
+    { artist: DAFT_PUNK, parentId: null, depth: 0 },
+    { artist: JUSTICE, parentId: DAFT_PUNK.id, depth: 1 },
+    { artist: CASSIUS, parentId: DAFT_PUNK.id, depth: 1 },
+    { artist: { id: 'dz:99', name: 'Boys Noize', picture: art('boys-noize') }, parentId: JUSTICE.id, depth: 2 },
+  ],
+  edges: [
+    { from: DAFT_PUNK.id, to: JUSTICE.id },
+    { from: DAFT_PUNK.id, to: CASSIUS.id },
+    { from: JUSTICE.id, to: 'dz:99' },
+  ],
+  truncated: true,
+};
+
+export const EMPTY_MUSIC_MAP: MusicMap = {
+  root: DAFT_PUNK,
+  nodes: [{ artist: DAFT_PUNK, parentId: null, depth: 0 }],
+  edges: [],
+  truncated: false,
 };
 
 export function soulseekHit(filename: string, username = 'peer'): SearchHit {

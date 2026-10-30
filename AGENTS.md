@@ -52,6 +52,11 @@ src/core/            pure TypeScript, no React Native imports, unit-tested in No
   search.ts          query cleaning, bitrate preference, Levenshtein scoring, ranking of Soulseek hits
   catalog.ts         CatalogProvider interface + Deezer provider (throttled, cached)
   catalogTypes.ts    catalog entities and store contract (tracks, artists, albums, pages)
+  musicMap.ts        bounded related-artist graph for the Music Map page
+  autoplay.ts        catalog recommendations when a list ends (no repeats)
+  transcode.ts       pure smallest-source / 94 kbps policy (native encoder blocked)
+  autoBrowse.ts      Android Auto browse tree over library/device/cache
+  logPrivacy.ts      validation + redaction shared by the app and log server
   unify.ts           match Soulseek files to catalog tracks (title, artist, duration)
   share.ts           shared track links (soulstream://, Deezer URLs); MainActivity
                      turns text shared to the app into a link
@@ -66,6 +71,7 @@ src/state/store.ts   zustand store: search, catalog, pages, playback, fallback, 
 src/ui/              screens, pages (artist/album), sheets, components, theme
 src/player/          track-player setup and background service
 src/transport/       TCP transport: react-native-tcp-socket (app), node:net (tests)
+server/logs/         VPS-ready log ingest API (HTTP adapter, retention, file store)
 __tests__/           jest suites; fixtures/deezer/ holds recorded Deezer answers
 test-utils/          fake Soulseek server + peers (multiPeerNetwork), UI fixtures
 tools/               fake-network.ts (dev server), showcase.mjs, icon/ (app icon source
@@ -198,3 +204,6 @@ an accent-free copy when they have accents.
 | `docs/performance-audit.md` | Responsiveness audit: measurements, fixes, open checks |
 | `docs/peer-search-research.md` | How peers match queries; query problems and the query ladder |
 | `docs/library-import-research.md` | Importing a library from other music apps (parked) |
+| `docs/bitrate-transcode.md` | Smallest-source policy, 94 kbps encoder options and blocker |
+| `docs/android-auto.md` | Android Auto service, bridge, tests and DHU plan |
+| `server/logs/README.md` | Log ingest API, privacy contract and VPS steps |

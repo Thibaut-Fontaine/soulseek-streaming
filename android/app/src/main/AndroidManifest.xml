@@ -15,6 +15,19 @@
       android:usesCleartextTraffic="${usesCleartextTraffic}"
       android:networkSecurityConfig="@xml/network_security_config"
       android:supportsRtl="true">
+      <!-- Android Auto: media apps declare the media capability and expose a
+           MediaBrowserService (SoulStreamMediaService). -->
+      <meta-data
+        android:name="com.google.android.gms.car.application"
+        android:resource="@xml/automotive_app_desc" />
+      <service
+        android:name=".auto.SoulStreamMediaService"
+        android:exported="true"
+        android:label="@string/app_name">
+        <intent-filter>
+          <action android:name="android.media.browse.MediaBrowserService" />
+        </intent-filter>
+      </service>
       <activity
         android:name=".MainActivity"
         android:label="@string/app_name"

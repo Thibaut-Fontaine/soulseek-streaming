@@ -224,6 +224,20 @@ function MainSettings({
             />
           ) : null}
         </View>
+        <ListRow
+          icon="playNext"
+          title="Lecture automatique"
+          subtitle="Après une liste, enchaîne des titres proches via le catalogue. Désactivé par défaut."
+          last
+          right={
+            <Toggle
+              value={settings.autoplayEnabled}
+              onValueChange={value => toggle({ autoplayEnabled: value })}
+              disabled={!settings.catalogEnabled}
+              accessibilityLabel="Lecture automatique"
+            />
+          }
+        />
       </View>
 
       <Text style={styles.groupTitle}>Catalogue</Text>
@@ -249,12 +263,24 @@ function MainSettings({
           icon="user"
           title="Afficher les noms des pairs"
           subtitle="Masqués par défaut. Les noms des personnes qui envoient les fichiers apparaissent dans le lecteur, les sources et le journal partagé."
-          last
           right={
             <Toggle
               value={settings.showUploaders}
               onValueChange={value => toggle({ showUploaders: value })}
               accessibilityLabel="Afficher les noms des pairs"
+            />
+          }
+        />
+        <ListRow
+          icon="info"
+          title="Envoyer les journaux (anonyme)"
+          subtitle="Envoie les erreurs et étapes de lecture pour améliorer l’app. Identifiant anonyme ; ni compte, ni mot de passe, ni nom de pair, ni chemin de fichier. Désactivé par défaut."
+          last
+          right={
+            <Toggle
+              value={settings.logUploadEnabled}
+              onValueChange={value => toggle({ logUploadEnabled: value })}
+              accessibilityLabel="Envoyer les journaux (anonyme)"
             />
           }
         />

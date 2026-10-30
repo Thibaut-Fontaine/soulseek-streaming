@@ -20,6 +20,7 @@ class MainApplication : Application(), ReactApplication {
             PackageList(this).packages.apply {
               add(ExitInfoPackage())
               add(BuildInfoPackage())
+              add(AutoPackage())
             }
 
         override fun getJSMainModuleName(): String = "index"

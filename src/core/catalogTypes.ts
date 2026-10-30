@@ -133,7 +133,8 @@ export type Loadable<T> =
 /** Pages pushed above the tabs, like a navigation stack. */
 export type Page =
   | { kind: 'artist'; id: string; name?: string }
-  | { kind: 'album'; id: string; title?: string };
+  | { kind: 'album'; id: string; title?: string }
+  | { kind: 'map'; id: string; name?: string };
 
 /** A list of catalog tracks being played (album, top tracks, radio...). */
 export interface CatalogPlayContext {

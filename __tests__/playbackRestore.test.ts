@@ -144,6 +144,8 @@ async function withNetwork(peers: FakePeer[], run: (network: MultiPeerNetwork) =
       cacheMb: 1024,
       catalogEnabled: false,
       showUploaders: false,
+      logUploadEnabled: false,
+      autoplayEnabled: false,
     },
   });
 

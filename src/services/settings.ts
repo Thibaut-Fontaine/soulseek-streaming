@@ -26,6 +26,13 @@ export interface Settings {
    * uploader identities in the player, source lists and shared journals.
    */
   showUploaders: boolean;
+  /**
+   * Send the redacted debug journal to the SoulStream log service. Off by
+   * default; anonymous installation id, no account or peer details.
+   */
+  logUploadEnabled: boolean;
+  /** Continue a finished list with catalog recommendations. Off by default. */
+  autoplayEnabled: boolean;
 }
 
 export interface Credentials {
@@ -47,6 +54,8 @@ export const DEFAULT_SETTINGS: Settings = {
   cacheMb: 1024,
   catalogEnabled: true,
   showUploaders: false,
+  logUploadEnabled: false,
+  autoplayEnabled: false,
 };
 
 /**
@@ -122,6 +131,14 @@ export function settingsFromStored(value: unknown, options: { legacy?: boolean }
       typeof parsed.showUploaders === 'boolean'
         ? parsed.showUploaders
         : DEFAULT_SETTINGS.showUploaders,
+    logUploadEnabled:
+      typeof parsed.logUploadEnabled === 'boolean'
+        ? parsed.logUploadEnabled
+        : DEFAULT_SETTINGS.logUploadEnabled,
+    autoplayEnabled:
+      typeof parsed.autoplayEnabled === 'boolean'
+        ? parsed.autoplayEnabled
+        : DEFAULT_SETTINGS.autoplayEnabled,
   };
 }
 
