@@ -424,7 +424,7 @@ export const playbackLimits = {
 };
 
 /** Errors that mean "this peer will not send to us", worth remembering. */
-const DENIED_PATTERN = /refus|denied|banned|not shared|ne partage/i;
+const DENIED_PATTERN = /refus|denied|banned|not shared|ne partage|too many megabytes|quota|too many files/i;
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -1086,6 +1086,7 @@ export const useAppStore = create<AppState>((set, get) => {
     let fallback: CurrentPlayback['fallback'] = null;
     let lastError = 'Lecture impossible';
     let freshSearches = 0;
+    let fresh: SearchHit[] = [];
 
     await ensurePlayer();
     set({ playerReady: true });
@@ -1126,14 +1127,14 @@ export const useAppStore = create<AppState>((set, get) => {
 
         service?.cancelActive();
         fallback = { username: hit.username, reason: lastError };
-        hit = nextCandidate(first, tried);
+        hit = nextCandidate(first, tried, fresh);
 
         // Every source we knew failed: look for a peer that appeared since.
         // Only once, and only while an attempt is still allowed, so a dead
         // track ends with one clear error instead of an endless search loop.
         if (!hit && attempt < playbackLimits.maxAttempts && freshSearches < playbackLimits.freshSearches) {
           freshSearches++;
-          const fresh = await searchMoreSources(first);
+          fresh = await searchMoreSources(first);
 
           if (sequence !== playSequence) {
             return;

@@ -150,6 +150,25 @@ describe('automatic peer fallback', () => {
     );
   });
 
+  test('tries every peer found by the recovery search', async () => {
+    await withNetwork(
+      [
+        { username: 'denier', filename: TRACK, behavior: 'deny', avgSpeed: 5_000_000 },
+        // Both answer only the recovery search; the first also refuses.
+        { username: 'late-no', filename: TRACK, behavior: 'deny', skipSearches: 1 },
+        { username: 'late-ok', filename: TRACK, behavior: 'ok', skipSearches: 1, avgSpeed: 50_000 },
+      ],
+      async network => {
+        await searchAndPlay();
+        await waitFor(() => useAppStore.getState().current?.phase === 'playing');
+
+        expect(useAppStore.getState().current?.hit.username).toBe('late-ok');
+        expect(network.queueRequests).toEqual(['denier', 'late-no', 'late-ok']);
+        expect(network.searches.length).toBe(2);
+      },
+    );
+  });
+
   test('shows one final error, without retrying denied peers', async () => {
     await withNetwork(
       [
