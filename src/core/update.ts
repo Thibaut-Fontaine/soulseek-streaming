@@ -21,8 +21,8 @@ export interface AppVersionManifest {
 }
 
 const SHA256_PATTERN = /^[0-9a-f]{64}$/i;
-/** HTTPS with a host and an optional path; avoids relying on the URL polyfill. */
-const HTTPS_URL_PATTERN = /^https:\/\/[^\s/]+(?:\/[^\s]*)?$/i;
+/** Only the project's own APK host is trusted, even if the manifest is hostile. */
+const TRUSTED_APK_URL = /^https:\/\/(?:www\.)?thibautfontaine\.space(?::443)?\/[^\s]*$/i;
 
 function positiveInteger(value: unknown): value is number {
   return typeof value === 'number' && Number.isInteger(value) && value > 0;
@@ -30,7 +30,7 @@ function positiveInteger(value: unknown): value is number {
 
 /** Any malformed or non-HTTPS link is refused. */
 export function isTrustedApkUrl(value: string): boolean {
-  return HTTPS_URL_PATTERN.test(value.trim());
+  return TRUSTED_APK_URL.test(value.trim());
 }
 
 /**

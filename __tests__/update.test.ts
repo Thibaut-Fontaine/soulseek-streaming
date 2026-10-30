@@ -74,8 +74,10 @@ describe('version manifest', () => {
   });
 
   it('only trusts HTTPS download links', () => {
-    expect(isTrustedApkUrl('https://example.com/app.apk')).toBe(true);
-    expect(isTrustedApkUrl('http://example.com/app.apk')).toBe(false);
+    expect(isTrustedApkUrl('https://thibautfontaine.space/streaming/SoulStream.apk')).toBe(true);
+    expect(isTrustedApkUrl('https://www.thibautfontaine.space/streaming/SoulStream.apk')).toBe(true);
+    expect(isTrustedApkUrl('https://example.com/app.apk')).toBe(false);
+    expect(isTrustedApkUrl('http://thibautfontaine.space/app.apk')).toBe(false);
     expect(isTrustedApkUrl('file:///data/app.apk')).toBe(false);
   });
 
