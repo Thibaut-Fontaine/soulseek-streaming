@@ -16,7 +16,6 @@ import TrackPlayer, { State, usePlaybackState, useProgress } from 'react-native-
 
 import type { SearchHit } from '../core/types';
 import { useAppStore } from '../state/store';
-import { isUploaderLabel, redactUploaderNames, uploaderLabel } from '../strings';
 import { CoverBackdrop, Dot, IconButton, MarqueeText, StatusCard } from './components';
 import type { CardAction } from './components';
 import { ACTION_LABELS, SHARING_EXPLANATION, describePlaybackError } from './errors';
@@ -101,7 +100,6 @@ function PlayerContent({ translateY }: { translateY: Animated.Value }) {
   const reconnect = useAppStore(state => state.reconnect);
   const runSearch = useAppStore(state => state.runSearch);
   const setTab = useAppStore(state => state.setTab);
-  const showUploaders = useAppStore(state => state.settings.showUploaders);
 
   const insets = useSafeAreaInsets();
   const { width, height } = useWindowDimensions();
@@ -193,7 +191,7 @@ function PlayerContent({ translateY }: { translateY: Animated.Value }) {
   };
 
   const searchThisTrack = () => {
-    const text = [isUploaderLabel(info.artist) ? '' : info.artist, info.title].filter(Boolean).join(' ');
+    const text = [info.artist.startsWith('@') ? '' : info.artist, info.title].filter(Boolean).join(' ');
     closePlayer();
     setTab('search');
     void runSearch(text);
@@ -218,12 +216,12 @@ function PlayerContent({ translateY }: { translateY: Animated.Value }) {
     { label: 'Chercher ce titre', icon: 'search', onPress: searchThisTrack },
   ];
 
-  const failureMessage =
-    current.error ?? 'Le flux audio n’a pas pu être lu. Le pair a peut-être coupé la connexion.';
-  const shownFailureMessage = showUploaders
-    ? failureMessage
-    : redactUploaderNames(failureMessage, [hit.username]);
-  const failure = hasError ? describePlaybackError(shownFailureMessage, { receivedRatio }) : null;
+  const failure = hasError
+    ? describePlaybackError(
+        current.error ?? 'Le flux audio n’a pas pu être lu. Le pair a peut-être coupé la connexion.',
+        { receivedRatio },
+      )
+    : null;
 
   // Leave room for the controls on short screens.
   const artSize = Math.max(160, Math.min(width - SIDE * 2, height * 0.42, 420));
@@ -441,14 +439,12 @@ function PreparingCard({
   const transfer = useCurrentTransfer();
   const speed = useByteRate(transfer?.received ?? 0, transfer?.id);
   const queuePosition = transfer?.state === 'queued' ? transfer.queuePosition ?? 0 : 0;
-  const showUploader = useAppStore(state => state.settings.showUploaders);
-  const uploader = uploaderLabel(hit.username, showUploader);
 
   return (
     <>
       <StatusCard
         tone="accent"
-        title={`Préparation · ${uploader}`}
+        title={`Préparation · @${hit.username}`}
         leading={<ActivityIndicator size="small" color={colors.accent} />}
         actions={[{ label: 'Annuler', onPress: onCancel, icon: 'x' }]}
         style={styles.card}>
@@ -481,13 +477,11 @@ function SourceChip({
   const speed = useByteRate(transfer?.received ?? 0, transfer?.id);
   const availability = peerAvailability(hit);
   const live = transfer?.state === 'streaming' ? speed : undefined;
-  const showUploader = useAppStore(state => state.settings.showUploaders);
-  const uploader = uploaderLabel(hit.username, showUploader);
 
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel={fromDevice ? 'Lu depuis l’appareil' : showUploader ? `Source : ${hit.username}. Voir les sources` : 'Voir les sources'}
+      accessibilityLabel={fromDevice ? 'Lu depuis l’appareil' : `Source : ${hit.username}. Voir les sources`}
       onPress={onPress}
       style={({ pressed }) => [styles.chip, pressed && styles.pressed]}>
       {fromDevice ? (
@@ -496,7 +490,7 @@ function SourceChip({
         <Dot tone={availability === 'free' ? 'good' : availability === 'queued' ? 'warn' : 'bad'} />
       )}
       <Text style={styles.chipText} numberOfLines={1}>
-        {fromDevice ? `Sur l’appareil · ${sourceSummary(hit)}` : `${uploader} · ${sourceSummary(hit, live)}`}
+        {fromDevice ? `Sur l’appareil · ${sourceSummary(hit)}` : `@${hit.username} · ${sourceSummary(hit, live)}`}
       </Text>
     </Pressable>
   );

@@ -12,7 +12,7 @@ import { CatalogCredit, ForYouSections } from './ForYou';
 import { Button, Cover, EmptyState } from './components';
 import { Icon } from './Icon';
 import { AppLogo, DeviceMark, TrackCover, useIsCurrent, useTrackInfo } from './track';
-import { colors, gutter, radius, spacing, type } from './theme';
+import { colors, gutter, spacing, type } from './theme';
 
 /** Two columns; music lovers go through many albums, so show a good number. */
 const QUICK_COUNT = 10;
@@ -59,7 +59,6 @@ export function HomeScreen() {
   const insets = useSafeAreaInsets();
 
   const quick = React.useMemo(() => quickItems(history, catalogEnabled), [history, catalogEnabled]);
-  const mapArtist = catalogEnabled ? history[0]?.catalog?.artist ?? null : null;
   const tileAlbums = React.useMemo(
     () => new Set(quick.flatMap(item => (item.kind === 'album' ? [item.album.id] : []))),
     [quick],
@@ -129,25 +128,6 @@ export function HomeScreen() {
             ),
           )}
         </View>
-      ) : null}
-
-      {mapArtist ? (
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel={`Carte musicale de ${mapArtist.name}`}
-          onPress={() => openPage({ kind: 'map', id: mapArtist.id, name: mapArtist.name })}
-          style={({ pressed }) => [styles.mapCard, pressed && styles.pressed]}>
-          <View style={styles.mapCardIcon}>
-            <Icon name="peer" size={20} color={colors.accent} />
-          </View>
-          <View style={styles.mapCardText}>
-            <Text style={styles.mapCardTitle}>Carte musicale</Text>
-            <Text style={styles.mapCardBody} numberOfLines={1}>
-              {`Explorer les artistes proches de ${mapArtist.name}`}
-            </Text>
-          </View>
-          <Icon name="right" size={18} color={colors.textMuted} />
-        </Pressable>
       ) : null}
 
       {likedHits.length > 0 ? (
@@ -390,39 +370,6 @@ const styles = StyleSheet.create({
     flexWrap: 'wrap',
     gap: spacing.sm,
     paddingHorizontal: gutter,
-  },
-  mapCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.md,
-    marginHorizontal: gutter,
-    marginTop: spacing.lg,
-    padding: spacing.md,
-    borderRadius: radius.md,
-    backgroundColor: colors.surface,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.08)',
-  },
-  mapCardIcon: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: 'rgba(255,182,39,0.14)',
-  },
-  mapCardText: {
-    flex: 1,
-  },
-  mapCardTitle: {
-    color: colors.text,
-    fontSize: 14,
-    fontWeight: '800',
-  },
-  mapCardBody: {
-    ...type.bodySm,
-    color: colors.textMuted,
-    marginTop: 2,
   },
   quick: {
     width: '48.5%',

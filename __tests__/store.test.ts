@@ -45,9 +45,6 @@ async function withNetwork(peers: FakePeer[], run: (network: MultiPeerNetwork) =
       shareWifiOnly: true,
       cacheMb: 1024,
       catalogEnabled: false,
-      showUploaders: false,
-      logUploadEnabled: false,
-      autoplayEnabled: false,
     },
   });
 
@@ -239,9 +236,7 @@ describe('login without network', () => {
     expect(await useAppStore.getState().login('tester', 'secret', 'saved')).toBe(false);
 
     expect(useAppStore.getState().username).toBe('tester');
-    // The client stays alive and keeps retrying: the app must not need a
-    // restart when the network comes back.
-    expect(useAppStore.getState().connection).toBe('reconnecting');
+    expect(useAppStore.getState().connection).toBe('error');
   });
 
   test('credentials typed on the login screen stay there', async () => {

@@ -1,7 +1,5 @@
 import {
   AUTO_MATCH_SCORE,
-  availabilityScore,
-  bitratePreference,
   formatSearchQuery,
   levenshtein,
   pickBestMatch,
@@ -96,7 +94,7 @@ describe('best match selection', () => {
     ).toBeNull();
   });
 
-  test('prefers a free slot even when the other file is lighter', () => {
+  test('prefers a free slot and a higher bitrate', () => {
     const best = pickBestMatch('one more time', [
       hit('Daft Punk - One More Time.mp3', { bitrate: 128, slotFree: false }),
       hit('Daft Punk - One More Time.mp3', { bitrate: 320, slotFree: true }),
@@ -105,48 +103,6 @@ describe('best match selection', () => {
     expect(best).not.toBeNull();
     expect(best?.hit.bitrate).toBe(320);
     expect(best?.score).toBeGreaterThanOrEqual(AUTO_MATCH_SCORE);
-  });
-});
-
-describe('bitrate preference', () => {
-  const query = 'daft punk one more time';
-  const sameFile = 'Daft Punk - One More Time.mp3';
-
-  /** Same track, same peer: only the bitrate differs. */
-  function quality(bitrate?: number): SearchHit {
-    return hit(sameFile, { bitrate, slotFree: true, queueLength: 0, avgSpeed: 500_000 });
-  }
-
-  test('prefers lighter files when everything else is equal', () => {
-    const ranked = rankHits(query, [quality(320), quality(192), quality(128)]);
-
-    expect(ranked.map(source => source.hit.bitrate)).toEqual([128, 192, 320]);
-  });
-
-  test('24 and 96 kbps files beat 192 and 320 kbps ones', () => {
-    const ranked = rankHits(query, [quality(320), quality(192), quality(96), quality(24)]);
-
-    expect(ranked.slice(0, 2).map(source => source.hit.bitrate).sort((a, b) => a! - b!)).toEqual([24, 96]);
-  });
-
-  test('an unknown bitrate stays usable and beats a heavy file', () => {
-    const unknown = quality(undefined);
-
-    expect(bitratePreference(undefined)).toBeGreaterThan(bitratePreference(320));
-    expect(availabilityScore(unknown)).toBeGreaterThan(availabilityScore(quality(320)));
-    expect(rankHits(query, [quality(320), unknown]).map(source => source.hit.bitrate)).toEqual([
-      undefined,
-      320,
-    ]);
-  });
-
-  test('a 320 kbps file remains playable when it is the only source', () => {
-    const only = quality(320);
-    const ranked = rankHits(query, [only]);
-
-    expect(ranked).toHaveLength(1);
-    expect(ranked[0].hit).toBe(only);
-    expect(ranked[0].score).toBeGreaterThanOrEqual(AUTO_MATCH_SCORE);
   });
 });
 

@@ -411,49 +411,16 @@ function computeMatchScore(query: string, hit: SearchHit): number {
 }
 
 /**
- * How much a bitrate is wanted, in [0, 1].
- *
- * Phones play MP3s on small speakers and limited bandwidth: a 128 kbps file
- * starts faster and takes a third of the space of a 320 kbps one, for a
- * difference most listeners do not hear. Among otherwise equivalent sources
- * SoulStream therefore prefers the lightest practical file. A heavy file is
- * never rejected: it stays a source when nothing else is available.
- */
-export function bitratePreference(bitrate?: number): number {
-  if (!bitrate || !Number.isFinite(bitrate) || bitrate <= 0) {
-    // Unknown is neutral: not a reason to prefer or punish a peer.
-    return 0.5;
-  }
-
-  if (bitrate <= 128) {
-    return 1;
-  }
-
-  if (bitrate <= 160) {
-    return 0.8;
-  }
-
-  if (bitrate <= 192) {
-    return 0.6;
-  }
-
-  if (bitrate <= 256) {
-    return 0.4;
-  }
-
-  return 0.2;
-}
-
-/**
  * How likely a peer is to deliver the file quickly, in [0, 1]: a free upload
- * slot matters most, then a short queue, then speed and a light bitrate.
+ * slot matters most, then a short queue, then speed and bitrate.
  */
 export function availabilityScore(hit: SearchHit): number {
   const slot = hit.slotFree ? 1 : 0;
   const queue = 1 - Math.min(1, Math.max(0, hit.queueLength) / 20);
   // avgSpeed is bytes/s; 1 MB/s or more counts as full speed.
   const speed = Math.min(1, Math.log10(1 + Math.max(0, hit.avgSpeed) / 10_000) / 2);
-  return 0.45 * slot + 0.25 * queue + 0.2 * speed + 0.1 * bitratePreference(hit.bitrate);
+  const bitrate = Math.min(1, (hit.bitrate ?? 128) / 320);
+  return 0.45 * slot + 0.25 * queue + 0.2 * speed + 0.1 * bitrate;
 }
 
 /** Kept for compatibility: text match plus small quality nudges. */
@@ -468,9 +435,11 @@ export function scoreHit(query: string, hit: SearchHit): number {
     score += 0.02;
   }
 
-  // Same preference as `availabilityScore`: lighter files are a nudge, never
-  // a filter, so a lone 320 kbps source still matches.
-  score += 0.02 * bitratePreference(hit.bitrate);
+  if ((hit.bitrate ?? 0) >= 320) {
+    score += 0.03;
+  } else if ((hit.bitrate ?? 0) >= 192) {
+    score += 0.01;
+  }
 
   return Math.min(1, score);
 }

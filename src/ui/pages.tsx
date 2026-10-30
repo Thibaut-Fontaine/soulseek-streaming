@@ -17,7 +17,6 @@ import type {
   Loadable,
   Page,
 } from '../core/catalogTypes';
-import type { MusicMap } from '../core/musicMap';
 import { useAppStore } from '../state/store';
 import {
   AlbumCard,
@@ -42,7 +41,7 @@ import {
   trackArtists,
 } from './catalogFormat';
 import { Banners } from './Banners';
-import { Button, Cover, CoverBackdrop, EmptyState, IconButton, Skeleton, StatusCard, TrackGradient } from './components';
+import { Button, Cover, CoverBackdrop, IconButton, Skeleton, StatusCard, TrackGradient } from './components';
 import { colors, gutter, spacing, type } from './theme';
 
 const TOP_TRACKS = 5;
@@ -79,10 +78,8 @@ export function PageHost() {
 function PageView({ page }: { page: Page }) {
   return page.kind === 'artist' ? (
     <ArtistPage id={page.id} name={page.name} />
-  ) : page.kind === 'album' ? (
-    <AlbumPage id={page.id} title={page.title} />
   ) : (
-    <MusicMapPage id={page.id} name={page.name} />
+    <AlbumPage id={page.id} title={page.title} />
   );
 }
 
@@ -362,124 +359,6 @@ function ArtistContent({ data, heroHeight }: { data: ArtistPageData; heroHeight:
 const HERO_SHADE = ['rgba(11,10,15,0)', colors.bg];
 
 // ---------------------------------------------------------------------------
-// Music Map
-
-const MAP_HERO = 220;
-
-export function MusicMapPage({ id, name }: { id: string; name?: string }) {
-  const loadMusicMap = useAppStore(state => state.loadMusicMap);
-  const musicMaps = useAppStore(state => state.musicMaps);
-  const { entry, retry } = usePageData(key => musicMaps[key], loadMusicMap, id);
-  const insets = useSafeAreaInsets();
-  const title = entry?.status === 'ready' ? entry.data.root.name : name ?? 'Carte musicale';
-
-  return (
-    <PageScaffold title={title} heroHeight={MAP_HERO + insets.top}>
-      {entry?.status === 'ready' ? (
-        <MusicMapContent data={entry.data} />
-      ) : (
-        <>
-          <View style={[styles.mapHero, { paddingTop: insets.top + HEADER_HEIGHT }]}>
-            <TrackGradient seed={id} />
-            <Text style={styles.mapEyebrow}>Carte musicale</Text>
-            <Text style={styles.mapName} numberOfLines={2}>
-              {name ?? ''}
-            </Text>
-          </View>
-          {entry?.status === 'error' ? (
-            <PageError title="Impossible de charger la carte" error={entry.error} onRetry={retry} />
-          ) : (
-            <View accessibilityLabel="Chargement…">
-              <ShelfSkeleton />
-            </View>
-          )}
-        </>
-      )}
-    </PageScaffold>
-  );
-}
-
-function MusicMapContent({ data }: { data: MusicMap }) {
-  const playArtistRadio = useAppStore(state => state.playArtistRadio);
-  const { openArtist } = useOpeners();
-  const insets = useSafeAreaInsets();
-  const { root, nodes, edges, truncated } = data;
-  const firstRing = React.useMemo(() => nodes.filter(node => node.depth === 1), [nodes]);
-  const childrenOf = React.useMemo(() => {
-    const map = new Map<string, MusicMap['nodes']>();
-    for (const node of nodes) {
-      if (node.depth === 2 && node.parentId) {
-        map.set(node.parentId, [...(map.get(node.parentId) ?? []), node]);
-      }
-    }
-    return map;
-  }, [nodes]);
-
-  return (
-    <>
-      <View style={[styles.mapHero, { paddingTop: insets.top + HEADER_HEIGHT }]}>
-        <TrackGradient seed={root.id} />
-        <Text style={styles.mapEyebrow}>Carte musicale</Text>
-        <Text style={styles.mapName} numberOfLines={2} accessibilityRole="header">
-          {root.name}
-        </Text>
-        <Text style={styles.mapSubtitle}>
-          {firstRing.length > 0
-            ? `${firstRing.length} artiste${firstRing.length > 1 ? 's' : ''} relié${firstRing.length > 1 ? 's' : ''} · ${edges.length} lien${edges.length > 1 ? 's' : ''}`
-            : 'Aucun artiste relié pour l’instant'}
-        </Text>
-        <View style={styles.mapActions}>
-          <Button
-            label="Écouter la carte"
-            icon="wave"
-            size="sm"
-            onPress={() => void playArtistRadio(root.id, root.name)}
-          />
-          <Button
-            label="Ouvrir l’artiste"
-            variant="ghost"
-            size="sm"
-            onPress={() => openArtist(root)}
-          />
-        </View>
-      </View>
-
-      {firstRing.length === 0 ? (
-        <EmptyState
-          icon="peer"
-          title="Pas encore de liens"
-          body="Le catalogue ne connaît pas d’artiste proche de celui-ci. La carte s’enrichira avec d’autres artistes.">
-          <Button label="Ouvrir l’artiste" icon="user" onPress={() => openArtist(root)} style={styles.mapEmptyButton} />
-        </EmptyState>
-      ) : (
-        <>
-          <Shelf title={`Autour de ${root.name}`}>
-            {firstRing.map(node => (
-              <ArtistCard key={node.artist.id} artist={node.artist} onPress={openArtist} />
-            ))}
-          </Shelf>
-
-          {firstRing.map(node => {
-            const children = childrenOf.get(node.artist.id) ?? [];
-            return children.length === 0 ? null : (
-              <Shelf key={`children:${node.artist.id}`} title={`Comme ${node.artist.name}`}>
-                {children.map(child => (
-                  <ArtistCard key={child.artist.id} artist={child.artist} onPress={openArtist} />
-                ))}
-              </Shelf>
-            );
-          })}
-
-          {truncated ? (
-            <Text style={styles.mapNote}>Carte limitée pour rester rapide : ouvrez un artiste pour continuer.</Text>
-          ) : null}
-        </>
-      )}
-    </>
-  );
-}
-
-// ---------------------------------------------------------------------------
 // Album
 
 const ALBUM_COVER = 220;
@@ -683,44 +562,6 @@ const styles = StyleSheet.create({
     textShadowColor: 'rgba(0,0,0,0.4)',
     textShadowOffset: { width: 0, height: 2 },
     textShadowRadius: 16,
-  },
-  mapHero: {
-    minHeight: MAP_HERO,
-    justifyContent: 'flex-end',
-    paddingHorizontal: gutter,
-    paddingBottom: spacing.lg,
-    overflow: 'hidden',
-    backgroundColor: colors.surface,
-  },
-  mapEyebrow: {
-    ...type.eyebrow,
-    color: colors.accent,
-  },
-  mapName: {
-    ...type.display,
-    fontSize: 40,
-    lineHeight: 44,
-    color: colors.text,
-  },
-  mapSubtitle: {
-    ...type.bodySm,
-    color: colors.textMuted,
-    marginTop: spacing.xs,
-  },
-  mapActions: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: spacing.sm,
-    marginTop: spacing.md,
-  },
-  mapEmptyButton: {
-    marginTop: spacing.lg,
-  },
-  mapNote: {
-    ...type.caption,
-    color: colors.textMuted,
-    paddingHorizontal: gutter,
-    marginTop: spacing.xl,
   },
   fans: {
     ...type.bodySm,

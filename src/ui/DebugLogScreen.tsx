@@ -9,10 +9,7 @@ import {
   subscribeDebugLog,
 } from '../services/debugLog';
 import type { LogEntry, LogTag } from '../services/debugLog';
-import { formatBufferMb } from '../services/settings';
 import { useAppStore } from '../state/store';
-import type { SearchHit } from '../core/types';
-import { redactUploaderNames, uploaderPhrase } from '../strings';
 import { Button } from './components';
 import { Icon } from './Icon';
 import { colors, gutter, spacing, type } from './theme';
@@ -38,36 +35,9 @@ function useDebugLog(): readonly LogEntry[] {
   return getDebugLog();
 }
 
-/** Uploaders that may appear in the journal, so they can be redacted. */
-function knownUploaders(): string[] {
-  const state = useAppStore.getState();
-  const hits: Array<SearchHit | undefined> = [
-    state.current?.hit,
-    ...state.results.map(ranked => ranked.hit),
-    ...state.queue,
-    ...(state.context?.items ?? []),
-    ...state.device,
-    ...state.library.history.map(saved => saved.hit),
-    ...state.library.liked.map(saved => saved.hit),
-    ...Object.values(state.resolutions).flatMap(resolution => resolution.sources.map(source => source.hit)),
-  ];
-  const names = hits.map(hit => hit?.username);
-
-  // `hitKey` is "username\0filename": keep names seen before the current list.
-  for (const key of Object.keys(state.hitTracks)) {
-    const separator = key.indexOf('\u0000');
-    if (separator > 0) {
-      names.push(key.slice(0, separator));
-    }
-  }
-
-  return [...new Set(names.filter((name): name is string => !!name))];
-}
-
 /** Réglages → Journal de débogage: every step of fetching and playing a track. */
 export function DebugLogScreen({ onBack }: { onBack: () => void }) {
   const entries = useDebugLog();
-  const showUploaders = useAppStore(state => state.settings.showUploaders);
   // The journal is one array mutated in place: copy it on every update.
   const list = [...entries].reverse();
 
@@ -78,16 +48,13 @@ export function DebugLogScreen({ onBack }: { onBack: () => void }) {
       `${Platform.OS} ${String(Platform.Version)}`,
       `serveur ${state.settings.serverHost}:${state.settings.serverPort}, connexion ${state.connection}`,
       `port d'écoute ${state.listenPort || state.settings.listenPort}, port lecteur ${state.httpPort}`,
-      `tampon ${formatBufferMb(state.settings.bufferMb)}, partage ${state.settings.shareEnabled ? 'oui' : 'non'}`,
+      `tampon ${state.settings.bufferMb} Mo, partage ${state.settings.shareEnabled ? 'oui' : 'non'}`,
       state.current
-        ? `en cours : ${state.current.phase} ${uploaderPhrase(state.current.hit.username, showUploaders)} ${state.current.error ?? ''}`
+        ? `en cours : ${state.current.phase} ${state.current.hit.username} ${state.current.error ?? ''}`
         : 'aucune lecture en cours',
     ].join('\n');
 
-    const message = formatDebugLog(header);
-    Share.share({
-      message: showUploaders ? message : redactUploaderNames(message, knownUploaders()),
-    }).catch(() => {});
+    Share.share({ message: formatDebugLog(header) }).catch(() => {});
   };
 
   return (

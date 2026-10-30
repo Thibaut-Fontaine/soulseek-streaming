@@ -2,8 +2,8 @@ import NetInfo from '@react-native-community/netinfo';
 import type { NetInfoState } from '@react-native-community/netinfo';
 
 import { Emitter } from '../core/emitter';
-import { LoginError, SoulseekClient } from '../core/soulseekClient';
 import type { ConnectionState, SoulseekClientEvents } from '../core/soulseekClient';
+import { SoulseekClient } from '../core/soulseekClient';
 import type { TransferSnapshot } from '../core/transfer';
 import type { SearchHit } from '../core/types';
 import { ReactNativeTransport } from '../transport/rnTcpTransport';
@@ -178,12 +178,7 @@ export class StreamingService {
       const login = await client.connect();
       return login;
     } catch (error) {
-      // A refused login is final. A network failure is not: the client keeps
-      // the object and retries with backoff, so the UI can reconnect without
-      // rebuilding everything (and without stopping the current track).
-      if (error instanceof LoginError) {
-        await this.stop();
-      }
+      await this.stop();
       throw error;
     }
   }

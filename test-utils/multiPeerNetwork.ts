@@ -27,12 +27,11 @@ export interface FakePeer {
   durationSec?: number;
   /** Delay before this peer's search response, in ms. */
   delayMs?: number;
-  /** Answer only searches that match the path like real peers do (default: answer every search). */
+  /**
+   * Answer only searches that match the path like real peers do (default:
+   * answer every search): every word as a whole word, none of the `-words`.
+   */
   matchQuery?: boolean;
-  /** Reason sent with UploadDenied (default "Banned"). */
-  denyReason?: string;
-  /** Ignore this many searches before answering, like a peer that was offline. */
-  skipSearches?: number;
 }
 
 /** Nicotine+-style matching: lowercase, punctuation as spaces, whole words. */
@@ -78,8 +77,6 @@ export class MultiPeerNetwork {
   readonly queueRequests: string[] = [];
   /** Every search query the client sent, in order. */
   readonly searches: string[] = [];
-  /** Searches ignored so far, by peer username (see `skipSearches`). */
-  private readonly skippedSearches = new Map<string, number>();
 
   constructor(private readonly peers: FakePeer[]) {}
 
@@ -141,19 +138,7 @@ export class MultiPeerNetwork {
         const query = readString(payload, 4).value;
         this.searches.push(query);
 
-        const candidates = this.peers.filter(
-          candidate => !candidate.matchQuery || peerMatches(query, candidate.filename),
-        );
-
-        for (const peer of candidates) {
-          const toSkip = peer.skipSearches ?? 0;
-          const skipped = this.skippedSearches.get(peer.username) ?? 0;
-
-          if (skipped < toSkip) {
-            this.skippedSearches.set(peer.username, skipped + 1);
-            continue;
-          }
-
+        for (const peer of this.peers.filter(candidate => !candidate.matchQuery || peerMatches(query, candidate.filename))) {
           setTimeout(() => this.sendResults(peer, token), peer.delayMs ?? 20);
         }
 
@@ -231,7 +216,7 @@ export class MultiPeerNetwork {
 
       if (peer.behavior === 'deny') {
         const writer = new ByteWriter();
-        writer.string(filename).string(peer.denyReason ?? 'Banned');
+        writer.string(filename).string('Banned');
         socket.write(encodePeerMessage(PeerCode.UPLOAD_DENIED, writer.toBytes()));
         return;
       }

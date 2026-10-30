@@ -2,7 +2,6 @@ import React from 'react';
 import { StyleSheet, View } from 'react-native';
 
 import { useAppStore } from '../state/store';
-import { messages } from '../strings';
 import { Toast } from './components';
 import { gutter, spacing } from './theme';
 
@@ -41,8 +40,8 @@ export function Banners() {
           icon="server"
           message={
             connection === 'reconnecting'
-              ? messages.bannerReconnecting
-              : messages.bannerConnecting
+              ? 'Reconnexion au serveur Soulseek…'
+              : 'Connexion au serveur Soulseek…'
           }
         />
       ) : null}
@@ -51,7 +50,7 @@ export function Banners() {
           key="offline"
           tone="bad"
           icon="offline"
-          message={connectionError ?? messages.bannerOffline}
+          message={connectionError ?? 'Déconnecté du réseau Soulseek'}
           actionLabel="Réessayer"
           onAction={() => void reconnect()}
         />

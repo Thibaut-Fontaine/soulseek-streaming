@@ -9,7 +9,6 @@ import type { LayoutChangeEvent, StyleProp, ViewStyle } from 'react-native';
 import type { TransferSnapshot } from '../core/transfer';
 import { hitKey } from '../core/types';
 import type { SearchHit } from '../core/types';
-import { uploaderLabel } from '../strings';
 import { Badge, CoverArt, Dot, clamp01 } from './components';
 import type { DotTone } from './components';
 import { Icon } from './Icon';
@@ -62,21 +61,16 @@ export const SourceRow = React.memo(function SourceRow({
   chosen,
   onPress,
   last,
-  showUploader = false,
 }: {
   hit: SearchHit;
   chosen?: boolean;
   onPress: (hit: SearchHit) => void;
   last?: boolean;
-  /** The user allowed uploader names (Réglages → Confidentialité). */
-  showUploader?: boolean;
 }) {
-  const label = uploaderLabel(hit.username, showUploader);
-
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel={showUploader ? `Écouter depuis ${hit.username}` : 'Écouter depuis cette source'}
+      accessibilityLabel={`Écouter depuis ${hit.username}`}
       accessibilityState={{ selected: !!chosen }}
       onPress={() => onPress(hit)}
       style={({ pressed }) => [styles.sourceRow, !last && styles.sourceDivider, pressed && styles.pressed]}>
@@ -84,7 +78,7 @@ export const SourceRow = React.memo(function SourceRow({
         <View style={styles.sourceUser}>
           <Dot tone={AVAILABILITY_DOT[peerAvailability(hit)]} />
           <Text style={styles.sourceName} numberOfLines={1}>
-            {label}
+            @{hit.username}
           </Text>
         </View>
         <PeerBadges hit={hit} />
@@ -104,12 +98,10 @@ export function SourcesList({
   hits,
   currentKey,
   onPick,
-  showUploader = false,
 }: {
   hits: readonly SearchHit[];
   currentKey?: string | null;
   onPick: (hit: SearchHit) => void;
-  showUploader?: boolean;
 }) {
   const groups = React.useMemo(() => groupSources(hits), [hits]);
   const [open, setOpen] = React.useState<Record<string, boolean>>({});
@@ -124,7 +116,6 @@ export function SourcesList({
           group={group}
           expanded={open[group.key] ?? index === 0}
           currentKey={currentKey}
-          showUploader={showUploader}
           onToggle={() =>
             setOpen(state => ({ ...state, [group.key]: !(state[group.key] ?? index === 0) }))
           }
@@ -141,14 +132,12 @@ const SourceGroupCard = React.memo(function SourceGroupCard({
   currentKey,
   onToggle,
   onPick,
-  showUploader = false,
 }: {
   group: SourceGroup;
   expanded: boolean;
   currentKey?: string | null;
   onToggle: () => void;
   onPick: (hit: SearchHit) => void;
-  showUploader?: boolean;
 }) {
   const count = group.hits.length;
   const meta = [
@@ -193,7 +182,6 @@ const SourceGroupCard = React.memo(function SourceGroupCard({
                 hit={hit}
                 chosen={key === currentKey}
                 onPress={onPick}
-                showUploader={showUploader}
                 last={index === group.hits.length - 1}
               />
             );

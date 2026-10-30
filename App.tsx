@@ -4,11 +4,9 @@ import LinearGradient from 'react-native-linear-gradient';
 import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { parseShareLink } from './src/core/share';
-import { startAndroidAuto } from './src/services/androidAuto';
 import { debugLog } from './src/services/debugLog';
 import { startStallWatcher } from './src/services/stallWatcher';
 import { useAppStore } from './src/state/store';
-import { useUpdateStore } from './src/state/updateStore';
 import { IconButton } from './src/ui/components';
 import { Banners } from './src/ui/Banners';
 import { ErrorBoundary } from './src/ui/ErrorBoundary';
@@ -21,7 +19,6 @@ import { SheetHost } from './src/ui/Sheets';
 import { TabBar } from './src/ui/TabBar';
 import { TabHost, type TabResets } from './src/ui/TabHost';
 import { AppLogo } from './src/ui/track';
-import { UpdatePrompt } from './src/ui/UpdatePrompt';
 import { colors, spacing, type } from './src/ui/theme';
 
 /**
@@ -120,7 +117,6 @@ function Root() {
   const hasCurrent = useAppStore(state => state.current !== null);
   const init = useAppStore(state => state.init);
   const reconnect = useAppStore(state => state.reconnect);
-  const checkForUpdate = useUpdateStore(state => state.check);
 
   const insets = useSafeAreaInsets();
   useStallWatchdog();
@@ -130,17 +126,6 @@ function Root() {
   React.useEffect(() => {
     void init();
   }, [init]);
-
-  // Never blocks startup: the prompt appears only when a newer build exists.
-  React.useEffect(() => {
-    if (ready) {
-      void checkForUpdate();
-    }
-  }, [ready, checkForUpdate]);
-
-  // Android Auto browses a snapshot of the library and sends transport
-  // commands back through the same store actions as the in-app controls.
-  React.useEffect(() => startAndroidAuto(), []);
 
   // Artist/album pages belong to the tab they were opened from: switching
   // tab (from the bar or from code, e.g. "Rechercher « artiste »") clears them.
@@ -193,8 +178,6 @@ function Root() {
     const subscription = AppState.addEventListener('change', nextState => {
       if (nextState !== 'active') {
         backgroundSince.current ??= Date.now();
-        // Keep the resume point up to date even if the app is killed next.
-        void useAppStore.getState().flushPlaybackSession();
         return;
       }
 
@@ -256,7 +239,6 @@ function Root() {
 
       <PlayerSheet />
       <SheetHost />
-      <UpdatePrompt />
     </View>
   );
 }

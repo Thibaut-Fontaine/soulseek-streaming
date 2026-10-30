@@ -118,9 +118,6 @@ async function withNetwork(
       shareWifiOnly: true,
       cacheMb: 1024,
       catalogEnabled: true,
-      showUploaders: false,
-      logUploadEnabled: false,
-      autoplayEnabled: false,
     },
     resolutions: {},
     hitTracks: {},
@@ -245,53 +242,6 @@ describe('catalog search and playback', () => {
       expect(network.searches).toContain('fake artist stream me');
       useAppStore.setState({ settings: { ...useAppStore.getState().settings, catalogEnabled: true } });
     });
-  });
-
-  test('autoplay chains catalog recommendations and then stops cleanly', async () => {
-    const NEXT_TRACK = track('dz:30', 'Next Song', 200);
-    const NEXT_FILE = 'Music\\Fake Artist\\Album\\02 - Next Song.mp3';
-
-    await withNetwork(
-      [
-        { username: 'peer_a', filename: TRACK, behavior: 'ok' },
-        { username: 'peer_b', filename: NEXT_FILE, behavior: 'ok' },
-      ],
-      async () => {
-        setCatalogProvider({ ...fakeCatalog, artistRadio: async () => [NEXT_TRACK] });
-        useAppStore.setState({
-          settings: { ...useAppStore.getState().settings, autoplayEnabled: true },
-        });
-
-        await useAppStore.getState().playCatalogTrack(STREAM_ME, {
-          label: 'Album',
-          tracks: [STREAM_ME],
-          index: 0,
-        });
-        await waitFor(() => useAppStore.getState().current?.phase === 'playing');
-
-        await useAppStore.getState().playNext();
-        await waitFor(
-          () =>
-            useAppStore.getState().current?.hit.filename === NEXT_FILE &&
-            useAppStore.getState().current?.phase === 'playing',
-        );
-        expect(useAppStore.getState().catalogContext).toMatchObject({
-          label: 'Recommandations',
-          tracks: [NEXT_TRACK],
-          index: 0,
-        });
-
-        // Every recommendation was already played: autoplay stops without
-        // searching Soulseek again and leaves the current track alone.
-        await useAppStore.getState().playNext();
-        expect(useAppStore.getState().notice).toBe('Fin de la lecture automatique.');
-        expect(useAppStore.getState().current?.hit.filename).toBe(NEXT_FILE);
-
-        useAppStore.setState({
-          settings: { ...useAppStore.getState().settings, autoplayEnabled: false },
-        });
-      },
-    );
   });
 
   test('stopping while sources are searched cancels the track', async () => {

@@ -81,9 +81,6 @@ import {
   DISCOVERY,
   GET_LUCKY,
   HOME,
-  JUSTICE,
-  MUSIC_MAP,
-  EMPTY_MUSIC_MAP,
   OMT_FILE_A,
   OMT_RADIO,
   ONE_MORE_TIME,
@@ -124,7 +121,6 @@ function press(renderer: ReactTestRenderer.ReactTestRenderer, label: string) {
 const actions = {
   loadArtistPage: jest.fn(async () => {}),
   loadAlbumPage: jest.fn(async () => {}),
-  loadMusicMap: jest.fn(async () => {}),
   loadHome: jest.fn(async () => {}),
   searchFilesToo: jest.fn(async () => {}),
   playCatalogTrack: jest.fn(async () => {}),
@@ -160,7 +156,6 @@ beforeEach(() => {
     pages: [],
     artistPages: {},
     albumPages: {},
-    musicMaps: {},
     home: null,
     fileSearch: 'idle',
     catalogResults: null,
@@ -364,67 +359,6 @@ describe('page host', () => {
   });
 });
 
-describe('music map', () => {
-  test('loading, ready, navigation and play', () => {
-    useAppStore.setState({ pages: [{ kind: 'map', id: DAFT_PUNK.id, name: 'Daft Punk' }] });
-    const loading = text(render(<PageHost />));
-    expect(actions.loadMusicMap).toHaveBeenCalledWith(DAFT_PUNK.id);
-    expect(loading).toContain('Carte musicale');
-    expect(loading).toContain('Chargement…');
-
-    act(() => {
-      useAppStore.setState({
-        musicMaps: { [DAFT_PUNK.id]: { status: 'ready', data: MUSIC_MAP } },
-      });
-    });
-    const page = render(<PageHost />);
-    const out = text(page);
-    for (const label of [
-      'Carte musicale',
-      'Autour de Daft Punk',
-      'Comme Justice',
-      'Boys Noize',
-      'Carte limitée pour rester rapide',
-    ]) {
-      expect(out).toContain(label);
-    }
-    press(page, 'Écouter la carte');
-    expect(actions.playArtistRadio).toHaveBeenCalledWith(DAFT_PUNK.id, 'Daft Punk');
-    press(page, 'Artiste Justice');
-    expect(actions.openPage).toHaveBeenCalledWith({ kind: 'artist', id: JUSTICE.id, name: 'Justice' });
-  });
-
-  test('empty and error states', () => {
-    useAppStore.setState({
-      pages: [{ kind: 'map', id: DAFT_PUNK.id, name: 'Daft Punk' }],
-      musicMaps: { [DAFT_PUNK.id]: { status: 'ready', data: EMPTY_MUSIC_MAP } },
-    });
-    const empty = render(<PageHost />);
-    expect(text(empty)).toContain('Pas encore de liens');
-    press(empty, 'Ouvrir l’artiste');
-    expect(actions.openPage).toHaveBeenCalledWith({ kind: 'artist', id: DAFT_PUNK.id, name: 'Daft Punk' });
-
-    act(() => {
-      useAppStore.setState({
-        musicMaps: { [DAFT_PUNK.id]: { status: 'error', error: 'Hors ligne' } },
-      });
-    });
-    const error = render(<PageHost />);
-    expect(text(error)).toContain('Impossible de charger la carte');
-    press(error, 'Réessayer');
-    expect(actions.loadMusicMap).toHaveBeenCalledWith(DAFT_PUNK.id, true);
-  });
-
-  test('the home page opens the map of the last played artist', () => {
-    const played = { ...savedTrack(OMT_FILE_A, undefined, ONE_MORE_TIME) };
-    useAppStore.setState({ library: { ...EMPTY_LIBRARY, history: [played] } });
-    const home = render(<HomeScreen />);
-    expect(text(home)).toContain('Explorer les artistes proches de Daft Punk');
-    press(home, 'Carte musicale de Daft Punk');
-    expect(actions.openPage).toHaveBeenCalledWith({ kind: 'map', id: DAFT_PUNK.id, name: 'Daft Punk' });
-  });
-});
-
 const AERODYNAMIC_ID = 'dz:3135554';
 
 describe('search with the catalog', () => {
@@ -488,7 +422,7 @@ describe('search with the catalog', () => {
     const out = text(screen);
     expect(out).toContain('Get Lucky');
     expect(out).not.toMatch(/Aucune source|\d+ sources?\b|recherche des sources/);
-    press(screen, 'Chercher les fichiers sur le réseau');
+    press(screen, 'Chercher les fichiers sur Soulseek');
     expect(actions.searchFilesToo).toHaveBeenCalled();
   });
 

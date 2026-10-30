@@ -1,4 +1,3 @@
-import { messages } from '../strings';
 import type { IconName } from './iconPaths';
 import type { Tone } from './theme';
 
@@ -45,7 +44,10 @@ export const ACTION_LABELS: Record<ErrorAction, string> = {
 };
 
 /** Shown by the "En savoir plus" action of a sharing refusal. */
-export const SHARING_EXPLANATION = messages.sharingExplanation;
+export const SHARING_EXPLANATION =
+  'Beaucoup d’utilisateurs Soulseek refusent les téléchargements des comptes qui ne partagent ' +
+  'aucun fichier. SoulStream ne partage pas encore de fichiers : essayez une autre source, ' +
+  'ou partagez des fichiers depuis un autre client avec le même compte.';
 
 const SHARING_REASON = /shar|partag|ban|leech|no share/i;
 
@@ -69,7 +71,7 @@ export function describePlaybackError(
       tone: 'bad',
       icon: 'offline',
       title: 'Pair hors ligne',
-      body: messages.peerOfflineBody,
+      body: 'Ce pair s’est déconnecté du réseau Soulseek avant de vous envoyer le fichier.',
       actions: ['next-source', 'retry'],
     };
   }
@@ -163,7 +165,7 @@ export function describePlaybackError(
       tone: 'warn',
       icon: 'server',
       title: 'Hors ligne',
-      body: messages.serverOfflineBody,
+      body: 'La connexion au serveur Soulseek est coupée.',
       actions: ['reconnect'],
     };
   }

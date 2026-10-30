@@ -1,4 +1,4 @@
-import { AppState as RNAppState, PermissionsAndroid, Platform } from 'react-native';
+import { PermissionsAndroid, Platform } from 'react-native';
 import TrackPlayer, { Event } from 'react-native-track-player';
 import { create } from 'zustand';
 import {
@@ -9,7 +9,6 @@ import {
   types,
 } from '@react-native-documents/picker';
 
-import { bufferTargetFor } from '../core/buffer';
 import { id3TagSize, parseId3 } from '../core/id3';
 import { LoginError } from '../core/soulseekClient';
 import type { ConnectionState } from '../core/soulseekClient';
@@ -24,9 +23,6 @@ import {
 import type { RankedHit } from '../core/search';
 import { createDeezerCatalog, trackArtists } from '../core/catalog';
 import type { CatalogProvider } from '../core/catalog';
-import { buildMusicMap } from '../core/musicMap';
-import { recommendTracks, recommendationKey } from '../core/autoplay';
-import type { MusicMap } from '../core/musicMap';
 import type { ShareTarget } from '../core/share';
 import { primeHitScores, soulseekLadder, soulseekQueryFor, sourcesForTrack, unifyResults } from '../core/unify';
 import type {
@@ -42,27 +38,14 @@ import type {
   Resolution,
   TrackGroup,
 } from '../core/catalogTypes';
-import { displayArtist, displayTitle, hitKey, isStreamableFile, parseTrackName } from '../core/types';
+import { displayArtist, displayTitle, hitKey, isStreamableFile } from '../core/types';
 import type { SearchHit, TrackMeta } from '../core/types';
 import type { StreamTransfer } from '../core/transfer';
 import { ensurePlayer, resetPlayer } from '../player/player';
 import { clearCredentials, loadCredentials, loadSettings, saveCredentials, saveSettings } from '../services/settings';
 import type { Credentials, Settings } from '../services/settings';
-import {
-  clearSession,
-  createSessionRecorder,
-  defaultSessionStore,
-  loadSession,
-  planRestore,
-} from '../services/playbackSession';
-import type { SessionRecorder } from '../services/playbackSession';
 import { StreamingService } from '../services/streaming';
 import { debugLog } from '../services/debugLog';
-import {
-  clearRemoteLogQueue,
-  configureRemoteLog,
-  startRemoteLog,
-} from '../services/remoteLog';
 import { takeLastCrash } from '../services/crashReport';
 import { reportPreviousExits } from '../services/exitInfo';
 import { encodeBase64 } from '../services/fastBase64';
@@ -83,7 +66,6 @@ import { createBlobUtilFs } from '../services/blobUtilFs';
 import { TrackCache } from '../services/trackCache';
 import type { CacheEntry } from '../services/trackCache';
 import { contentTypeFor } from '../stream/httpServer';
-import { messages, redactUploaderNames, uploaderPhrase } from '../strings';
 
 export type Tab = 'home' | 'search' | 'library' | 'settings';
 
@@ -187,8 +169,6 @@ interface AppState {
   pages: Page[];
   artistPages: Record<string, Loadable<ArtistPageData>>;
   albumPages: Record<string, Loadable<AlbumPageData>>;
-  /** Music Map graphs, keyed by the artist id that seeds them. */
-  musicMaps: Record<string, Loadable<MusicMap>>;
   /**
    * Home content from the listening history only (recent artists and
    * artists like them); null when the catalog is off or nothing was played.
@@ -221,19 +201,12 @@ interface AppState {
   /** Also searches Soulseek files for the current query (catalog results shown). */
   searchFilesToo: () => Promise<void>;
   cancelSearch: () => void;
-  /**
-   * Plays a source; on failure falls back to other sources of the same track.
-   * `positionSec` resumes a saved session at that second.
-   */
-  playHit: (hit: SearchHit, options?: { positionSec?: number }) => Promise<void>;
+  /** Plays a source; on failure falls back to other sources of the same track. */
+  playHit: (hit: SearchHit) => Promise<void>;
   /** Skips the current source and tries the next one. */
   playNextSource: () => Promise<void>;
   retryPlayback: () => Promise<void>;
   stopPlayback: () => Promise<void>;
-  /** Restores the session saved before the app closed, if any. */
-  restorePlayback: () => Promise<void>;
-  /** Writes a pending playback session now (app going to the background). */
-  flushPlaybackSession: () => Promise<void>;
   dismissNotice: () => void;
 
   /** Plays a track the user picked, from a list that "next" will follow. */
@@ -276,8 +249,6 @@ interface AppState {
   closeAllPages: () => void;
   loadArtistPage: (id: string, force?: boolean) => Promise<void>;
   loadAlbumPage: (id: string, force?: boolean) => Promise<void>;
-  /** Builds the Music Map of an artist (related artists, bounded). */
-  loadMusicMap: (id: string, force?: boolean) => Promise<void>;
   /** Builds `home` from the recently played artists; no-op when unchanged. */
   loadHome: (force?: boolean) => Promise<void>;
   /**
@@ -297,11 +268,6 @@ interface AppState {
   trackForHit: (hit: SearchHit) => CatalogTrack | null;
   /** Plays tracks similar to an artist's ("Radio <artist>"). */
   playArtistRadio: (artistId: string, name: string) => Promise<void>;
-  /**
-   * Appends and plays catalog recommendations after a list ends. No-op when
-   * the catalog is off or Soulseek is offline; stops cleanly when exhausted.
-   */
-  startAutoplay: (seed?: CatalogTrack) => Promise<void>;
   /** A track someone shared (see `core/share.ts`): play it, or search for it. */
   openShared: (target: ShareTarget) => Promise<void>;
 }
@@ -309,20 +275,9 @@ interface AppState {
 let service: StreamingService | null = null;
 /** Tracks already played; also our shared folder. Created on init. */
 let trackCache: TrackCache | null = null;
-
-/** Tests inject a cache without running `init` (which needs native modules). */
-export function setTrackCacheForTests(cache: TrackCache | null): void {
-  trackCache = cache;
-}
-
 let initStarted = false;
 let searchSequence = 0;
 let playSequence = 0;
-/** Saves the resume point while a track plays. Created on init. */
-let sessionRecorder: SessionRecorder | null = null;
-let watchingSession = false;
-/** Login resets many fields at once; do not mistake that for "nothing plays". */
-let loginInProgress = false;
 /** When the user last started a track; see the queue-ended listener. */
 let lastPlayStartedAt = 0;
 
@@ -332,9 +287,6 @@ let searchAbort: AbortController | null = null;
 let catalogPlaySequence = 0;
 /** Recent artist ids the current `home` was built from. */
 let homeKey = '';
-/** Catalog tracks already offered by autoplay in this session. */
-const autoplaySeen = new Set<string>();
-let autoplayRunning = false;
 /** Source searches in flight, by catalog track id. */
 const resolving = new Map<string, Promise<Resolution>>();
 /** When each resolution was made, by catalog track id. */
@@ -350,42 +302,6 @@ export function setCatalogProvider(provider: CatalogProvider): void {
   catalog = provider;
 }
 
-/**
- * The app came back to the foreground: phone sockets are often dead after a
- * sleep, and the state can still say "online". Check an online connection;
- * otherwise skip the backoff and reconnect now. Nothing runs before a login.
- */
-export function onAppForeground(): void {
-  const state = useAppStore.getState();
-
-  if (!state.username) {
-    return;
-  }
-
-  if (!service) {
-    void state.reconnect();
-    return;
-  }
-
-  if (state.connection === 'online') {
-    void state.checkConnection();
-    return;
-  }
-
-  service.reconnectNow();
-}
-
-/** Listens for foreground returns. Returns an unsubscribe function for tests. */
-export function watchAppState(): () => void {
-  const subscription = RNAppState.addEventListener('change', next => {
-    if (next === 'active') {
-      onAppForeground();
-    }
-  });
-
-  return () => subscription.remove();
-}
-
 /** Peers that refused us during this session, by lower-cased username. */
 const deniedPeers = new Map<string, string>();
 
@@ -397,7 +313,8 @@ class PlaybackCancelled extends Error {
 
 const MAX_TRANSFER_HISTORY = 20;
 
-const START_TIMEOUT = 'La source n’a pas démarré à temps';
+/** How many sources to try for one track before giving up. */
+const MAX_ATTEMPTS = 5;
 const SEARCH_DURATION_MS = 10000;
 /** Weaker matches are still listed; the user picks what to play. */
 const LIST_SCORE = 0.55;
@@ -443,8 +360,6 @@ const RESTART_THRESHOLD_SEC = 3;
  * shorten them.
  */
 export const playbackTimeouts = {
-  /** Total time a peer gets to start sending bytes before another is tried. */
-  startMs: 5000,
   reachPeerMs: 25000,
   acceptFreeSlotMs: 20000,
   acceptNoSlotMs: 12000,
@@ -453,22 +368,21 @@ export const playbackTimeouts = {
   bufferTotalMs: 90000,
 };
 
-/**
- * Attempts made for one track. Exported so tests can shorten the fresh
- * search; the app always keeps the same small ceiling.
- */
-export const playbackLimits = {
-  maxAttempts: 5,
-  /** New searches launched when every known source failed. */
-  freshSearches: 1,
-  freshSearchMs: 5000,
-};
-
 /** Errors that mean "this peer will not send to us", worth remembering. */
-const DENIED_PATTERN = /refus|denied|banned|not shared|ne partage|too many megabytes|quota|too many files/i;
+const DENIED_PATTERN = /refus|denied|banned|not shared|ne partage/i;
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function bufferTargetFor(size: number, bufferMb: number): number {
+  if (size <= 0) {
+    return 256 * 1024;
+  }
+
+  const cap = Math.max(256 * 1024, bufferMb * 1024 * 1024);
+  const proportional = Math.floor(size * 0.15);
+  return Math.min(size, Math.max(256 * 1024, Math.min(cap, proportional)));
 }
 
 function rememberTransfers(
@@ -519,93 +433,8 @@ export function recentArtists(library: Library, max = HOME_ARTISTS): CatalogArti
   return artists;
 }
 
-/** Whether the track now playing is worth saving as a resume point. */
-function playbackSnapshot(): {
-  hit: SearchHit;
-  source: 'network' | 'cache';
-  queue: SearchHit[];
-  context: PlayContext | null;
-  catalogContext: CatalogPlayContext | null;
-  shuffle: boolean;
-  repeat: boolean;
-} | null {
-  const state = useAppStore.getState();
-  const current = state.current;
-
-  if (!current || current.phase !== 'playing') {
-    return null;
-  }
-
-  return {
-    hit: current.hit,
-    source: current.source,
-    queue: state.queue,
-    context: state.context,
-    catalogContext: state.catalogContext,
-    shuffle: state.shuffle,
-    repeat: state.repeat,
-  };
-}
-
-/**
- * Saves the resume point when what plays changes, and every few seconds while
- * it plays (the recorder debounces both). Clears it when playback stops or
- * fails, so a broken track is not offered back on the next launch.
- */
-function watchPlaybackSession(): void {
-  if (watchingSession) {
-    return;
-  }
-
-  watchingSession = true;
-  useAppStore.subscribe((state, previous) => {
-    if (!sessionRecorder || loginInProgress) {
-      return;
-    }
-
-    const changed =
-      state.current !== previous.current ||
-      state.queue !== previous.queue ||
-      state.context !== previous.context ||
-      state.catalogContext !== previous.catalogContext ||
-      state.shuffle !== previous.shuffle ||
-      state.repeat !== previous.repeat;
-
-    if (!changed) {
-      return;
-    }
-
-    if (!state.current || state.current.phase === 'error') {
-      void sessionRecorder.clear();
-      return;
-    }
-
-    if (state.current.phase === 'playing') {
-      sessionRecorder.touch();
-    }
-  });
-}
-
-/** Seeks without failing playback when the player is not ready yet. */
-async function seekToPosition(positionSec: number): Promise<void> {
-  if (!Number.isFinite(positionSec)) {
-    return;
-  }
-
-  try {
-    await TrackPlayer.seekTo(Math.max(0, positionSec));
-  } catch {
-    // The player reports failures through its state.
-  }
-}
-
 export const useAppStore = create<AppState>((set, get) => {
   const metaLoading = new Set<string>();
-
-  /** Error text shown to the user; uploader names stay out unless allowed. */
-  function shownError(message: string, usernames: readonly string[]): string {
-    return get().settings.showUploaders ? message : redactUploaderNames(message, usernames);
-  }
 
   function updateLibrary(change: (library: Library) => Library): void {
     const library = change(get().library);
@@ -883,20 +712,8 @@ export const useAppStore = create<AppState>((set, get) => {
     const prepared = service.prepareStream(hit);
     const id = prepared.transferId;
     const startedAt = Date.now();
-    const startDeadline = startedAt + playbackTimeouts.startMs;
     const step = (name: string) =>
       debugLog('play', `${name} après ${Date.now() - startedAt} ms`);
-    /**
-     * Timeout for a step before any byte arrives. The peer as a whole gets
-     * `startMs`: a refused, queued or silent uploader must not keep the user
-     * waiting when another source may start right away.
-     */
-    const beforeStart = (configuredMs: number, message: string) => {
-      const left = startDeadline - Date.now();
-      return left < configuredMs
-        ? { timeout: Math.max(1, left), message: START_TIMEOUT }
-        : { timeout: configuredMs, message };
-    };
 
     debugLog(
       'play',
@@ -919,58 +736,33 @@ export const useAppStore = create<AppState>((set, get) => {
       },
     });
 
-    const reach = beforeStart(
-      playbackTimeouts.reachPeerMs,
-      `Impossible de joindre ${uploaderPhrase(hit.username, get().settings.showUploaders)}`,
-    );
     await waitForTransfer(
       id,
       sequence,
       t => t.state !== 'requesting',
-      reach.timeout,
-      reach.message,
+      playbackTimeouts.reachPeerMs,
+      `Impossible de joindre ${hit.username}`,
     );
     step('pair joint, QueueUpload envoyé');
 
-    const accepted = beforeStart(
-      hit.slotFree ? playbackTimeouts.acceptFreeSlotMs : playbackTimeouts.acceptNoSlotMs,
-      `${uploaderPhrase(hit.username, get().settings.showUploaders)} vous a mis en file d'attente`,
-    );
     await waitForTransfer(
       id,
       sequence,
       t => t.state === 'awaiting-file' || t.state === 'streaming' || t.state === 'complete',
-      accepted.timeout,
-      accepted.message,
+      hit.slotFree ? playbackTimeouts.acceptFreeSlotMs : playbackTimeouts.acceptNoSlotMs,
+      `${hit.username} vous a mis en file d'attente`,
     );
     step('transfert accepté');
 
-    const opened = beforeStart(
-      playbackTimeouts.openFileMs,
-      `${uploaderPhrase(hit.username, get().settings.showUploaders)} n'a pas ouvert le transfert`,
-    );
     await waitForTransfer(
       id,
       sequence,
       t => t.state === 'streaming' || t.state === 'complete',
-      opened.timeout,
-      opened.message,
+      playbackTimeouts.openFileMs,
+      `${hit.username} n'a pas ouvert le transfert`,
     );
     step('connexion F ouverte, octets en route');
     void readStreamMeta(id, hit);
-
-    // The connection being open is not enough: some peers accept then never
-    // send a byte. Until the first bytes arrive the same deadline applies.
-    const firstBytes = beforeStart(playbackTimeouts.bufferTotalMs, START_TIMEOUT);
-    await waitForTransfer(
-      id,
-      sequence,
-      t => t.state === 'complete' || t.buffer.total > 0,
-      firstBytes.timeout,
-      firstBytes.message,
-      playbackTimeouts.stallMs,
-    );
-    step('premiers octets reçus');
 
     await waitForTransfer(
       id,
@@ -1004,24 +796,20 @@ export const useAppStore = create<AppState>((set, get) => {
   /**
    * The next source to try for the same track: same title, not tried yet,
    * not a peer that refused us. Read lazily, so results that arrived during
-   * the previous attempt (or a fresh search) are considered.
+   * the previous attempt are considered.
    */
-  function nextCandidate(
-    original: SearchHit,
-    tried: Set<string>,
-    fresh: SearchHit[] = [],
-  ): SearchHit | null {
-    // A catalog track: its own matched sources, best first, plus anything a
-    // fresh search just found.
+  function nextCandidate(original: SearchHit, tried: Set<string>): SearchHit | null {
+    // A catalog track: its own matched sources, best first.
     const track = get().hitTracks[hitKey(original)];
+    const pool = track ? knownSources(track) : [];
 
-    if (track) {
-      for (const hit of [...knownSources(track).map(source => source.hit), ...fresh]) {
-        if (!tried.has(hitKey(hit)) && !deniedPeers.has(hit.username.toLowerCase())) {
-          return hit;
-        }
+    for (const { hit } of pool) {
+      if (!tried.has(hitKey(hit)) && !deniedPeers.has(hit.username.toLowerCase())) {
+        return hit;
       }
+    }
 
+    if (track && pool.length > 0) {
       return null;
     }
 
@@ -1037,56 +825,7 @@ export const useAppStore = create<AppState>((set, get) => {
       }
     }
 
-    for (const hit of fresh) {
-      if (tried.has(hitKey(hit)) || deniedPeers.has(hit.username.toLowerCase())) {
-        continue;
-      }
-
-      if (sameSongTitle(title, displayTitle(hit.filename))) {
-        return hit;
-      }
-    }
-
     return null;
-  }
-
-  /**
-   * A fresh Soulseek search when every known source failed: peers come and
-   * go, so another one may have the same file. One search, same query the
-   * title would use, and only the hits the caller has not tried yet.
-   */
-  async function searchMoreSources(original: SearchHit): Promise<SearchHit[]> {
-    const searchService = service;
-
-    if (!searchService || get().connection !== 'online') {
-      return [];
-    }
-
-    const track = get().hitTracks[hitKey(original)];
-    const parsed = parseTrackName(original.filename);
-    const query = track
-      ? soulseekQueryFor(track)
-      : [parsed.artist, parsed.title].filter(Boolean).join(' ');
-
-    if (!query) {
-      return [];
-    }
-
-    const spelling = query.normalize('NFC').toLowerCase();
-    debugLog('play', `plus aucune source connue : nouvelle recherche « ${spelling} »`);
-
-    try {
-      const hits = await searchService.search(
-        spelling,
-        undefined,
-        playbackLimits.freshSearchMs,
-        { exclusive: false },
-      );
-      return track ? sourcesForTrack(track, hits).map(source => source.hit) : hits;
-    } catch (error) {
-      debugLog('play', `recherche de secours en erreur : ${errorMessage(error)}`);
-      return [];
-    }
   }
 
   /**
@@ -1211,20 +950,16 @@ export const useAppStore = create<AppState>((set, get) => {
   async function playWithFallback(first: SearchHit): Promise<void> {
     const sequence = ++playSequence;
     const tried = new Set<string>();
-    const triedNames = new Set<string>();
     let hit: SearchHit | null = first;
     let fallback: CurrentPlayback['fallback'] = null;
     let lastError = 'Lecture impossible';
-    let freshSearches = 0;
-    let fresh: SearchHit[] = [];
 
     await ensurePlayer();
     set({ playerReady: true });
     void requestNotificationPermission();
 
-    for (let attempt = 1; hit && attempt <= playbackLimits.maxAttempts; attempt++) {
+    for (let attempt = 1; hit && attempt <= MAX_ATTEMPTS; attempt++) {
       tried.add(hitKey(hit));
-      triedNames.add(hit.username);
 
       try {
         // Stop the previous track before releasing its local HTTP source.
@@ -1258,21 +993,7 @@ export const useAppStore = create<AppState>((set, get) => {
 
         service?.cancelActive();
         fallback = { username: hit.username, reason: lastError };
-        hit = nextCandidate(first, tried, fresh);
-
-        // Every source we knew failed: look for a peer that appeared since.
-        // Only once, and only while an attempt is still allowed, so a dead
-        // track ends with one clear error instead of an endless search loop.
-        if (!hit && attempt < playbackLimits.maxAttempts && freshSearches < playbackLimits.freshSearches) {
-          freshSearches++;
-          fresh = await searchMoreSources(first);
-
-          if (sequence !== playSequence) {
-            return;
-          }
-
-          hit = nextCandidate(first, tried, fresh);
-        }
+        hit = nextCandidate(first, tried);
       }
     }
 
@@ -1286,10 +1007,10 @@ export const useAppStore = create<AppState>((set, get) => {
         ? {
             ...state.current,
             phase: 'error',
-            error: shownError(
-              tried.size > 1 ? `${lastError} (${tried.size} sources essayées)` : lastError,
-              [...triedNames],
-            ),
+            error:
+              tried.size > 1
+                ? `${lastError} (${tried.size} sources essayées)`
+                : lastError,
           }
         : null,
     }));
@@ -1315,7 +1036,7 @@ export const useAppStore = create<AppState>((set, get) => {
         searching: false,
         fileSearch: 'idle',
         searchError:
-          deviceResults.length > 0 || get().catalogResults ? null : messages.notConnected,
+          deviceResults.length > 0 || get().catalogResults ? null : 'Non connecté au réseau Soulseek',
       });
       return;
     }
@@ -1636,7 +1357,7 @@ export const useAppStore = create<AppState>((set, get) => {
   }
 
   async function loadPage<T>(
-    field: 'artistPages' | 'albumPages' | 'musicMaps',
+    field: 'artistPages' | 'albumPages',
     id: string,
     force: boolean,
     fetchPage: () => Promise<T>,
@@ -1671,21 +1392,17 @@ export const useAppStore = create<AppState>((set, get) => {
   }
 
   /** Plays a file (from the device cache when it is there). */
-  async function startHit(hit: SearchHit, positionSec?: number): Promise<void> {
+  async function startHit(hit: SearchHit): Promise<void> {
+    if (!service) {
+      return;
+    }
+
     if (!isStreamableFile(hit.filename)) {
       set({ notice: 'Seuls les fichiers MP3 sont proposés par SoulStream.' });
       return;
     }
 
     const cached = trackCache?.findByHit(hit);
-
-    // Downloads and imported files play with no network and no client. Without
-    // this check, a cached track was silently ignored while offline (the old
-    // `if (!service) return` came first) and the app looked broken.
-    if (!cached && !service) {
-      set({ notice: 'Ce morceau n’est pas téléchargé : impossible de le lire hors ligne.' });
-      return;
-    }
 
     try {
       lastPlayStartedAt = Date.now();
@@ -1698,21 +1415,14 @@ export const useAppStore = create<AppState>((set, get) => {
 
       const playing = get().current;
       if (playing && playing.phase === 'playing') {
-        if (positionSec !== undefined) {
-          await seekToPosition(positionSec);
-        }
         completeTrack(playing.hit);
       }
     } catch (error) {
       set(state => ({
         current: state.current
-          ? {
-              ...state.current,
-              phase: 'error',
-              error: shownError(errorMessage(error), [hit.username]),
-            }
+          ? { ...state.current, phase: 'error', error: errorMessage(error) }
           : null,
-        searchError: state.current ? state.searchError : shownError(errorMessage(error), [hit.username]),
+        searchError: state.current ? state.searchError : errorMessage(error),
       }));
     }
   }
@@ -1766,7 +1476,7 @@ export const useAppStore = create<AppState>((set, get) => {
 
     const reason =
       resolution.status === 'error'
-        ? 'Non connecté au réseau'
+        ? 'Non connecté au réseau Soulseek'
         : `Aucune source pour « ${track.title} »`;
 
     const nextIndex = context ? nextCatalogIndex(context) : null;
@@ -1787,14 +1497,11 @@ export const useAppStore = create<AppState>((set, get) => {
       serverPort: 2242,
       listenPort: 22345,
       streamPort: 0,
-      bufferMb: 0.5,
+      bufferMb: 2,
       shareEnabled: true,
       shareWifiOnly: true,
       cacheMb: 1024,
       catalogEnabled: true,
-      showUploaders: false,
-      logUploadEnabled: false,
-      autoplayEnabled: false,
     },
 
     username: null,
@@ -1832,7 +1539,6 @@ export const useAppStore = create<AppState>((set, get) => {
     pages: [],
     artistPages: {},
     albumPages: {},
-    musicMaps: {},
     home: null,
     resolutions: {},
     hitTracks: {},
@@ -1846,10 +1552,6 @@ export const useAppStore = create<AppState>((set, get) => {
       }
 
       initStarted = true;
-
-      // The phone may sleep for a long time: on return, verify or restore the
-      // Soulseek connection instead of waiting for a socket to time out.
-      watchAppState();
 
       try {
         const lastCrash = await takeLastCrash();
@@ -1881,8 +1583,6 @@ export const useAppStore = create<AppState>((set, get) => {
           }
         }
         set({ settings, library, hitTracks });
-        configureRemoteLog(settings.logUploadEnabled === true);
-        void startRemoteLog();
 
         try {
           trackCache = new TrackCache(createBlobUtilFs(), settings.cacheMb * 1024 * 1024);
@@ -1908,25 +1608,6 @@ export const useAppStore = create<AppState>((set, get) => {
           set({ prefillUsername: credentials.username });
           await get().login(credentials.username, credentials.password, 'saved');
         }
-
-        // Only once login is over: its mass reset must not erase the session
-        // the restart is about to restore.
-        sessionRecorder = createSessionRecorder({
-          store: defaultSessionStore,
-          snapshot: playbackSnapshot,
-          // A hard kill loses at most ~1 s: the position tick writes shortly
-          // after each read, and going to the background flushes immediately.
-          debounceMs: 600,
-          tickMs: 1000,
-          position: async () => {
-            try {
-              return (await TrackPlayer.getProgress()).position ?? 0;
-            } catch {
-              return 0;
-            }
-          },
-        });
-        watchPlaybackSession();
       } finally {
         set({ ready: true });
       }
@@ -1936,16 +1617,10 @@ export const useAppStore = create<AppState>((set, get) => {
       const settings = get().settings;
       const previousUsername = get().username;
 
-      loginInProgress = true;
       searchSequence++;
       playSequence++;
       deniedPeers.clear();
       await resetPlayer();
-
-      // A new account must not inherit the previous one's resume point.
-      if (session === 'new') {
-        await clearSession();
-      }
 
       if (service) {
         await service.stop();
@@ -1988,26 +1663,12 @@ export const useAppStore = create<AppState>((set, get) => {
           httpPort: instance.httpPort,
           tab: session === 'new' ? 'home' : get().tab,
         });
-        loginInProgress = false;
-
-        if (session === 'saved') {
-          void get().restorePlayback();
-        }
-
         return true;
       } catch (error) {
-        const refused = error instanceof LoginError;
-        // A network failure must leave the client alive: it backs off, the
-        // NetworkInfo listener and the foreground handler can reconnect it.
-        // Typed credentials on the login screen have no session to keep yet.
-        const keepClient = !refused && session !== 'new';
+        await instance.stop();
 
-        if (!keepClient) {
-          await instance.stop();
-
-          if (service === instance) {
-            service = null;
-          }
+        if (service === instance) {
+          service = null;
         }
 
         // Without network, stored credentials keep the user in the app (offline
@@ -2015,18 +1676,17 @@ export const useAppStore = create<AppState>((set, get) => {
         const keptUsername =
           session === 'keep'
             ? previousUsername
-            : session === 'saved' && !refused
+            : session === 'saved' && !(error instanceof LoginError)
               ? username
               : null;
 
         set({
           username: keptUsername,
-          connection: keepClient ? instance.state : 'error',
+          connection: 'error',
           connectionError: errorMessage(error),
-          loginRejection: refused ? error.reason : null,
+          loginRejection: error instanceof LoginError ? error.reason : null,
         });
 
-        loginInProgress = false;
         return false;
       }
     },
@@ -2035,8 +1695,6 @@ export const useAppStore = create<AppState>((set, get) => {
       playSequence++;
       searchSequence++;
       await resetPlayer();
-      await sessionRecorder?.clear();
-      await clearSession();
 
       if (service) {
         await service.stop();
@@ -2077,7 +1735,7 @@ export const useAppStore = create<AppState>((set, get) => {
 
       // The client is already retrying: skip its backoff instead of tearing
       // everything down (that would stop the current track).
-      if (service) {
+      if (service && get().connection === 'reconnecting') {
         service.reconnectNow();
         return;
       }
@@ -2100,12 +1758,6 @@ export const useAppStore = create<AppState>((set, get) => {
       const previous = get().settings;
       await saveSettings(settings);
       set({ settings });
-      configureRemoteLog(settings.logUploadEnabled === true);
-      if (settings.logUploadEnabled) {
-        void startRemoteLog();
-      } else {
-        void clearRemoteLogQueue();
-      }
       trackCache?.setLimit(settings.cacheMb * 1024 * 1024);
 
       // Only server and port changes need a new connection; the rest applies
@@ -2209,7 +1861,7 @@ export const useAppStore = create<AppState>((set, get) => {
         }
 
         // Nothing in the catalog, or it is unreachable: search the files.
-        debugLog('play', `rien dans le catalogue : ${messages.fileSearchOnNetwork}`);
+        debugLog('play', 'rien dans le catalogue : recherche des fichiers sur Soulseek');
       }
 
       await searchFiles(sequence, rawQuery, networkQuery, [], deviceResults);
@@ -2237,9 +1889,9 @@ export const useAppStore = create<AppState>((set, get) => {
       }));
     },
 
-    playHit: async (hit, options) => {
+    playHit: async hit => {
       cancelCatalogPlay();
-      await startHit(hit, options?.positionSec);
+      await startHit(hit);
     },
 
     playNextSource: async () => {
@@ -2273,57 +1925,13 @@ export const useAppStore = create<AppState>((set, get) => {
       cancelCatalogPlay();
       // Clear the UI first: the native reset can take a while.
       set({ current: null, playerOpen: false });
-      await sessionRecorder?.clear();
-      await clearSession();
       await resetPlayer();
       service?.cancelActive();
-    },
-
-    restorePlayback: async () => {
-      const saved = await loadSession();
-
-      if (!saved || get().current) {
-        return;
-      }
-
-      const cached = !!trackCache?.findByHit(saved.hit);
-      const plan = planRestore(saved, { online: get().connection === 'online', cached });
-
-      // Offline with no local copy: keep the session for the next launch.
-      if (plan === 'wait') {
-        return;
-      }
-
-      set({
-        queue: saved.queue,
-        context: saved.context,
-        catalogContext: saved.catalogContext,
-        shuffle: saved.shuffle,
-        repeat: saved.repeat,
-      });
-
-      await get().playHit(saved.hit, { positionSec: saved.positionSec });
-
-      const current = get().current;
-
-      if (!current || current.phase === 'error') {
-        set({
-          current: null,
-          playerOpen: false,
-          notice: 'La source de la dernière lecture n’est plus disponible.',
-        });
-        await clearSession();
-      }
-    },
-
-    flushPlaybackSession: async () => {
-      await sessionRecorder?.flush();
     },
 
     dismissNotice: () => set({ notice: null }),
 
     playTrack: async (hit, context) => {
-      autoplaySeen.clear();
       set({ context: context ?? null, catalogContext: null });
       await get().playHit(hit);
     },
@@ -2342,10 +1950,6 @@ export const useAppStore = create<AppState>((set, get) => {
       if (catalogContext) {
         const index = nextCatalogIndex(catalogContext);
         if (index === null) {
-          if (get().settings.autoplayEnabled) {
-            await get().startAutoplay(catalogContext.tracks[catalogContext.index]);
-            return;
-          }
           set({ notice: 'Fin de la liste de lecture.' });
           return;
         }
@@ -2367,15 +1971,6 @@ export const useAppStore = create<AppState>((set, get) => {
         const index = context.index + 1;
         set({ context: { ...context, index } });
         await get().playHit(context.items[index]);
-        return;
-      }
-
-      // A single track or a file list also ends with recommendations when the
-      // user opted in and the file is matched to a catalog track.
-      const current = get().current;
-      const currentTrack = current ? get().trackForHit(current.hit) : null;
-      if (currentTrack && get().settings.autoplayEnabled) {
-        await get().startAutoplay(currentTrack);
         return;
       }
 
@@ -2474,10 +2069,8 @@ export const useAppStore = create<AppState>((set, get) => {
       set(state => ({ pages: [...state.pages, page], playerOpen: false, sheet: null }));
       if (page.kind === 'artist') {
         void get().loadArtistPage(page.id);
-      } else if (page.kind === 'album') {
-        void get().loadAlbumPage(page.id);
       } else {
-        void get().loadMusicMap(page.id);
+        void get().loadAlbumPage(page.id);
       }
     },
 
@@ -2493,8 +2086,6 @@ export const useAppStore = create<AppState>((set, get) => {
 
     loadArtistPage: (id, force = false) => loadPage('artistPages', id, force, () => catalog.artist(id)),
     loadAlbumPage: (id, force = false) => loadPage('albumPages', id, force, () => catalog.album(id)),
-    loadMusicMap: (id, force = false) =>
-      loadPage('musicMaps', id, force, () => buildMusicMap({ id }, catalog)),
     loadHome: async (force = false) => {
       const artists = get().settings.catalogEnabled ? recentArtists(get().library) : [];
 
@@ -2579,11 +2170,7 @@ export const useAppStore = create<AppState>((set, get) => {
       return promise;
     },
 
-    playCatalogTrack: (track, context) => {
-      autoplaySeen.clear();
-      autoplaySeen.add(recommendationKey(track));
-      return playCatalog(track, context, 0, true);
-    },
+    playCatalogTrack: (track, context) => playCatalog(track, context, 0, true),
 
     enqueueCatalogTrack: (track, first = false) => {
       set({ notice: 'Recherche de sources…' });
@@ -2600,79 +2187,6 @@ export const useAppStore = create<AppState>((set, get) => {
     },
 
     trackForHit: hit => get().hitTracks[hitKey(hit)] ?? null,
-
-    startAutoplay: async (seed?: CatalogTrack) => {
-      const context = get().catalogContext;
-      const current = get().current;
-      const source =
-        seed ??
-        (context ? context.tracks[context.index] : null) ??
-        (current ? get().trackForHit(current.hit) : null);
-
-      if (!source) {
-        set({ notice: 'Fin de la liste de lecture.' });
-        return;
-      }
-      if (!get().settings.catalogEnabled) {
-        set({ notice: 'Catalogue en ligne désactivé : pas de recommandations.' });
-        return;
-      }
-      if (get().connection !== 'online') {
-        set({ notice: 'Hors ligne : lecture automatique arrêtée.' });
-        return;
-      }
-      if (autoplayRunning) {
-        return;
-      }
-
-      autoplayRunning = true;
-      const sequence = catalogPlaySequence;
-
-      try {
-        const excluded = new Set(autoplaySeen);
-        excluded.add(recommendationKey(source));
-        const result = await recommendTracks(catalog, source, excluded, {
-          limit: 10,
-          maxRelatedArtists: 4,
-        });
-
-        // The user played something else while we asked the catalog.
-        if (sequence !== catalogPlaySequence) {
-          return;
-        }
-
-        if (result.tracks.length === 0) {
-          set({
-            notice:
-              result.reason === 'error'
-                ? 'Recommandations indisponibles.'
-                : 'Fin de la lecture automatique.',
-          });
-          return;
-        }
-
-        for (const track of result.tracks) {
-          autoplaySeen.add(recommendationKey(track));
-        }
-        // Bounded session memory: old entries stop protecting against repeats,
-        // which is fine after hundreds of tracks.
-        while (autoplaySeen.size > 300) {
-          const oldest = autoplaySeen.values().next().value;
-          if (oldest === undefined) {
-            break;
-          }
-          autoplaySeen.delete(oldest);
-        }
-
-        debugLog('play', `lecture automatique : ${result.tracks.length} recommandation(s)`);
-        await playCatalog(result.tracks[0], { label: 'Recommandations', tracks: result.tracks, index: 0 }, 0, false);
-      } catch (error) {
-        debugLog('play', `lecture automatique indisponible : ${errorMessage(error)}`);
-        set({ notice: 'Recommandations indisponibles.' });
-      } finally {
-        autoplayRunning = false;
-      }
-    },
 
     playArtistRadio: async (artistId, name) => {
       try {

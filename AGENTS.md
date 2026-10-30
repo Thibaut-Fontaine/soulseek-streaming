@@ -48,30 +48,19 @@ src/core/            pure TypeScript, no React Native imports, unit-tested in No
   protocol.ts        Soulseek message codes, encoders, parsers (zlib search replies)
   soulseekClient.ts  server + peer connections, searches (several at once), transfers, shares
   transfer.ts, chunkBuffer.ts, framer.ts, bytes.ts, uploads.ts, id3.ts
-  buffer.ts          playback buffer target (500 KiB default, 15 % of the file)
-  search.ts          query cleaning, bitrate preference, Levenshtein scoring, ranking of Soulseek hits
+  search.ts          query cleaning, Levenshtein scoring, ranking of Soulseek hits
   catalog.ts         CatalogProvider interface + Deezer provider (throttled, cached)
   catalogTypes.ts    catalog entities and store contract (tracks, artists, albums, pages)
-  musicMap.ts        bounded related-artist graph for the Music Map page
-  autoplay.ts        catalog recommendations when a list ends (no repeats)
-  transcode.ts       pure smallest-source / 94 kbps policy (native encoder blocked)
-  autoBrowse.ts      Android Auto browse tree over library/device/cache
-  logPrivacy.ts      validation + redaction shared by the app and log server
   unify.ts           match Soulseek files to catalog tracks (title, artist, duration)
   share.ts           shared track links (soulstream://, Deezer URLs); MainActivity
                      turns text shared to the app into a link
   types.ts           SearchHit, MP3-only policy, path parsing
 src/services/        streaming orchestration, settings + Keychain, track cache, library, debug log
-                     playback session persistence (resume after a crash or close),
-                     update manifest check and APK verification
-src/state/updateStore.ts  update prompt state (check, download progress, install)
-server/version-api/  GET /api/app/version contract + fixture (not deployed by app releases)
 src/stream/          local HTTP Range proxy for the native player
 src/state/store.ts   zustand store: search, catalog, pages, playback, fallback, library
 src/ui/              screens, pages (artist/album), sheets, components, theme
 src/player/          track-player setup and background service
 src/transport/       TCP transport: react-native-tcp-socket (app), node:net (tests)
-server/logs/         VPS-ready log ingest API (HTTP adapter, retention, file store)
 __tests__/           jest suites; fixtures/deezer/ holds recorded Deezer answers
 test-utils/          fake Soulseek server + peers (multiPeerNetwork), UI fixtures
 tools/               fake-network.ts (dev server), showcase.mjs, icon/ (app icon source
@@ -85,10 +74,7 @@ catalog (no Soulseek request). Soulseek is searched for a title when it is
 played (`playCatalogTrack` → `resolveTrack`) with a query ladder
 (`soulseekLadder` in `unify.ts`: artist + title, then title only, then
 artist + album, each tried only if the previous found no source, 9 s in all),
-which then plays the best source with automatic fallback to the next ones. A
-source that has not sent a byte after 5 s is abandoned; when every known source
-failed, one fresh Soulseek search looks for another peer before the final
-error. A Soulseek file search for the query
+which then plays the best source with automatic fallback to the next ones. A Soulseek file search for the query
 runs only when the catalog is off, finds nothing or is unreachable, or when
 the user taps "Chercher les fichiers sur Soulseek" (`searchFilesToo`); then
 the catalog's spelling is searched too (fixes typos) and `unify.ts` groups the
@@ -110,23 +96,9 @@ an accent-free copy when they have accents.
   release builds use R8. JS stalls ≥ 300 ms are journaled (`perf` tag).
 - **Minimise Soulseek requests**: no Soulseek search while browsing the
   catalog; one search per played title (plus the accent-free spelling),
-  the next ladder step only when it found no source, and one recovery search
-  only when every known source failed;
+  the next ladder step only when it found no source;
   peer address cache, queue polling at most once a minute, no
   distributed search tree, no chat or user watching.
-- **Offline playback**: downloaded and imported tracks play from the device
-  cache with no network and no `StreamingService`; only an uncached track
-  needs the client, and it shows a clear offline message.
-- **Reconnection**: network failures keep the client alive and retrying with
-  backoff (the first attempt included); authentication failures stop for good;
-  returning to the foreground checks an online connection and reconnects
-  otherwise.
-- **Playback buffer**: 500 KiB by default (`bufferMb: 0.5`, shown "500 Ko"),
-  still 15 % of the file within that cap; stored v1 settings are migrated.
-- **Bitrate**: among otherwise equivalent sources, prefer the lighter file
-  (≤128 kbps first, then 160/192/256/320); unknown bitrates are neutral and a
-  heavy file stays playable when it is the only source. One preference in
-  `core/search.ts` drives ranking and source selection.
 - Nothing plays until the user taps a result. Short files (< 45 s) are
   previews and are penalised.
 - **Catalog**: Deezer's public API, no key. Its terms are non-commercial only;
@@ -137,16 +109,6 @@ an accent-free copy when they have accents.
 - **Home page**: only content derived from the user's listening history
   (recent artists, albums of recent tracks, similar artists). No charts,
   trends or genres — this was an explicit product decision.
-- **Privacy**: uploader names are hidden by default (`showUploaders: false`):
-  the player, mini player, source lists, search results, errors and shared
-  debug journals show a neutral "Pair". Réglages → Confidentialité reveals
-  them. The network is not named in the interface; user-facing sentences live
-  in `src/strings.ts`.
-- **Updates**: checked in the background from `GET /api/app/version` on the
-  VPS; only a strictly greater `versionCode` prompts. The APK link must be
-  HTTPS and the file's SHA-256 must match the manifest before the system
-  installer is opened (never a silent install). `server/version-api/` is a
-  contract and fixture, not deployed by app releases.
 - No other external service (analytics, LLM APIs, paid APIs) without an
   explicit decision from the owner.
 - UI stays simple, Spotify-like: one clear action per surface, mini player,
@@ -204,6 +166,3 @@ an accent-free copy when they have accents.
 | `docs/performance-audit.md` | Responsiveness audit: measurements, fixes, open checks |
 | `docs/peer-search-research.md` | How peers match queries; query problems and the query ladder |
 | `docs/library-import-research.md` | Importing a library from other music apps (parked) |
-| `docs/bitrate-transcode.md` | Smallest-source policy, 94 kbps encoder options and blocker |
-| `docs/android-auto.md` | Android Auto service, bridge, tests and DHU plan |
-| `server/logs/README.md` | Log ingest API, privacy contract and VPS steps |
