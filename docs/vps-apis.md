@@ -108,10 +108,10 @@ served from `/var/www/thibautfontaine.space/streaming/dev/version.json`:
   "versionCode": 19,
   "versionName": "1.3.0-beta16",
   "apkUrl": "https://thibautfontaine.space/streaming/dev/SoulStream.apk",
-  "sha256": "ae83058dfc7b8e1ecfea16c2251fac06999c3a8ddd0e7f8428e7d196931d5584",
-  "sizeBytes": 52366827,
+  "sha256": "6fc75bb766480d95cf730010e77a4c6589cb5cb6f3a580e023950429cbf08b3b",
+  "sizeBytes": 52368599,
   "notes": "Build dev 1.3.0-beta16 (lots 1-3).",
-  "publishedAt": "2026-10-30T09:36:00Z"
+  "publishedAt": "2026-10-30T12:11:00Z"
 }
 ```
 
@@ -137,7 +137,7 @@ silently.
 7. On next app launch, a strictly newer code shows the prompt.
 
 Current dev build: **1.3.0-beta16 / versionCode 19**, SHA
-`ae83058dfc7b8e1ecfea16c2251fac06999c3a8ddd0e7f8428e7d196931d5584`.
+`6fc75bb766480d95cf730010e77a4c6589cb5cb6f3a580e023950429cbf08b3b`.
 The public beta15 app (versionCode 18) does not contain the update client yet;
 only the dev APK does.
 
