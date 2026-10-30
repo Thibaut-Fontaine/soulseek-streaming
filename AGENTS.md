@@ -48,7 +48,8 @@ src/core/            pure TypeScript, no React Native imports, unit-tested in No
   protocol.ts        Soulseek message codes, encoders, parsers (zlib search replies)
   soulseekClient.ts  server + peer connections, searches (several at once), transfers, shares
   transfer.ts, chunkBuffer.ts, framer.ts, bytes.ts, uploads.ts, id3.ts
-  search.ts          query cleaning, Levenshtein scoring, ranking of Soulseek hits
+  buffer.ts          playback buffer target (500 KiB default, 15 % of the file)
+  search.ts          query cleaning, bitrate preference, Levenshtein scoring, ranking of Soulseek hits
   catalog.ts         CatalogProvider interface + Deezer provider (throttled, cached)
   catalogTypes.ts    catalog entities and store contract (tracks, artists, albums, pages)
   unify.ts           match Soulseek files to catalog tracks (title, artist, duration)
@@ -74,7 +75,10 @@ catalog (no Soulseek request). Soulseek is searched for a title when it is
 played (`playCatalogTrack` → `resolveTrack`) with a query ladder
 (`soulseekLadder` in `unify.ts`: artist + title, then title only, then
 artist + album, each tried only if the previous found no source, 9 s in all),
-which then plays the best source with automatic fallback to the next ones. A Soulseek file search for the query
+which then plays the best source with automatic fallback to the next ones. A
+source that has not sent a byte after 5 s is abandoned; when every known source
+failed, one fresh Soulseek search looks for another peer before the final
+error. A Soulseek file search for the query
 runs only when the catalog is off, finds nothing or is unreachable, or when
 the user taps "Chercher les fichiers sur Soulseek" (`searchFilesToo`); then
 the catalog's spelling is searched too (fixes typos) and `unify.ts` groups the
@@ -96,9 +100,23 @@ an accent-free copy when they have accents.
   release builds use R8. JS stalls ≥ 300 ms are journaled (`perf` tag).
 - **Minimise Soulseek requests**: no Soulseek search while browsing the
   catalog; one search per played title (plus the accent-free spelling),
-  the next ladder step only when it found no source;
+  the next ladder step only when it found no source, and one recovery search
+  only when every known source failed;
   peer address cache, queue polling at most once a minute, no
   distributed search tree, no chat or user watching.
+- **Offline playback**: downloaded and imported tracks play from the device
+  cache with no network and no `StreamingService`; only an uncached track
+  needs the client, and it shows a clear offline message.
+- **Reconnection**: network failures keep the client alive and retrying with
+  backoff (the first attempt included); authentication failures stop for good;
+  returning to the foreground checks an online connection and reconnects
+  otherwise.
+- **Playback buffer**: 500 KiB by default (`bufferMb: 0.5`, shown "500 Ko"),
+  still 15 % of the file within that cap; stored v1 settings are migrated.
+- **Bitrate**: among otherwise equivalent sources, prefer the lighter file
+  (≤128 kbps first, then 160/192/256/320); unknown bitrates are neutral and a
+  heavy file stays playable when it is the only source. One preference in
+  `core/search.ts` drives ranking and source selection.
 - Nothing plays until the user taps a result. Short files (< 45 s) are
   previews and are penalised.
 - **Catalog**: Deezer's public API, no key. Its terms are non-commercial only;
