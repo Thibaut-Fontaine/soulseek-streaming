@@ -173,6 +173,7 @@ Each was a real bug; the commit body has the details.
   timed source search never ends and the next song never starts. Keep
   `stopForegroundGracePeriod` longer than a slow next-track lookup: Android
   12+ won't let the service return to the foreground from the background.
+  Details and next steps: `docs/background-playback.md`.
 - **"No source" is cached 5 min while moving through a list**, and a whole
   source lookup is capped at 9 s; a slow re-search with music stopped
   preceded a crash report (`6bb2ab1`).
@@ -228,4 +229,5 @@ Full measurements: `docs/performance-audit.md`.
 | `docs/superpowers/` | Specs and plans of past work (e.g. low-end performance run) |
 | `docs/peer-search-research.md` | How peers match queries; query problems and the query ladder |
 | `docs/library-import-research.md` | Importing a library from other music apps (parked) |
+| `docs/background-playback.md` | Next song with the screen locked: cause, beta18 workaround, native-app practice, next steps |
 | `docs/vps-apis.md` | VPS log ingest API, version manifest, deployment and update procedure |
