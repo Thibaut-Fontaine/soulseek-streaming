@@ -25,14 +25,7 @@ Seen on the emulator (fake network and real Soulseek, test account
 - Owner report, parked until a screen recording: the full player could
   not be closed (it still scrolled) around "Autre source"; not reproduced.
 
-## 2. Next track (requested by Leo, 2026-10-30)
-
-- **Pre-cache the next song in the queue**: once the current track is fully
-  downloaded, download the next one in the queue into the track cache.
-  Section 4 has the detailed plan (limits, cancel on skip). Decision for the
-  co-owners: on by default, or a setting as section 4 proposes.
-
-## 3. Audit asynchronous behaviour and responsiveness: device checks
+## 2. Audit asynchronous behaviour and responsiveness: device checks
 
 Code audit and fixes done (`docs/performance-audit.md`): search scoring
 (534 ms → 5.5 ms per update), chunked download writes, cover decoding,
@@ -51,25 +44,16 @@ catalog request priority, dead-connection detection after sleep. Left:
   virtualized library, small backdrop blur, R8). If tracks still stutter
   when they start on modest phones: native (Kotlin) data path (see the audit).
 
-## 4. Optional pre-download of the next track (setting, off by default)
+## 3. Lighter look-ahead source search
 
-Not implemented. Today, when an album/radio/top-tracks list plays, only the
-next track's *sources* are looked up in advance (one Soulseek search,
-`playCatalog` in `src/state/store.ts`); nothing is downloaded ahead.
+While a list plays, the next track's sources are looked up in advance
+(`playCatalog`), then that track is pre-downloaded once the current one is
+complete (`prefetchNext`). The look-ahead runs the whole query ladder; its
+title-only step (e.g. "crusade") caused ~9,500 peer connection requests in
+two minutes on the real network (audit #12): skip that step for look-ahead
+searches (it still runs when the track is played).
 
-- Add a setting in Réglages (e.g. "Précharger le titre suivant", off by
-  default; maybe "Wi-Fi uniquement" like sharing) — not automatic.
-- When on: once the current track is fully downloaded, download the next one
-  in the list (queue first, then the play context) into the track cache
-  (`trackCache.ts`), so it starts instantly and gaplessly.
-- Respect the existing limits: one transfer at a time per peer, cache size,
-  Wi-Fi-only option, cancel the pre-download when the user skips elsewhere.
-- Decide whether the automatic source lookup for the next track should also
-  move behind this setting. Its title-only fallback query (e.g. "crusade")
-  caused ~9,500 peer connection requests in two minutes on the real
-  network (audit #12); at least skip that step for look-ahead searches.
-
-## 5. One Soulseek search per album
+## 4. One Soulseek search per album
 
 When an album starts playing, search "artist album" once and match the
 files to every track of the album (`sourcesForTrack` per track). The query
@@ -78,7 +62,7 @@ track and only when the other steps failed. Albums are
 shared as folders, so one request usually covers them, from the same peer and
 quality. Only tracks still without a source get their own search on play.
 
-## 6. Check behaviour on older, low-RAM devices (last)
+## 5. Check behaviour on older, low-RAM devices (last)
 
 - Test on an older / low-RAM Android device or emulator profile (2–3 GB RAM,
   older Android version; minSdk is 24).

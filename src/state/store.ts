@@ -583,6 +583,9 @@ export const useAppStore = create<AppState>((set, get) => {
     });
 
     instance.events.on('transfer', snapshot => {
+      if (snapshot.state === 'complete' && snapshot.id === get().current?.transferId) {
+        void prefetchNext();
+      }
       set(state => {
         // While preparing, the playback loop handles failures (and falls back
         // to another source). Once playing, a failure only means no more
@@ -952,6 +955,7 @@ export const useAppStore = create<AppState>((set, get) => {
       contentType: contentTypeFor(hit.filename),
     });
     await TrackPlayer.play();
+    void prefetchNext();
   }
 
   async function playWithFallback(first: SearchHit): Promise<void> {
@@ -1445,6 +1449,65 @@ export const useAppStore = create<AppState>((set, get) => {
     return context.index + 1 < context.tracks.length ? context.index + 1 : null;
   }
 
+  /**
+   * The next song to pre-download: the queue first, then the list playing.
+   * Never starts a Soulseek search: a catalog list uses the look-ahead
+   * lookup `playCatalog` already made.
+   */
+  async function nextHitToPrefetch(): Promise<SearchHit | null> {
+    const { queue, context, catalogContext, shuffle } = get();
+    if (queue.length > 0) {
+      return queue[0];
+    }
+    if (shuffle) {
+      return null;
+    }
+    if (context && context.index + 1 < context.items.length) {
+      return context.items[context.index + 1];
+    }
+    if (catalogContext && catalogContext.index + 1 < catalogContext.tracks.length) {
+      const next = catalogContext.tracks[catalogContext.index + 1];
+      const inFlight = resolving.get(next.id);
+      const existing = get().resolutions[next.id];
+      const fresh = existing?.status === 'found' && Date.now() - (resolvedAt.get(next.id) ?? 0) < RESOLUTION_TTL_MS;
+      const resolution = inFlight ? await inFlight : fresh ? existing : null;
+      return resolution?.sources[0]?.hit ?? null;
+    }
+    return null;
+  }
+
+  /**
+   * Once the current track is fully on the device, downloads the next one
+   * into the cache so it starts instantly. One at a time, after the current
+   * download so they never share the bandwidth.
+   */
+  async function prefetchNext(): Promise<void> {
+    const instance = service;
+    const current = get().current;
+    if (!instance || !current || get().connection !== 'online') {
+      return;
+    }
+    const downloaded = current.source === 'cache' || instance.getTransfer(current.transferId)?.state === 'complete';
+    if (!downloaded) {
+      return;
+    }
+
+    const sequence = playSequence;
+    const hit = await nextHitToPrefetch();
+    if (sequence !== playSequence || service !== instance) {
+      return;
+    }
+    // No next song (any more): drop a pre-download of an older one.
+    if (!hit || hitKey(hit) === hitKey(current.hit) || deniedPeers.has(hit.username.toLowerCase())) {
+      instance.cancelPrefetch();
+      return;
+    }
+    const wasRunning = instance.prefetchTransferId;
+    if (instance.prefetch(hit) && instance.prefetchTransferId !== wasRunning) {
+      debugLog('play', `préchargement du suivant : ${hit.username} — ${hit.filename}`);
+    }
+  }
+
   /** Plays a file (from the device cache when it is there). */
   async function startHit(hit: SearchHit): Promise<void> {
     if (!isStreamableFile(hit.filename)) {
@@ -1525,7 +1588,9 @@ export const useAppStore = create<AppState>((set, get) => {
       // user stopped it or moved on meanwhile).
       const upcoming = context ? context.tracks[context.index + 1] : undefined;
       if (upcoming && !get().shuffle && sequence === catalogPlaySequence && get().current) {
-        void get().resolveTrack(upcoming);
+        void get()
+          .resolveTrack(upcoming)
+          .then(() => prefetchNext());
       }
       return;
     }
@@ -2061,17 +2126,21 @@ export const useAppStore = create<AppState>((set, get) => {
       }
     },
 
-    enqueue: (hit, first = false) =>
+    enqueue: (hit, first = false) => {
       set(state => ({
         queue: first ? [hit, ...state.queue] : [...state.queue, hit],
         notice: first ? 'Sera lu ensuite.' : 'Ajouté à la file d’attente.',
-      })),
+      }));
+      void prefetchNext();
+    },
 
     toggleShuffle: () => set(state => ({ shuffle: !state.shuffle })),
     toggleRepeat: () => set(state => ({ repeat: !state.repeat })),
 
-    removeFromQueue: index =>
-      set(state => ({ queue: state.queue.filter((_, i) => i !== index) })),
+    removeFromQueue: index => {
+      set(state => ({ queue: state.queue.filter((_, i) => i !== index) }));
+      void prefetchNext();
+    },
 
     toggleLike: hit => {
       const meta = get().meta[hitKey(hit)];

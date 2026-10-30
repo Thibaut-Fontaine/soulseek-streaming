@@ -5,6 +5,7 @@ import { Emitter } from '../core/emitter';
 import type { ConnectionState, SoulseekClientEvents } from '../core/soulseekClient';
 import { SoulseekClient } from '../core/soulseekClient';
 import type { TransferSnapshot } from '../core/transfer';
+import { hitKey } from '../core/types';
 import type { SearchHit } from '../core/types';
 import { ReactNativeTransport } from '../transport/rnTcpTransport';
 import type { Transport } from '../transport/types';
@@ -43,6 +44,8 @@ export class StreamingService {
   private unsubscribeNetInfo: (() => void) | null = null;
   private networkType: string | null = null;
   private unsubscribeCache: (() => void) | null = null;
+  /** Background download of the next track, into the cache (one at a time). */
+  private prefetching: { transferId: string; key: string } | null = null;
 
   private active:
     | {
@@ -163,7 +166,13 @@ export class StreamingService {
             read: (offset, length) => transfer.buffer.read(offset, length),
           })
           .then(() => this.client?.refreshShares())
-          .catch(() => {});
+          .catch(() => {})
+          .finally(() => {
+            // Saved: a pre-download no one plays yet needs no memory any more.
+            if (this.prefetching?.transferId === snapshot.id) {
+              this.cancelPrefetch();
+            }
+          });
       }
     });
 
@@ -185,6 +194,7 @@ export class StreamingService {
 
   async stop(): Promise<void> {
     this.cancelActive();
+    this.cancelPrefetch();
     this.unsubscribeNetInfo?.();
     this.unsubscribeNetInfo = null;
     this.unsubscribeCache?.();
@@ -238,9 +248,19 @@ export class StreamingService {
       throw new Error('Non connecté');
     }
 
+    // The track being pre-downloaded: play from that transfer, bytes and all.
+    const key = hitKey(hit);
+    const adopted = this.prefetching?.key === key ? this.client.getTransfer(this.prefetching.transferId) : null;
+    if (adopted) {
+      this.prefetching = null;
+    } else {
+      this.cancelPrefetch();
+    }
+
     this.cancelActive();
 
-    const transfer = this.client.createTransfer(hit);
+    const transfer =
+      adopted && (adopted.isActive || adopted.state === 'complete') ? adopted : this.client.createTransfer(hit);
     const id = transfer.id;
     // The URL carries a random token rather than the transfer id (which is
     // just user + file + time), so other apps on the device cannot guess it.
@@ -272,6 +292,42 @@ export class StreamingService {
     unsubscribe();
     this.client?.cancelTransfer(transferId);
     this.active = null;
+  }
+
+  /**
+   * Downloads `hit` in the background so it plays from the cache later.
+   * Replaces any other pre-download. False when nothing was started.
+   */
+  prefetch(hit: SearchHit): boolean {
+    const key = hitKey(hit);
+    if (this.prefetching?.key === key) {
+      return true;
+    }
+    this.cancelPrefetch();
+
+    if (!this.client || this.cache?.findByHit(hit) || (this.active && hitKey(this.active.hit) === key)) {
+      return false;
+    }
+
+    try {
+      this.prefetching = { transferId: this.client.createTransfer(hit).id, key };
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  cancelPrefetch(): void {
+    const prefetching = this.prefetching;
+    if (!prefetching) {
+      return;
+    }
+    this.prefetching = null;
+    this.client?.cancelTransfer(prefetching.transferId);
+  }
+
+  get prefetchTransferId(): string | null {
+    return this.prefetching?.transferId ?? null;
   }
 
   get activeTransferId(): string | null {

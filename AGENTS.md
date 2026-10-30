@@ -76,7 +76,10 @@ played (`playCatalogTrack` → `resolveTrack`) with a query ladder
 artist + album, each tried only if the previous found no source, 9 s in all),
 which then plays the best source with automatic fallback to the next ones;
 if every source fails (refused, queue full, unreachable), the ladder steps
-not searched yet run once more (`searchMoreSources`). A Soulseek file search for the query
+not searched yet run once more (`searchMoreSources`). Once the current track is fully
+downloaded, the next one (queue first, then the list playing) is
+pre-downloaded into the track cache (`prefetchNext`), with no extra search:
+a catalog list reuses the look-ahead source lookup. A Soulseek file search for the query
 runs only when the catalog is off, finds nothing or is unreachable, or when
 the user taps "Chercher les fichiers sur Soulseek" (`searchFilesToo`); then
 the catalog's spelling is searched too (fixes typos) and `unify.ts` groups the

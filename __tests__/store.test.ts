@@ -248,6 +248,79 @@ describe('search and library', () => {
   });
 });
 
+describe('next track pre-download', () => {
+  const OTHER = 'Music\\Fake Artist\\Album\\02 - Second Song.mp3';
+  let cache: TrackCache;
+
+  beforeEach(async () => {
+    cache = new TrackCache(memoryFs(), 50_000_000);
+    await cache.load();
+    setTrackCache(cache);
+  });
+
+  afterEach(() => setTrackCache(null));
+
+  test('the queued song downloads once the current one is complete, then plays from the device', async () => {
+    await withNetwork(
+      [
+        { username: 'peer_a', filename: TRACK, behavior: 'ok' },
+        { username: 'peer_b', filename: OTHER, behavior: 'ok' },
+      ],
+      async network => {
+        await useAppStore.getState().runSearch('fake artist');
+        const hits = useAppStore.getState().results.map(r => r.hit);
+        const first = hits.find(hit => hit.filename === TRACK)!;
+        const second = hits.find(hit => hit.filename === OTHER)!;
+
+        useAppStore.getState().enqueue(second);
+        await useAppStore.getState().playTrack(first);
+        await waitFor(() => useAppStore.getState().current?.phase === 'playing');
+        // Nothing is fetched ahead while the current track still downloads.
+        if (useAppStore.getState().transfers[useAppStore.getState().current!.transferId]?.state !== 'complete') {
+          expect(network.queueRequests).toEqual(['peer_a']);
+        }
+
+        await waitFor(() => cache.findByHit(second) !== null);
+        expect(network.queueRequests).toEqual(['peer_a', 'peer_b']);
+
+        await useAppStore.getState().playNext();
+        expect(useAppStore.getState().current?.hit.filename).toBe(OTHER);
+        expect(useAppStore.getState().current?.source).toBe('cache');
+        expect(network.queueRequests).toEqual(['peer_a', 'peer_b']);
+      },
+    );
+  });
+
+  test('playing something else cancels the pre-download', async () => {
+    await withNetwork(
+      [
+        { username: 'peer_a', filename: TRACK, behavior: 'ok' },
+        { username: 'peer_b', filename: OTHER, behavior: 'silent' },
+      ],
+      async () => {
+        await useAppStore.getState().runSearch('fake artist');
+        const hits = useAppStore.getState().results.map(r => r.hit);
+        const first = hits.find(hit => hit.filename === TRACK)!;
+        const second = hits.find(hit => hit.filename === OTHER)!;
+
+        useAppStore.getState().enqueue(second);
+        await useAppStore.getState().playTrack(first);
+        // TRACK finishes and lands in the cache; OTHER's peer never answers.
+        await waitFor(() => cache.findByHit(first) !== null);
+        await waitFor(() => Object.values(useAppStore.getState().transfers).some(t => t.username === 'peer_b'));
+
+        useAppStore.getState().removeFromQueue(0);
+        await useAppStore.getState().playTrack(first);
+        await waitFor(() =>
+          Object.values(useAppStore.getState().transfers).every(
+            t => t.username !== 'peer_b' || t.state === 'cancelled',
+          ),
+        );
+      },
+    );
+  });
+});
+
 describe('login without network', () => {
   async function closedPort(): Promise<number> {
     const net = jest.requireActual<typeof import('node:net')>('node:net');
