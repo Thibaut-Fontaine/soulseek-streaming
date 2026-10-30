@@ -8,8 +8,12 @@ export interface Settings {
   listenPort: number;
   /** Local HTTP port used to feed the native player. 0 lets the OS choose. */
   streamPort: number;
-  /** How much of a track to buffer before playback starts, in MiB. */
-  bufferMb: number;
+  /**
+   * How much of a track to buffer before playback starts, in MiB; 0 = auto
+   * (0.5-1 MB from the peer's rate, `core/buffering.ts`). Named
+   * `startBufferMb` so installs with the old 2 MB default move to auto.
+   */
+  startBufferMb: number;
   /** Share the tracks already played with other users. */
   shareEnabled: boolean;
   /** Only upload while on Wi-Fi (or Ethernet). */
@@ -33,7 +37,7 @@ export const DEFAULT_SETTINGS: Settings = {
   serverPort: 2242,
   listenPort: 22345,
   streamPort: 0,
-  bufferMb: 2,
+  startBufferMb: 0,
   shareEnabled: true,
   shareWifiOnly: true,
   cacheMb: 1024,
@@ -61,10 +65,10 @@ export async function loadSettings(): Promise<Settings> {
       serverPort: clampPort(parsed.serverPort, DEFAULT_SETTINGS.serverPort),
       listenPort: clampPort(parsed.listenPort, DEFAULT_SETTINGS.listenPort, true),
       streamPort: clampPort(parsed.streamPort, DEFAULT_SETTINGS.streamPort, true),
-      bufferMb:
-        typeof parsed.bufferMb === 'number' && parsed.bufferMb >= 0.25 && parsed.bufferMb <= 64
-          ? parsed.bufferMb
-          : DEFAULT_SETTINGS.bufferMb,
+      startBufferMb:
+        typeof parsed.startBufferMb === 'number' && (parsed.startBufferMb === 0 || (parsed.startBufferMb >= 0.25 && parsed.startBufferMb <= 64))
+          ? parsed.startBufferMb
+          : DEFAULT_SETTINGS.startBufferMb,
       shareEnabled:
         typeof parsed.shareEnabled === 'boolean' ? parsed.shareEnabled : DEFAULT_SETTINGS.shareEnabled,
       shareWifiOnly:

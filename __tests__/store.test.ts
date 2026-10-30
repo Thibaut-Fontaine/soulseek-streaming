@@ -69,7 +69,7 @@ async function withNetwork(peers: FakePeer[], run: (network: MultiPeerNetwork) =
       serverPort: network.serverPort,
       listenPort: 0,
       streamPort: 0,
-      bufferMb: 0.25,
+      startBufferMb: 0.25,
       shareEnabled: false,
       shareWifiOnly: true,
       cacheMb: 1024,
@@ -137,6 +137,16 @@ describe('playback with source fallback', () => {
         expect(useAppStore.getState().results.length).toBe(2);
       },
     );
+  });
+
+  test('plays with the automatic start buffer', async () => {
+    await withNetwork([{ username: 'auto_ok', filename: TRACK, behavior: 'ok' }], async () => {
+      const { settings } = useAppStore.getState();
+      useAppStore.setState({ settings: { ...settings, startBufferMb: 0 } });
+      await searchAndPickBest();
+      await waitFor(() => useAppStore.getState().current?.phase === 'playing');
+      expect(useAppStore.getState().current?.bufferTarget).toBeLessThanOrEqual(1024 * 1024);
+    });
   });
 
   test('moves on when a peer never answers', async () => {

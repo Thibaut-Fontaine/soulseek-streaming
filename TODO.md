@@ -25,14 +25,8 @@ Seen on the emulator (fake network and real Soulseek, test account
 - Owner report, parked until a screen recording: the full player could
   not be closed (it still scrolled) around "Autre source"; not reproduced.
 
-## 2. Playback start and next track (requested by Leo, 2026-10-30)
+## 2. Next track (requested by Leo, 2026-10-30)
 
-- **Smaller buffer before playing**: start after 0.5–1 MB depending on the
-  peer's rate (fast peer → 0.5 MB, slow peer → 1 MB). Today
-  `bufferTargetFor` in `src/state/store.ts` waits for 15 % of the file,
-  between 256 KiB and `settings.bufferMb` (default 2 MB). Measure the rate
-  over the first bytes received, pick the target from it, and keep enough
-  margin that playback doesn't stall right after it starts.
 - **Pre-cache the next song in the queue**: once the current track is fully
   downloaded, download the next one in the queue into the track cache.
   Section 4 has the detailed plan (limits, cancel on skip). Decision for the

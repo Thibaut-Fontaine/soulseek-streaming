@@ -21,9 +21,13 @@ import { Icon } from './Icon';
 import { colors, formatBytes, gutter, radius, spacing, type } from './theme';
 
 /** Buffer sizes offered by the slider, within the 0.25–64 MB bounds of `loadSettings`. */
-const BUFFER_STEPS = [0.25, 0.5, 1, 2, 4, 8, 16, 32, 64] as const;
+// 0 = auto: 0,5 à 1 Mo selon le débit du pair (`core/buffering.ts`).
+const BUFFER_STEPS = [0, 0.25, 0.5, 1, 2, 4, 8, 16, 32, 64] as const;
 
 function formatMb(value: number): string {
+  if (value === 0) {
+    return 'Auto';
+  }
   return `${String(value).replace('.', ',')} Mo`;
 }
 
@@ -148,18 +152,18 @@ function MainSettings({
 
   React.useEffect(() => {
     setPicked(null);
-  }, [settings.bufferMb]);
+  }, [settings.startBufferMb]);
 
   const status = connectionStatus(connection);
-  const bufferIndex = picked ?? nearestBufferIndex(settings.bufferMb);
-  const bufferMb = picked === null ? settings.bufferMb : BUFFER_STEPS[picked];
-  const bufferDirty = bufferMb !== settings.bufferMb;
+  const bufferIndex = picked ?? nearestBufferIndex(settings.startBufferMb);
+  const startBufferMb = picked === null ? settings.startBufferMb : BUFFER_STEPS[picked];
+  const bufferDirty = startBufferMb !== settings.startBufferMb;
 
   const saveBuffer = async () => {
     setSaving(true);
 
     try {
-      await applySettings({ ...settings, bufferMb });
+      await applySettings({ ...settings, startBufferMb });
     } finally {
       setSaving(false);
     }
@@ -204,10 +208,10 @@ function MainSettings({
             <View style={styles.sliderText}>
               <Text style={styles.rowTitle}>Tampon avant lecture</Text>
               <Text style={styles.rowHint}>
-                Plus grand = démarrage plus lent mais moins de coupures.
+                Auto : 0,5 à 1 Mo selon le débit du pair. Plus grand = démarrage plus lent mais moins de coupures.
               </Text>
             </View>
-            <Text style={styles.sliderValue}>{formatMb(bufferMb)}</Text>
+            <Text style={styles.sliderValue}>{formatMb(startBufferMb)}</Text>
           </View>
           <StepSlider
             values={BUFFER_STEPS}

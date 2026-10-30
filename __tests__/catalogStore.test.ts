@@ -113,7 +113,7 @@ async function withNetwork(
       serverPort: network.serverPort,
       listenPort: 0,
       streamPort: 0,
-      bufferMb: 0.25,
+      startBufferMb: 0.25,
       shareEnabled: false,
       shareWifiOnly: true,
       cacheMb: 1024,

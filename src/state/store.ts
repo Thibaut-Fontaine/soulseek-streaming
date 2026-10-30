@@ -63,6 +63,7 @@ import {
 import type { Library } from '../services/library';
 import type { LogTag } from '../services/debugLog';
 import { createBlobUtilFs } from '../services/blobUtilFs';
+import { autoBufferCeiling, autoBufferReached, fixedBufferTarget } from '../core/buffering';
 import { TrackCache } from '../services/trackCache';
 import type { CacheEntry } from '../services/trackCache';
 import { contentTypeFor } from '../stream/httpServer';
@@ -380,16 +381,6 @@ const DENIED_PATTERN = /refus|denied|banned|not shared|ne partage/i;
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
-}
-
-function bufferTargetFor(size: number, bufferMb: number): number {
-  if (size <= 0) {
-    return 256 * 1024;
-  }
-
-  const cap = Math.max(256 * 1024, bufferMb * 1024 * 1024);
-  const proportional = Math.floor(size * 0.15);
-  return Math.min(size, Math.max(256 * 1024, Math.min(cap, proportional)));
 }
 
 function rememberTransfers(
@@ -715,7 +706,9 @@ export const useAppStore = create<AppState>((set, get) => {
       throw new Error('Non connecté');
     }
 
-    const bufferTarget = bufferTargetFor(hit.size, get().settings.bufferMb);
+    const fixedMb = get().settings.startBufferMb;
+    // Auto (0): the target shown is the ceiling; playback may start sooner.
+    const bufferTarget = fixedMb > 0 ? fixedBufferTarget(hit.size, fixedMb) : autoBufferCeiling(hit.size);
     const prepared = service.prepareStream(hit);
     const id = prepared.transferId;
     const startedAt = Date.now();
@@ -725,7 +718,7 @@ export const useAppStore = create<AppState>((set, get) => {
     debugLog(
       'play',
       `source ${attempt} : ${hit.username} — ${hit.filename} (${hit.size} o, ${hit.bitrate ?? '?'} kbps, ` +
-        `slot ${hit.slotFree ? 'libre' : 'occupé'}, file ${hit.queueLength}) ; tampon visé ${bufferTarget} o ; URL ${prepared.url}`,
+        `slot ${hit.slotFree ? 'libre' : 'occupé'}, file ${hit.queueLength}) ; tampon visé ${fixedMb > 0 ? '' : 'auto ≤ '}${bufferTarget} o ; URL ${prepared.url}`,
     );
 
     set({
@@ -770,13 +763,20 @@ export const useAppStore = create<AppState>((set, get) => {
     );
     step('connexion F ouverte, octets en route');
     void readStreamMeta(id, hit);
+    const flowingSince = Date.now();
 
     await waitForTransfer(
       id,
       sequence,
       t =>
         t.state === 'complete' ||
-        t.buffer.total >= Math.min(bufferTarget, t.expectedSize),
+        (fixedMb > 0
+          ? t.buffer.total >= Math.min(bufferTarget, t.expectedSize)
+          : autoBufferReached(t.buffer.total, Date.now() - flowingSince, {
+              size: t.expectedSize || hit.size,
+              bitrate: hit.bitrate,
+              durationSec: hit.durationSec,
+            })),
       playbackTimeouts.bufferTotalMs,
       'Source trop lente',
       playbackTimeouts.stallMs,
@@ -1553,7 +1553,7 @@ export const useAppStore = create<AppState>((set, get) => {
       serverPort: 2242,
       listenPort: 22345,
       streamPort: 0,
-      bufferMb: 2,
+      startBufferMb: 0,
       shareEnabled: true,
       shareWifiOnly: true,
       cacheMb: 1024,

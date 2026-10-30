@@ -48,7 +48,7 @@ export function DebugLogScreen({ onBack }: { onBack: () => void }) {
       `${Platform.OS} ${String(Platform.Version)}`,
       `serveur ${state.settings.serverHost}:${state.settings.serverPort}, connexion ${state.connection}`,
       `port d'écoute ${state.listenPort || state.settings.listenPort}, port lecteur ${state.httpPort}`,
-      `tampon ${state.settings.bufferMb} Mo, partage ${state.settings.shareEnabled ? 'oui' : 'non'}`,
+      `tampon ${state.settings.startBufferMb === 0 ? 'auto' : `${state.settings.startBufferMb} Mo`}, partage ${state.settings.shareEnabled ? 'oui' : 'non'}`,
       state.current
         ? `en cours : ${state.current.phase} ${state.current.hit.username} ${state.current.error ?? ''}`
         : 'aucune lecture en cours',
