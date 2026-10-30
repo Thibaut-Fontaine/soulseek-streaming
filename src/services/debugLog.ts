@@ -4,6 +4,7 @@
  * Shows what happened when a track does not play; keeps the last MAX_ENTRIES
  * lines. Each line also goes to logcat (tag ReactNativeJS).
  */
+import { enqueueRemoteLog } from './remoteLog';
 
 export type LogTag = 'net' | 'peer' | 'transfer' | 'http' | 'player' | 'play' | 'app' | 'perf';
 
@@ -20,10 +21,18 @@ const listeners = new Set<() => void>();
 let notifyScheduled = false;
 
 export function debugLog(tag: LogTag, message: string): void {
-  entries.push({ at: Date.now(), tag, message });
+  const entry = { at: Date.now(), tag, message };
+  entries.push(entry);
 
   if (entries.length > MAX_ENTRIES) {
     entries.splice(0, entries.length - MAX_ENTRIES);
+  }
+
+  // Opt-in remote journal: redacted and queued asynchronously, never awaited.
+  try {
+    enqueueRemoteLog(entry);
+  } catch {
+    // Logging must never break playback or the UI.
   }
 
   // Release builds too: `adb logcat -s ReactNativeJS` reads the journal from

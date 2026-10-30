@@ -118,6 +118,7 @@ async function withNetwork(
       shareWifiOnly: true,
       cacheMb: 1024,
       catalogEnabled: true,
+      logUploadEnabled: false,
     },
     resolutions: {},
     hitTracks: {},

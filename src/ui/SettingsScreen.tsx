@@ -245,6 +245,23 @@ function MainSettings({
         />
       </View>
 
+      <Text style={styles.groupTitle}>Confidentialité</Text>
+      <View style={styles.group}>
+        <ListRow
+          icon="info"
+          title="Envoyer les journaux (anonyme)"
+          subtitle="Envoie les erreurs et étapes de lecture pour améliorer l’app. Identifiant anonyme ; ni compte, ni mot de passe, ni nom de pair, ni chemin de fichier. Désactivé par défaut."
+          last
+          right={
+            <Toggle
+              value={settings.logUploadEnabled}
+              onValueChange={value => toggle({ logUploadEnabled: value })}
+              accessibilityLabel="Envoyer les journaux (anonyme)"
+            />
+          }
+        />
+      </View>
+
       <Text style={styles.groupTitle}>Partage</Text>
       <View style={styles.group}>
         <ListRow

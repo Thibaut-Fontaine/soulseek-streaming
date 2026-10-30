@@ -46,6 +46,11 @@ import { clearCredentials, loadCredentials, loadSettings, saveCredentials, saveS
 import type { Credentials, Settings } from '../services/settings';
 import { StreamingService } from '../services/streaming';
 import { debugLog } from '../services/debugLog';
+import {
+  clearRemoteLogQueue,
+  configureRemoteLog,
+  startRemoteLog,
+} from '../services/remoteLog';
 import { takeLastCrash } from '../services/crashReport';
 import { reportPreviousExits } from '../services/exitInfo';
 import { encodeBase64 } from '../services/fastBase64';
@@ -1502,6 +1507,7 @@ export const useAppStore = create<AppState>((set, get) => {
       shareWifiOnly: true,
       cacheMb: 1024,
       catalogEnabled: true,
+      logUploadEnabled: false,
     },
 
     username: null,
@@ -1583,6 +1589,8 @@ export const useAppStore = create<AppState>((set, get) => {
           }
         }
         set({ settings, library, hitTracks });
+        configureRemoteLog(settings.logUploadEnabled === true);
+        void startRemoteLog();
 
         try {
           trackCache = new TrackCache(createBlobUtilFs(), settings.cacheMb * 1024 * 1024);
@@ -1758,6 +1766,12 @@ export const useAppStore = create<AppState>((set, get) => {
       const previous = get().settings;
       await saveSettings(settings);
       set({ settings });
+      configureRemoteLog(settings.logUploadEnabled === true);
+      if (settings.logUploadEnabled) {
+        void startRemoteLog();
+      } else {
+        void clearRemoteLogQueue();
+      }
       trackCache?.setLimit(settings.cacheMb * 1024 * 1024);
 
       // Only server and port changes need a new connection; the rest applies

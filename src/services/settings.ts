@@ -21,6 +21,11 @@ export interface Settings {
    * pages. Off: only Soulseek file names, nothing leaves for another service.
    */
   catalogEnabled: boolean;
+  /**
+   * Send the redacted debug journal to the SoulStream log service. Off by
+   * default; anonymous installation id, no account or peer details.
+   */
+  logUploadEnabled: boolean;
 }
 
 export interface Credentials {
@@ -38,6 +43,7 @@ export const DEFAULT_SETTINGS: Settings = {
   shareWifiOnly: true,
   cacheMb: 1024,
   catalogEnabled: true,
+  logUploadEnabled: false,
 };
 
 const SETTINGS_KEY = '@soulstream/settings/v1';
@@ -79,6 +85,10 @@ export async function loadSettings(): Promise<Settings> {
         typeof parsed.catalogEnabled === 'boolean'
           ? parsed.catalogEnabled
           : DEFAULT_SETTINGS.catalogEnabled,
+      logUploadEnabled:
+        typeof parsed.logUploadEnabled === 'boolean'
+          ? parsed.logUploadEnabled
+          : DEFAULT_SETTINGS.logUploadEnabled,
     };
   } catch {
     return { ...DEFAULT_SETTINGS };
