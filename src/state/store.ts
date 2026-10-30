@@ -276,6 +276,12 @@ interface AppState {
 let service: StreamingService | null = null;
 /** Tracks already played; also our shared folder. Created on init. */
 let trackCache: TrackCache | null = null;
+
+/** Tests inject a cache without running `init` (which needs native modules). */
+export function setTrackCacheForTests(cache: TrackCache | null): void {
+  trackCache = cache;
+}
+
 let initStarted = false;
 let searchSequence = 0;
 let playSequence = 0;
@@ -1384,16 +1390,20 @@ export const useAppStore = create<AppState>((set, get) => {
 
   /** Plays a file (from the device cache when it is there). */
   async function startHit(hit: SearchHit): Promise<void> {
-    if (!service) {
-      return;
-    }
-
     if (!isStreamableFile(hit.filename)) {
       set({ notice: 'Seuls les fichiers MP3 sont proposés par SoulStream.' });
       return;
     }
 
     const cached = trackCache?.findByHit(hit);
+
+    // Downloads and imported files play with no network and no client. Without
+    // this check, a cached track was silently ignored while offline (the old
+    // `if (!service) return` came first) and the app looked broken.
+    if (!cached && !service) {
+      set({ notice: 'Ce morceau n’est pas téléchargé : impossible de le lire hors ligne.' });
+      return;
+    }
 
     try {
       lastPlayStartedAt = Date.now();
