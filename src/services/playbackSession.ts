@@ -231,7 +231,6 @@ export function createSessionRecorder(options: SessionRecorderOptions): SessionR
   const { store, snapshot, position, debounceMs = 1000, tickMs = 5000 } = options;
   let timer: ReturnType<typeof setTimeout> | null = null;
   let ticker: ReturnType<typeof setInterval> | null = null;
-  let pending = false;
   let stopped = false;
 
   const cancelTimer = () => {
@@ -243,12 +242,6 @@ export function createSessionRecorder(options: SessionRecorderOptions): SessionR
 
   const flush = async (): Promise<void> => {
     cancelTimer();
-    const wasPending = pending;
-    pending = false;
-
-    if (!wasPending) {
-      return;
-    }
 
     const current = snapshot();
 
@@ -263,10 +256,6 @@ export function createSessionRecorder(options: SessionRecorderOptions): SessionR
       seconds = await position();
     } catch {
       // Keep the last known position (0) rather than failing the save.
-    }
-
-    if (stopped && !wasPending) {
-      return;
     }
 
     await saveSession(
@@ -285,13 +274,11 @@ export function createSessionRecorder(options: SessionRecorderOptions): SessionR
       return;
     }
 
-    pending = true;
     cancelTimer();
     timer = setTimeout(() => {
       void flush();
     }, debounceMs);
   };
-
   if (tickMs > 0) {
     ticker = setInterval(touch, tickMs);
     // Node/Jest timers keep the process alive; React Native's do not.
@@ -302,7 +289,6 @@ export function createSessionRecorder(options: SessionRecorderOptions): SessionR
     touch,
     flush,
     clear: async () => {
-      pending = false;
       cancelTimer();
       await clearSession(store);
     },

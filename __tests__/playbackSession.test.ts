@@ -148,6 +148,23 @@ describe('debounced session recorder', () => {
     expect(saved.positionSec).toBeCloseTo(77.2, 5);
   });
 
+  it('flushes the exact position when the app goes to the background', async () => {
+    const store = fakeStore();
+    const recorder = createSessionRecorder({
+      store,
+      debounceMs: 60_000,
+      tickMs: 0,
+      snapshot: () => session(),
+      position: async () => 88.75,
+    });
+
+    await recorder.flush();
+
+    const saved = JSON.parse(store.data.get(PLAYBACK_SESSION_KEY)!);
+    expect(saved.positionSec).toBeCloseTo(88.75, 5);
+    await recorder.stop();
+  });
+
   it('clears the stored session when playback stops', async () => {
     const store = fakeStore({ [PLAYBACK_SESSION_KEY]: serializeSession(session()) });
     let snapshot: PlaybackSession | null = session();

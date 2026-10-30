@@ -48,8 +48,19 @@ function knownUploaders(): string[] {
     ...state.device,
     ...state.library.history.map(saved => saved.hit),
     ...state.library.liked.map(saved => saved.hit),
+    ...Object.values(state.resolutions).flatMap(resolution => resolution.sources.map(source => source.hit)),
   ];
-  return [...new Set(hits.map(hit => hit?.username).filter((name): name is string => !!name))];
+  const names = hits.map(hit => hit?.username);
+
+  // `hitKey` is "username\0filename": keep names seen before the current list.
+  for (const key of Object.keys(state.hitTracks)) {
+    const separator = key.indexOf('\u0000');
+    if (separator > 0) {
+      names.push(key.slice(0, separator));
+    }
+  }
+
+  return [...new Set(names.filter((name): name is string => !!name))];
 }
 
 /** Réglages → Journal de débogage: every step of fetching and playing a track. */

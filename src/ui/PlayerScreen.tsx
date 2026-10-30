@@ -16,7 +16,7 @@ import TrackPlayer, { State, usePlaybackState, useProgress } from 'react-native-
 
 import type { SearchHit } from '../core/types';
 import { useAppStore } from '../state/store';
-import { isUploaderLabel, uploaderLabel } from '../strings';
+import { isUploaderLabel, redactUploaderNames, uploaderLabel } from '../strings';
 import { CoverBackdrop, Dot, IconButton, MarqueeText, StatusCard } from './components';
 import type { CardAction } from './components';
 import { ACTION_LABELS, SHARING_EXPLANATION, describePlaybackError } from './errors';
@@ -101,6 +101,7 @@ function PlayerContent({ translateY }: { translateY: Animated.Value }) {
   const reconnect = useAppStore(state => state.reconnect);
   const runSearch = useAppStore(state => state.runSearch);
   const setTab = useAppStore(state => state.setTab);
+  const showUploaders = useAppStore(state => state.settings.showUploaders);
 
   const insets = useSafeAreaInsets();
   const { width, height } = useWindowDimensions();
@@ -217,12 +218,12 @@ function PlayerContent({ translateY }: { translateY: Animated.Value }) {
     { label: 'Chercher ce titre', icon: 'search', onPress: searchThisTrack },
   ];
 
-  const failure = hasError
-    ? describePlaybackError(
-        current.error ?? 'Le flux audio n’a pas pu être lu. Le pair a peut-être coupé la connexion.',
-        { receivedRatio },
-      )
-    : null;
+  const failureMessage =
+    current.error ?? 'Le flux audio n’a pas pu être lu. Le pair a peut-être coupé la connexion.';
+  const shownFailureMessage = showUploaders
+    ? failureMessage
+    : redactUploaderNames(failureMessage, [hit.username]);
+  const failure = hasError ? describePlaybackError(shownFailureMessage, { receivedRatio }) : null;
 
   // Leave room for the controls on short screens.
   const artSize = Math.max(160, Math.min(width - SIDE * 2, height * 0.42, 420));

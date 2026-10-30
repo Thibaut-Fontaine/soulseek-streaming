@@ -74,7 +74,7 @@ import { createBlobUtilFs } from '../services/blobUtilFs';
 import { TrackCache } from '../services/trackCache';
 import type { CacheEntry } from '../services/trackCache';
 import { contentTypeFor } from '../stream/httpServer';
-import { messages, uploaderPhrase } from '../strings';
+import { messages, redactUploaderNames, uploaderPhrase } from '../strings';
 
 export type Tab = 'home' | 'search' | 'library' | 'settings';
 
@@ -536,6 +536,11 @@ async function seekToPosition(positionSec: number): Promise<void> {
 
 export const useAppStore = create<AppState>((set, get) => {
   const metaLoading = new Set<string>();
+
+  /** Error text shown to the user; uploader names stay out unless allowed. */
+  function shownError(message: string, usernames: readonly string[]): string {
+    return get().settings.showUploaders ? message : redactUploaderNames(message, usernames);
+  }
 
   function updateLibrary(change: (library: Library) => Library): void {
     const library = change(get().library);
@@ -1051,6 +1056,7 @@ export const useAppStore = create<AppState>((set, get) => {
   async function playWithFallback(first: SearchHit): Promise<void> {
     const sequence = ++playSequence;
     const tried = new Set<string>();
+    const triedNames = new Set<string>();
     let hit: SearchHit | null = first;
     let fallback: CurrentPlayback['fallback'] = null;
     let lastError = 'Lecture impossible';
@@ -1061,6 +1067,7 @@ export const useAppStore = create<AppState>((set, get) => {
 
     for (let attempt = 1; hit && attempt <= MAX_ATTEMPTS; attempt++) {
       tried.add(hitKey(hit));
+      triedNames.add(hit.username);
 
       try {
         // Stop the previous track before releasing its local HTTP source.
@@ -1108,10 +1115,10 @@ export const useAppStore = create<AppState>((set, get) => {
         ? {
             ...state.current,
             phase: 'error',
-            error:
-              tried.size > 1
-                ? `${lastError} (${tried.size} sources essayées)`
-                : lastError,
+            error: shownError(
+              tried.size > 1 ? `${lastError} (${tried.size} sources essayées)` : lastError,
+              [...triedNames],
+            ),
           }
         : null,
     }));
@@ -1524,9 +1531,13 @@ export const useAppStore = create<AppState>((set, get) => {
     } catch (error) {
       set(state => ({
         current: state.current
-          ? { ...state.current, phase: 'error', error: errorMessage(error) }
+          ? {
+              ...state.current,
+              phase: 'error',
+              error: shownError(errorMessage(error), [hit.username]),
+            }
           : null,
-        searchError: state.current ? state.searchError : errorMessage(error),
+        searchError: state.current ? state.searchError : shownError(errorMessage(error), [hit.username]),
       }));
     }
   }
@@ -1719,6 +1730,10 @@ export const useAppStore = create<AppState>((set, get) => {
         sessionRecorder = createSessionRecorder({
           store: defaultSessionStore,
           snapshot: playbackSnapshot,
+          // A crash loses at most ~1.5 s: the position tick writes shortly
+          // after each read, and going to the background flushes immediately.
+          debounceMs: 1000,
+          tickMs: 1500,
           position: async () => {
             try {
               return (await TrackPlayer.getProgress()).position ?? 0;

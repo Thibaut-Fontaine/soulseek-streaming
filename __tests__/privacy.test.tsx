@@ -53,6 +53,7 @@ import { Banners } from '../src/ui/Banners';
 import { DebugLogScreen } from '../src/ui/DebugLogScreen';
 import { LoginScreen } from '../src/ui/LoginScreen';
 import { MiniPlayer } from '../src/ui/MiniPlayer';
+import { SourceRow } from '../src/ui/peer';
 import { PlayerSheet } from '../src/ui/PlayerScreen';
 import { SearchScreen } from '../src/ui/SearchScreen';
 import { SettingsScreen } from '../src/ui/SettingsScreen';
@@ -169,11 +170,43 @@ test('the source sheet hides uploader names by default', () => {
   expect(text(render(<SheetHost />))).toContain(`@${SECRET}`);
 });
 
+test('a source row announces no uploader in its accessibility label', () => {
+  const hidden = render(<SourceRow hit={hit()} onPress={() => {}} />);
+  const hiddenRow = hidden.root.findByProps({ accessibilityLabel: 'Écouter depuis cette source' });
+  expect(hiddenRow.props.accessibilityLabel).toBe('Écouter depuis cette source');
+  expect(text(hidden)).not.toContain(SECRET);
+
+  const shown = render(<SourceRow hit={hit()} onPress={() => {}} showUploader />);
+  expect(shown.root.findByProps({ accessibilityLabel: `Écouter depuis ${SECRET}` })).toBeTruthy();
+});
+
 test('search results use a neutral artist instead of the uploader', () => {
   seed(false);
   const out = text(render(<SearchScreen />));
   expect(out).not.toContain(SECRET);
   expect(out).toContain('Pair');
+});
+
+test('error cards redact the uploader too', () => {
+  seed(false);
+  act(() => {
+    useAppStore.setState(state => ({
+      current: state.current
+        ? { ...state.current, phase: 'error', error: `Adresse de ${SECRET} introuvable` }
+        : null,
+    }));
+  });
+  expect(text(render(<PlayerSheet />))).not.toContain(SECRET);
+
+  seed(true);
+  act(() => {
+    useAppStore.setState(state => ({
+      current: state.current
+        ? { ...state.current, phase: 'error', error: `Adresse de ${SECRET} introuvable` }
+        : null,
+    }));
+  });
+  expect(text(render(<PlayerSheet />))).toContain(SECRET);
 });
 
 test('the debug journal shared with the developer is redacted', async () => {
@@ -203,6 +236,7 @@ test('no screen still shows the network name in its interface', () => {
   seed(false);
   const output = [
     text(render(<LoginScreen />)),
+    text(render(<SearchScreen />)),
     text(render(<SettingsScreen />)),
     text(render(<Banners />)),
   ].join(' ');
