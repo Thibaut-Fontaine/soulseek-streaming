@@ -157,6 +157,8 @@ interface AppState {
   transfers: Record<string, TransferSnapshot>;
   current: CurrentPlayback | null;
   notice: string | null;
+  /** The user closed the offline banner; shown again on the next connection change. */
+  offlineBannerHidden: boolean;
 
   // ---- Online catalog (see src/core/catalog.ts) ----
   /** Catalog answer for the last search; null when off, offline or not run. */
@@ -209,6 +211,7 @@ interface AppState {
   retryPlayback: () => Promise<void>;
   stopPlayback: () => Promise<void>;
   dismissNotice: () => void;
+  hideOfflineBanner: () => void;
 
   /** Plays a track the user picked, from a list that "next" will follow. */
   playTrack: (hit: SearchHit, context?: PlayContext) => Promise<void>;
@@ -567,6 +570,7 @@ export const useAppStore = create<AppState>((set, get) => {
       debugLog('net', `connexion : ${payload.state}${payload.error ? ` (${payload.error})` : ''}`);
       set(state => ({
         connection: payload.state,
+        offlineBannerHidden: state.offlineBannerHidden && payload.state !== 'online',
         connectionError: payload.error ?? (payload.state === 'online' ? null : state.connectionError),
         listenPort: instance.listenPort || state.listenPort,
         httpPort: instance.httpPort || state.httpPort,
@@ -700,6 +704,29 @@ export const useAppStore = create<AppState>((set, get) => {
       });
 
       check();
+    });
+  }
+
+  /**
+   * Waits (bounded) while the first connection is still being made, so a
+   * track tapped right after start-up is not refused as "offline".
+   */
+  function settledConnection(maxMs = 20000): Promise<void> {
+    if (get().connection !== 'connecting') {
+      return Promise.resolve();
+    }
+    return new Promise(resolve => {
+      const done = () => {
+        clearTimeout(timer);
+        unsubscribe();
+        resolve();
+      };
+      const timer = setTimeout(done, maxMs);
+      const unsubscribe = useAppStore.subscribe(state => {
+        if (state.connection !== 'connecting') {
+          done();
+        }
+      });
     });
   }
 
@@ -1050,6 +1077,10 @@ export const useAppStore = create<AppState>((set, get) => {
     catalogTracks: CatalogTrack[],
     deviceResults: SearchHit[],
   ): Promise<void> {
+    await settledConnection();
+    if (sequence !== searchSequence) {
+      return;
+    }
     const searchService = service;
     const online = !!searchService && get().connection === 'online';
 
@@ -1337,6 +1368,7 @@ export const useAppStore = create<AppState>((set, get) => {
       }
     }
 
+    await settledConnection();
     if (!service || get().connection !== 'online') {
       return { status: 'error', sources: [] };
     }
@@ -1666,6 +1698,7 @@ export const useAppStore = create<AppState>((set, get) => {
     catalogContext: null,
     catalogPending: null,
     notice: null,
+    offlineBannerHidden: false,
 
     init: async () => {
       if (initStarted) {
@@ -1726,8 +1759,11 @@ export const useAppStore = create<AppState>((set, get) => {
         const credentials = await loadCredentials();
 
         if (credentials) {
-          set({ prefillUsername: credentials.username });
-          await get().login(credentials.username, credentials.password, 'saved');
+          // Open the app now and connect behind it: without network the
+          // connect takes up to 15 s, and the library and cached tracks
+          // need none.
+          set({ prefillUsername: credentials.username, username: credentials.username, connection: 'connecting' });
+          void get().login(credentials.username, credentials.password, 'saved');
         }
       } finally {
         set({ ready: true });
@@ -1782,6 +1818,7 @@ export const useAppStore = create<AppState>((set, get) => {
         set({
           username,
           connection: 'online',
+          offlineBannerHidden: false,
           listenPort: instance.listenPort,
           httpPort: instance.httpPort,
           tab: session === 'new' ? 'home' : get().tab,
@@ -2053,6 +2090,7 @@ export const useAppStore = create<AppState>((set, get) => {
     },
 
     dismissNotice: () => set({ notice: null }),
+    hideOfflineBanner: () => set({ offlineBannerHidden: true }),
 
     playTrack: async (hit, context) => {
       set({ context: context ?? null, catalogContext: null });

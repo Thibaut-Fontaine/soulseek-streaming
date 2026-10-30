@@ -44,6 +44,7 @@ jest.mock('../src/player/player', () => ({
 import type { SearchHit } from '../src/core/types';
 import { savedTrack } from '../src/services/library';
 import { useAppStore } from '../src/state/store';
+import { Banners } from '../src/ui/Banners';
 import { HomeScreen } from '../src/ui/HomeScreen';
 import { LibraryScreen } from '../src/ui/LibraryScreen';
 import { MarqueeText } from '../src/ui/components';
@@ -288,4 +289,25 @@ test('the library shows its overview again after the tab was left', () => {
   act(() => useAppStore.setState({ tab: 'library' }));
 
   expect(overviewShown()).toBe(true);
+});
+
+describe('offline banner', () => {
+  test('can be closed and stays closed while still offline', () => {
+    useAppStore.setState({ connection: 'error', connectionError: 'Délai de connexion dépassé', offlineBannerHidden: false, notice: null });
+    let tree!: ReactTestRenderer.ReactTestRenderer;
+    act(() => {
+      tree = ReactTestRenderer.create(<Banners />);
+    });
+    const text = () => JSON.stringify(tree.toJSON());
+    expect(text()).toContain('Délai de connexion dépassé');
+
+    act(() => tree.root.findByProps({ accessibilityLabel: 'Fermer' }).props.onPress());
+    expect(text()).not.toContain('Délai de connexion dépassé');
+
+    // Still offline after another failed attempt: stays closed.
+    act(() => useAppStore.setState({ connection: 'connecting' }));
+    act(() => useAppStore.setState({ connection: 'error' }));
+    expect(text()).not.toContain('Délai de connexion dépassé');
+    act(() => tree.unmount());
+  });
 });

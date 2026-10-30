@@ -14,6 +14,8 @@ export function Banners() {
   const notice = useAppStore(state => state.notice);
   const dismissNotice = useAppStore(state => state.dismissNotice);
   const reconnect = useAppStore(state => state.reconnect);
+  const offlineHidden = useAppStore(state => state.offlineBannerHidden);
+  const hideOffline = useAppStore(state => state.hideOfflineBanner);
 
   // Notices ("Sera lu ensuite", "Fin de la liste"…) go away on their own.
   React.useEffect(() => {
@@ -25,7 +27,7 @@ export function Banners() {
   }, [notice, dismissNotice]);
 
   const reconnecting = connection === 'connecting' || connection === 'reconnecting';
-  const offline = connection === 'disconnected' || connection === 'error';
+  const offline = (connection === 'disconnected' || connection === 'error') && !offlineHidden;
 
   if (!notice && !reconnecting && !offline) {
     return null;
@@ -53,6 +55,7 @@ export function Banners() {
           message={connectionError ?? 'Déconnecté du réseau Soulseek'}
           actionLabel="Réessayer"
           onAction={() => void reconnect()}
+          onDismiss={hideOffline}
         />
       ) : null}
       {notice ? (
