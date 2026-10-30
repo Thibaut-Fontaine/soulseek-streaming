@@ -96,7 +96,7 @@ describe('best match selection', () => {
     ).toBeNull();
   });
 
-  test('prefers a free slot and a higher bitrate', () => {
+  test('prefers a free slot even when the other file is lighter', () => {
     const best = pickBestMatch('one more time', [
       hit('Daft Punk - One More Time.mp3', { bitrate: 128, slotFree: false }),
       hit('Daft Punk - One More Time.mp3', { bitrate: 320, slotFree: true }),

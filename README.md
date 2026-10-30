@@ -121,6 +121,16 @@ cd android && ./gradlew assembleRelease --no-daemon && cd ..
   que le transfert Soulseek avance.
 - Lecture en arrière-plan, contrôles sur l'écran verrouillé et notification
   média via `react-native-track-player`.
+- **Démarrage rapide** : 500 Ko suffisent avant de lancer le lecteur (réglable
+  dans Réglages), qui continue de télécharger pendant la lecture.
+- **Sources légères d'abord** : à qualité de correspondance égale, un MP3
+  128 kb/s passe avant un 192 ou 320 (démarrage plus rapide, moins de données) ;
+  un fichier plus lourd reste lisible s'il est la seule source.
+- **Repli automatique** : un pair qui refuse, nous met en file ou n'envoie rien
+  au bout de 5 s est abandonné ; quand plus aucune source connue ne reste, une
+  nouvelle recherche Soulseek est lancée automatiquement.
+- **Lecture hors ligne** : les morceaux déjà téléchargés et ceux ajoutés depuis
+  le téléphone se lisent sans réseau ni connexion Soulseek.
 - File d'attente du pair affichée en temps réel, annulation, réessai.
 - Connexions indirectes (`ConnectToPeer` / `PierceFirewall`) pour fonctionner
   quand le téléphone n'est pas joignable directement.
@@ -194,7 +204,7 @@ album (`soulseekLadder` dans `src/core/unify.ts`), le tout en 9 s au plus.
    on répond par un offset 64 bits, puis les octets du fichier arrivent.
 7. Les octets sont ajoutés à un `ChunkBuffer`, exposé par le serveur HTTP local
    avec `Accept-Ranges: bytes`. Le lecteur démarre dès que la cible de tampon
-   est atteinte (par défaut 15 % du fichier, plafonné à 2 Mo).
+   est atteinte (par défaut 15 % du fichier, plafonné à 500 Ko).
 
 Si le pair ne peut pas nous joindre directement (NAT, CGNAT), son client peut
 envoyer `ConnectToPeer` au serveur ; le serveur nous transmet l'adresse et un
@@ -275,7 +285,7 @@ lecteur. Ce dispositif est réservé au développement.
 | Port serveur | `2242` | Port TCP du serveur |
 | Port d'écoute | `22345` | Port annoncé par `SetWaitPort` ; `0` = automatique |
 | Port HTTP local | `0` | Proxy audio sur `127.0.0.1` ; `0` = automatique |
-| Tampon | `2 Mo` | Plafond de préchargement avant lecture |
+| Tampon | `500 Ko` | Plafond de préchargement avant lecture |
 
 ### Le problème du NAT (à lire)
 
