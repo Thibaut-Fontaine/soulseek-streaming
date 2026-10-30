@@ -16,6 +16,7 @@ import TrackPlayer, { State, usePlaybackState, useProgress } from 'react-native-
 
 import type { SearchHit } from '../core/types';
 import { useAppStore } from '../state/store';
+import { isUploaderLabel, uploaderLabel } from '../strings';
 import { CoverBackdrop, Dot, IconButton, MarqueeText, StatusCard } from './components';
 import type { CardAction } from './components';
 import { ACTION_LABELS, SHARING_EXPLANATION, describePlaybackError } from './errors';
@@ -191,7 +192,7 @@ function PlayerContent({ translateY }: { translateY: Animated.Value }) {
   };
 
   const searchThisTrack = () => {
-    const text = [info.artist.startsWith('@') ? '' : info.artist, info.title].filter(Boolean).join(' ');
+    const text = [isUploaderLabel(info.artist) ? '' : info.artist, info.title].filter(Boolean).join(' ');
     closePlayer();
     setTab('search');
     void runSearch(text);
@@ -439,12 +440,14 @@ function PreparingCard({
   const transfer = useCurrentTransfer();
   const speed = useByteRate(transfer?.received ?? 0, transfer?.id);
   const queuePosition = transfer?.state === 'queued' ? transfer.queuePosition ?? 0 : 0;
+  const showUploader = useAppStore(state => state.settings.showUploaders);
+  const uploader = uploaderLabel(hit.username, showUploader);
 
   return (
     <>
       <StatusCard
         tone="accent"
-        title={`Préparation · @${hit.username}`}
+        title={`Préparation · ${uploader}`}
         leading={<ActivityIndicator size="small" color={colors.accent} />}
         actions={[{ label: 'Annuler', onPress: onCancel, icon: 'x' }]}
         style={styles.card}>
@@ -477,11 +480,13 @@ function SourceChip({
   const speed = useByteRate(transfer?.received ?? 0, transfer?.id);
   const availability = peerAvailability(hit);
   const live = transfer?.state === 'streaming' ? speed : undefined;
+  const showUploader = useAppStore(state => state.settings.showUploaders);
+  const uploader = uploaderLabel(hit.username, showUploader);
 
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel={fromDevice ? 'Lu depuis l’appareil' : `Source : ${hit.username}. Voir les sources`}
+      accessibilityLabel={fromDevice ? 'Lu depuis l’appareil' : showUploader ? `Source : ${hit.username}. Voir les sources` : 'Voir les sources'}
       onPress={onPress}
       style={({ pressed }) => [styles.chip, pressed && styles.pressed]}>
       {fromDevice ? (
@@ -490,7 +495,7 @@ function SourceChip({
         <Dot tone={availability === 'free' ? 'good' : availability === 'queued' ? 'warn' : 'bad'} />
       )}
       <Text style={styles.chipText} numberOfLines={1}>
-        {fromDevice ? `Sur l’appareil · ${sourceSummary(hit)}` : `@${hit.username} · ${sourceSummary(hit, live)}`}
+        {fromDevice ? `Sur l’appareil · ${sourceSummary(hit)}` : `${uploader} · ${sourceSummary(hit, live)}`}
       </Text>
     </Pressable>
   );

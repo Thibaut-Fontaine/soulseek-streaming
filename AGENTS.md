@@ -110,6 +110,11 @@ an accent-free copy when they have accents.
 - **Home page**: only content derived from the user's listening history
   (recent artists, albums of recent tracks, similar artists). No charts,
   trends or genres — this was an explicit product decision.
+- **Privacy**: uploader names are hidden by default (`showUploaders: false`):
+  the player, mini player, source lists, search results, errors and shared
+  debug journals show a neutral "Pair". Réglages → Confidentialité reveals
+  them. The network is not named in the interface; user-facing sentences live
+  in `src/strings.ts`.
 - No other external service (analytics, LLM APIs, paid APIs) without an
   explicit decision from the owner.
 - UI stays simple, Spotify-like: one clear action per surface, mini player,

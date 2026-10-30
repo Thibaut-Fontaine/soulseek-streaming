@@ -32,6 +32,7 @@ jest.mock('../src/services/settings', () => ({
     shareWifiOnly: true,
     cacheMb: 1024,
     catalogEnabled: false,
+    showUploaders: false,
   })),
   saveSettings: jest.fn(async () => {}),
   loadCredentials: jest.fn(async () => null),
@@ -142,6 +143,7 @@ async function withNetwork(peers: FakePeer[], run: (network: MultiPeerNetwork) =
       shareWifiOnly: true,
       cacheMb: 1024,
       catalogEnabled: false,
+      showUploaders: false,
     },
   });
 

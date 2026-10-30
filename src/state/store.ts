@@ -74,6 +74,7 @@ import { createBlobUtilFs } from '../services/blobUtilFs';
 import { TrackCache } from '../services/trackCache';
 import type { CacheEntry } from '../services/trackCache';
 import { contentTypeFor } from '../stream/httpServer';
+import { messages, uploaderPhrase } from '../strings';
 
 export type Tab = 'home' | 'search' | 'library' | 'settings';
 
@@ -841,7 +842,7 @@ export const useAppStore = create<AppState>((set, get) => {
       sequence,
       t => t.state !== 'requesting',
       playbackTimeouts.reachPeerMs,
-      `Impossible de joindre ${hit.username}`,
+      `Impossible de joindre ${uploaderPhrase(hit.username, get().settings.showUploaders)}`,
     );
     step('pair joint, QueueUpload envoyé');
 
@@ -850,7 +851,7 @@ export const useAppStore = create<AppState>((set, get) => {
       sequence,
       t => t.state === 'awaiting-file' || t.state === 'streaming' || t.state === 'complete',
       hit.slotFree ? playbackTimeouts.acceptFreeSlotMs : playbackTimeouts.acceptNoSlotMs,
-      `${hit.username} vous a mis en file d'attente`,
+      `${uploaderPhrase(hit.username, get().settings.showUploaders)} vous a mis en file d'attente`,
     );
     step('transfert accepté');
 
@@ -859,7 +860,7 @@ export const useAppStore = create<AppState>((set, get) => {
       sequence,
       t => t.state === 'streaming' || t.state === 'complete',
       playbackTimeouts.openFileMs,
-      `${hit.username} n'a pas ouvert le transfert`,
+      `${uploaderPhrase(hit.username, get().settings.showUploaders)} n'a pas ouvert le transfert`,
     );
     step('connexion F ouverte, octets en route');
     void readStreamMeta(id, hit);
@@ -1136,7 +1137,7 @@ export const useAppStore = create<AppState>((set, get) => {
         searching: false,
         fileSearch: 'idle',
         searchError:
-          deviceResults.length > 0 || get().catalogResults ? null : 'Non connecté au réseau Soulseek',
+          deviceResults.length > 0 || get().catalogResults ? null : messages.notConnected,
       });
       return;
     }
@@ -1579,7 +1580,7 @@ export const useAppStore = create<AppState>((set, get) => {
 
     const reason =
       resolution.status === 'error'
-        ? 'Non connecté au réseau Soulseek'
+        ? 'Non connecté au réseau'
         : `Aucune source pour « ${track.title} »`;
 
     const nextIndex = context ? nextCatalogIndex(context) : null;
@@ -1605,6 +1606,7 @@ export const useAppStore = create<AppState>((set, get) => {
       shareWifiOnly: true,
       cacheMb: 1024,
       catalogEnabled: true,
+      showUploaders: false,
     },
 
     username: null,
@@ -1994,7 +1996,7 @@ export const useAppStore = create<AppState>((set, get) => {
         }
 
         // Nothing in the catalog, or it is unreachable: search the files.
-        debugLog('play', 'rien dans le catalogue : recherche des fichiers sur Soulseek');
+        debugLog('play', `rien dans le catalogue : ${messages.fileSearchOnNetwork}`);
       }
 
       await searchFiles(sequence, rawQuery, networkQuery, [], deviceResults);

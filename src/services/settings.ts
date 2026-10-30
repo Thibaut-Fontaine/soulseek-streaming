@@ -21,6 +21,11 @@ export interface Settings {
    * pages. Off: only Soulseek file names, nothing leaves for another service.
    */
   catalogEnabled: boolean;
+  /**
+   * Show the names of the people sending files. Off by default: the app hides
+   * uploader identities in the player, source lists and shared journals.
+   */
+  showUploaders: boolean;
 }
 
 export interface Credentials {
@@ -38,6 +43,7 @@ export const DEFAULT_SETTINGS: Settings = {
   shareWifiOnly: true,
   cacheMb: 1024,
   catalogEnabled: true,
+  showUploaders: false,
 };
 
 const SETTINGS_KEY = '@soulstream/settings/v1';
@@ -79,6 +85,10 @@ export async function loadSettings(): Promise<Settings> {
         typeof parsed.catalogEnabled === 'boolean'
           ? parsed.catalogEnabled
           : DEFAULT_SETTINGS.catalogEnabled,
+      showUploaders:
+        typeof parsed.showUploaders === 'boolean'
+          ? parsed.showUploaders
+          : DEFAULT_SETTINGS.showUploaders,
     };
   } catch {
     return { ...DEFAULT_SETTINGS };

@@ -180,7 +180,10 @@ test('every bottom sheet renders', () => {
     expect(out.length).toBeGreaterThan(100);
   }
 
-  useAppStore.setState({ sheet: { kind: 'sources', hits: [ONE], title: 'One More Time' } });
+  useAppStore.setState({
+    settings: { ...useAppStore.getState().settings, showUploaders: true },
+    sheet: { kind: 'sources', hits: [ONE], title: 'One More Time' },
+  });
   expect(text(render(<SheetHost />))).toContain('Écouter depuis other');
 });
 

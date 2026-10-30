@@ -13,6 +13,7 @@ import type { SearchHit } from '../core/types';
 import { trackIdentity } from '../services/library';
 import type { Library } from '../services/library';
 import { useAppStore } from '../state/store';
+import { uploaderLabel } from '../strings';
 import { pickArtwork, trackArtists } from './catalogFormat';
 import { Cover, Dot } from './components';
 import type { DotTone } from './components';
@@ -72,6 +73,7 @@ export function useCatalogTrack(hit: SearchHit | null | undefined): CatalogTrack
 export function useTrackInfo(hit: SearchHit | null | undefined): TrackInfo {
   const meta = useAppStore(state => (hit ? state.meta[hitKey(hit)] : undefined));
   const catalog = useCatalogTrack(hit);
+  const showUploaders = useAppStore(state => state.settings.showUploaders);
 
   if (!hit) {
     return { title: '', artist: '', coverUri: null, artwork: null, catalog: null };
@@ -83,7 +85,7 @@ export function useTrackInfo(hit: SearchHit | null | undefined): TrackInfo {
       (catalog ? trackArtists(catalog) : '') ||
       meta?.artist ||
       displayArtist(hit) ||
-      (hit.username ? `@${hit.username}` : 'Sur l’appareil'),
+      (hit.username ? uploaderLabel(hit.username, showUploaders) : 'Sur l’appareil'),
     album: catalog?.album?.title || meta?.album,
     coverUri: meta?.coverUri ?? null,
     artwork: catalog?.album?.cover ?? null,
