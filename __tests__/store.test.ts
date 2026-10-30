@@ -25,11 +25,40 @@ jest.mock('../src/transport/rnTcpTransport', () => ({
   ReactNativeTransport: jest.requireActual('../src/transport/nodeTransport').NodeTransport,
 }));
 
-import { playbackTimeouts, useAppStore } from '../src/state/store';
+import { playbackTimeouts, setTrackCache, useAppStore } from '../src/state/store';
+import { TrackCache } from '../src/services/trackCache';
+import type { CacheFs } from '../src/services/trackCache';
+import type { SearchHit } from '../src/core/types';
+import { loadCredentials } from '../src/services/settings';
 
 jest.setTimeout(30000);
 
 const TRACK = 'Music\\Fake Artist\\Album\\01 - Stream Me.mp3';
+
+function memoryFs(): CacheFs {
+  const files = new Map<string, string>();
+  return {
+    dir: '/docs/tracks',
+    exists: async path => path === '/docs/tracks' || files.has(path),
+    mkdir: async () => {},
+    writeBase64: async (path, data) => void files.set(path, data),
+    readBase64: async path => files.get(path) ?? '',
+    writeText: async (path, data) => void files.set(path, data),
+    readText: async path => files.get(path) ?? '',
+    unlink: async path => void files.delete(path),
+    move: async (from, to) => {
+      files.set(to, files.get(from) ?? '');
+      files.delete(from);
+    },
+  };
+}
+
+function savedHit(filename: string): SearchHit {
+  return {
+    username: 'old_peer', filename, size: 1000, extension: 'mp3', slotFree: true,
+    avgSpeed: 1, queueLength: 0, bitrate: 320, durationSec: 200,
+  };
+}
 
 async function withNetwork(peers: FakePeer[], run: (network: MultiPeerNetwork) => Promise<void>) {
   const network = new MultiPeerNetwork(peers);
@@ -244,5 +273,45 @@ describe('login without network', () => {
 
     expect(useAppStore.getState().username).toBeNull();
     expect(useAppStore.getState().prefillUsername).toBe('tester');
+  });
+
+  describe('with tracks on the device', () => {
+    const cachedHit = savedHit(TRACK);
+
+    beforeEach(async () => {
+      const cache = new TrackCache(memoryFs(), 1_000_000);
+      await cache.load();
+      await cache.save(cachedHit, new Uint8Array(1000).fill(7));
+      setTrackCache(cache);
+    });
+
+    afterEach(() => setTrackCache(null));
+
+    test('a cached track plays after an offline login', async () => {
+      expect(await useAppStore.getState().login('tester', 'secret', 'saved')).toBe(false);
+      await useAppStore.getState().playTrack(cachedHit);
+
+      expect(useAppStore.getState().current?.source).toBe('cache');
+      expect(useAppStore.getState().current?.phase).toBe('playing');
+    });
+
+    test('a failed reconnect keeps the cached track playing', async () => {
+      await useAppStore.getState().login('tester', 'secret', 'saved');
+      await useAppStore.getState().playTrack(cachedHit);
+      jest.mocked(loadCredentials).mockResolvedValueOnce({ username: 'tester', password: 'secret' });
+      await useAppStore.getState().reconnect();
+      expect(loadCredentials).toHaveBeenCalled();
+
+      expect(useAppStore.getState().current?.source).toBe('cache');
+      expect(useAppStore.getState().current?.phase).toBe('playing');
+    });
+
+    test('a file not on the device says why it cannot play', async () => {
+      await useAppStore.getState().login('tester', 'secret', 'saved');
+      await useAppStore.getState().playTrack(savedHit('Music\\Other\\Not Here.mp3'));
+
+      expect(useAppStore.getState().current).toBeNull();
+      expect(useAppStore.getState().notice).toBe('Non connecté au réseau Soulseek.');
+    });
   });
 });

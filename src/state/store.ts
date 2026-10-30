@@ -300,6 +300,11 @@ const ladderNext = new Map<string, number>();
 const fullTracks = new Map<string, CatalogTrack | null>();
 
 /** Tests replace the online catalog with recorded answers. */
+/** Tests: use this cache instead of the one `init` creates. */
+export function setTrackCache(cache: TrackCache | null): void {
+  trackCache = cache;
+}
+
 export function setCatalogProvider(provider: CatalogProvider): void {
   catalog = provider;
 }
@@ -1442,16 +1447,18 @@ export const useAppStore = create<AppState>((set, get) => {
 
   /** Plays a file (from the device cache when it is there). */
   async function startHit(hit: SearchHit): Promise<void> {
-    if (!service) {
-      return;
-    }
-
     if (!isStreamableFile(hit.filename)) {
       set({ notice: 'Seuls les fichiers MP3 sont proposés par SoulStream.' });
       return;
     }
 
+    // A copy on the device plays without network (no service after an
+    // offline login).
     const cached = trackCache?.findByHit(hit);
+    if (!cached && !service) {
+      set({ notice: 'Non connecté au réseau Soulseek.' });
+      return;
+    }
 
     try {
       lastPlayStartedAt = Date.now();
@@ -1667,9 +1674,14 @@ export const useAppStore = create<AppState>((set, get) => {
       const previousUsername = get().username;
 
       searchSequence++;
-      playSequence++;
       deniedPeers.clear();
-      await resetPlayer();
+      // Reconnecting (foreground, "Réessayer") must not stop a track played
+      // from the device: it needs no network. A stream dies with its service.
+      const keepPlayback = session !== 'new' && get().current?.source === 'cache';
+      if (!keepPlayback) {
+        playSequence++;
+        await resetPlayer();
+      }
 
       if (service) {
         await service.stop();
@@ -1693,10 +1705,7 @@ export const useAppStore = create<AppState>((set, get) => {
         results: [],
         deviceResults: [],
         transfers: {},
-        current: null,
-        queue: [],
-        context: null,
-        playerOpen: false,
+        ...(keepPlayback ? {} : { current: null, queue: [], context: null, playerOpen: false }),
         sheet: null,
         listenPort: 0,
         httpPort: 0,

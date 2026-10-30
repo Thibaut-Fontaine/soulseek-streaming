@@ -22,12 +22,10 @@ Seen on the emulator (fake network and real Soulseek, test account
   from the cap in `acceptIndirectConnection`.
 - Two devices on one account kick each other: after RELOGGED, coming back
   to the foreground reconnects and logs the other device out.
-- "Réessayer" / `reconnect()` goes through `login()`, which stops a track
-  playing from the device cache (no network needed).
 - Owner report, parked until a screen recording: the full player could
   not be closed (it still scrolled) around "Autre source"; not reproduced.
 
-## 2. Playback start, next track, offline (requested by Leo, 2026-10-30)
+## 2. Playback start and next track (requested by Leo, 2026-10-30)
 
 - **Smaller buffer before playing**: start after 0.5–1 MB depending on the
   peer's rate (fast peer → 0.5 MB, slow peer → 1 MB). Today
@@ -39,11 +37,6 @@ Seen on the emulator (fake network and real Soulseek, test account
   downloaded, download the next one in the queue into the track cache.
   Section 4 has the detailed plan (limits, cancel on skip). Decision for the
   co-owners: on by default, or a setting as section 4 proposes.
-- **Cached tracks must play offline**: a track already played (stored in
-  the track cache) seemingly doesn't play without network. Reproduce
-  offline (airplane mode) and find what blocks it: probably the play goes
-  through the login/connection or source lookup before trying the cache
-  (see also the "Réessayer" item in section 1).
 
 ## 3. Audit asynchronous behaviour and responsiveness: device checks
 
