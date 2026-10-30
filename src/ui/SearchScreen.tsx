@@ -6,6 +6,7 @@ import { AUTO_MATCH_SCORE } from '../core/search';
 import type { SearchHit } from '../core/types';
 import { useAppStore } from '../state/store';
 import type { PlayContext } from '../state/store';
+import { messages } from '../strings';
 import { AlbumCard, ArtistCard, CatalogTrackRow, MoreToggle, Shelf, useIsCurrentCatalog } from './catalog';
 import {
   bestCatalogResult,
@@ -139,7 +140,7 @@ export function SearchScreen() {
           tone="warn"
           icon="offline"
           title="Hors ligne"
-          body="La recherche sur le réseau reprendra dès que la connexion Soulseek sera rétablie. Les morceaux sur l’appareil restent disponibles."
+          body={messages.searchOffline}
           actions={
             connection === 'disconnected' || connection === 'error'
               ? [{ label: ACTION_LABELS.reconnect, onPress: () => void reconnect() }]
@@ -360,7 +361,7 @@ function CatalogResults({ label }: { label: string }) {
       {fileSearch === 'idle' && online ? (
         <View style={styles.filesSearch}>
           <Button
-            label="Chercher les fichiers sur Soulseek"
+            label={messages.searchFiles}
             icon="search"
             variant="ghost"
             onPress={() => void searchFilesToo()}

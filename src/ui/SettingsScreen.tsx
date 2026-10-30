@@ -16,6 +16,7 @@ import LinearGradient from 'react-native-linear-gradient';
 import type { Settings } from '../services/settings';
 import { formatBufferMb } from '../services/settings';
 import { useAppStore } from '../state/store';
+import { messages } from '../strings';
 import { Button, Dot, ListRow, StepSlider, Toggle, connectionStatus } from './components';
 import { DebugLogScreen } from './DebugLogScreen';
 import { Icon } from './Icon';
@@ -230,13 +231,30 @@ function MainSettings({
         <ListRow
           icon="disc"
           title="Catalogue en ligne"
-          subtitle="Pochettes, titres, artistes et suggestions via Deezer. Désactivé : uniquement les noms de fichiers Soulseek."
+          subtitle={messages.settingsCatalogOff}
           last
           right={
             <Toggle
               value={settings.catalogEnabled}
               onValueChange={value => toggle({ catalogEnabled: value })}
               accessibilityLabel="Catalogue en ligne"
+            />
+          }
+        />
+      </View>
+
+      <Text style={styles.groupTitle}>Confidentialité</Text>
+      <View style={styles.group}>
+        <ListRow
+          icon="user"
+          title="Afficher les noms des pairs"
+          subtitle="Masqués par défaut. Les noms des personnes qui envoient les fichiers apparaissent dans le lecteur, les sources et le journal partagé."
+          last
+          right={
+            <Toggle
+              value={settings.showUploaders}
+              onValueChange={value => toggle({ showUploaders: value })}
+              accessibilityLabel="Afficher les noms des pairs"
             />
           }
         />
@@ -323,10 +341,7 @@ function MainSettings({
       <Text style={styles.groupTitle}>À propos</Text>
       <View style={[styles.group, styles.about]}>
         <Text style={styles.aboutText}>
-          SoulStream est un client Soulseek expérimental. Il ne fournit aucun fichier ni
-          catalogue de téléchargement : les métadonnées et pochettes viennent du catalogue
-          public Deezer, les fichiers des utilisateurs du réseau. Le catalogue est
-          désactivable dans Réglages → Catalogue.
+          {messages.settingsAboutClient}
         </Text>
         <Text style={styles.aboutText}>
           N’écoutez et ne partagez que des œuvres que vous avez le droit d’utiliser. Le
@@ -338,9 +353,8 @@ function MainSettings({
           presque instantanément, sur iOS comme sur Android.
         </Text>
         <Text style={styles.aboutText}>
-          Le partage se configure dans le client, pas dans le compte Soulseek. SoulStream
-          partage les morceaux écoutés et ceux que vous ajoutez ; certains utilisateurs
-          limitent ou bloquent les téléchargements des pairs qui ne partagent rien.
+          {messages.settingsAboutSharing} Les noms des personnes qui envoient des fichiers
+          sont masqués par défaut ; vous pouvez les afficher dans Confidentialité.
         </Text>
       </View>
     </ScrollView>
@@ -376,7 +390,7 @@ function NetworkSettings({ onBack }: { onBack: () => void }) {
       const trimmedHost = host.trim();
 
       if (!trimmedHost) {
-        throw new Error('Indiquez un serveur Soulseek');
+        throw new Error(messages.serverRequired);
       }
 
       const next: Settings = {

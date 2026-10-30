@@ -19,6 +19,7 @@ import type { SearchHit } from '../core/types';
 import { trackIdentity } from '../services/library';
 import { useAppStore } from '../state/store';
 import type { PlayContext, Sheet } from '../state/store';
+import { isUploaderLabel } from '../strings';
 import { CatalogTrackRow } from './catalog';
 import { trackArtists } from './catalogFormat';
 import { Cover } from './components';
@@ -144,7 +145,7 @@ function TrackActions({ hit, context }: { hit: SearchHit; context?: PlayContext 
   };
 
   const openPage = useAppStore(state => state.openPage);
-  const artist = info.artist.startsWith('@') ? null : info.artist;
+  const artist = isUploaderLabel(info.artist) ? null : info.artist;
   const catalog = info.catalog;
 
   return (
@@ -371,6 +372,7 @@ function Sources({ hits, title }: { hits: SearchHit[]; title: string }) {
   );
   const playHit = useAppStore(state => state.playHit);
   const closeSheet = useAppStore(state => state.closeSheet);
+  const showUploader = useAppStore(state => state.settings.showUploaders);
 
   return (
     <>
@@ -386,6 +388,7 @@ function Sources({ hits, title }: { hits: SearchHit[]; title: string }) {
             key={hitKey(hit)}
             hit={hit}
             chosen={hitKey(hit) === currentKey}
+            showUploader={showUploader}
             last={index === list.length - 1}
             onPress={picked => {
               closeSheet();

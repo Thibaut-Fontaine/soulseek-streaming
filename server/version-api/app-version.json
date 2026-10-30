@@ -1,0 +1,9 @@
+{
+  "versionCode": 19,
+  "versionName": "1.4.0",
+  "apkUrl": "https://thibautfontaine.space/streaming/SoulStream.apk",
+  "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "sizeBytes": 59521454,
+  "notes": "Reprise de la lecture après une fermeture, noms des pairs masqués par défaut, mise à jour depuis l’application.",
+  "publishedAt": "2026-10-30T10:00:00Z"
+}

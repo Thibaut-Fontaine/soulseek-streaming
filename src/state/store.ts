@@ -45,6 +45,14 @@ import type { StreamTransfer } from '../core/transfer';
 import { ensurePlayer, resetPlayer } from '../player/player';
 import { clearCredentials, loadCredentials, loadSettings, saveCredentials, saveSettings } from '../services/settings';
 import type { Credentials, Settings } from '../services/settings';
+import {
+  clearSession,
+  createSessionRecorder,
+  defaultSessionStore,
+  loadSession,
+  planRestore,
+} from '../services/playbackSession';
+import type { SessionRecorder } from '../services/playbackSession';
 import { StreamingService } from '../services/streaming';
 import { debugLog } from '../services/debugLog';
 import { takeLastCrash } from '../services/crashReport';
@@ -67,6 +75,7 @@ import { createBlobUtilFs } from '../services/blobUtilFs';
 import { TrackCache } from '../services/trackCache';
 import type { CacheEntry } from '../services/trackCache';
 import { contentTypeFor } from '../stream/httpServer';
+import { messages, redactUploaderNames, uploaderPhrase } from '../strings';
 
 export type Tab = 'home' | 'search' | 'library' | 'settings';
 
@@ -202,12 +211,19 @@ interface AppState {
   /** Also searches Soulseek files for the current query (catalog results shown). */
   searchFilesToo: () => Promise<void>;
   cancelSearch: () => void;
-  /** Plays a source; on failure falls back to other sources of the same track. */
-  playHit: (hit: SearchHit) => Promise<void>;
+  /**
+   * Plays a source; on failure falls back to other sources of the same track.
+   * `positionSec` resumes a saved session at that second.
+   */
+  playHit: (hit: SearchHit, options?: { positionSec?: number }) => Promise<void>;
   /** Skips the current source and tries the next one. */
   playNextSource: () => Promise<void>;
   retryPlayback: () => Promise<void>;
   stopPlayback: () => Promise<void>;
+  /** Restores the session saved before the app closed, if any. */
+  restorePlayback: () => Promise<void>;
+  /** Writes a pending playback session now (app going to the background). */
+  flushPlaybackSession: () => Promise<void>;
   dismissNotice: () => void;
 
   /** Plays a track the user picked, from a list that "next" will follow. */
@@ -285,6 +301,11 @@ export function setTrackCacheForTests(cache: TrackCache | null): void {
 let initStarted = false;
 let searchSequence = 0;
 let playSequence = 0;
+/** Saves the resume point while a track plays. Created on init. */
+let sessionRecorder: SessionRecorder | null = null;
+let watchingSession = false;
+/** Login resets many fields at once; do not mistake that for "nothing plays". */
+let loginInProgress = false;
 /** When the user last started a track; see the queue-ended listener. */
 let lastPlayStartedAt = 0;
 
@@ -478,8 +499,93 @@ export function recentArtists(library: Library, max = HOME_ARTISTS): CatalogArti
   return artists;
 }
 
+/** Whether the track now playing is worth saving as a resume point. */
+function playbackSnapshot(): {
+  hit: SearchHit;
+  source: 'network' | 'cache';
+  queue: SearchHit[];
+  context: PlayContext | null;
+  catalogContext: CatalogPlayContext | null;
+  shuffle: boolean;
+  repeat: boolean;
+} | null {
+  const state = useAppStore.getState();
+  const current = state.current;
+
+  if (!current || current.phase !== 'playing') {
+    return null;
+  }
+
+  return {
+    hit: current.hit,
+    source: current.source,
+    queue: state.queue,
+    context: state.context,
+    catalogContext: state.catalogContext,
+    shuffle: state.shuffle,
+    repeat: state.repeat,
+  };
+}
+
+/**
+ * Saves the resume point when what plays changes, and every few seconds while
+ * it plays (the recorder debounces both). Clears it when playback stops or
+ * fails, so a broken track is not offered back on the next launch.
+ */
+function watchPlaybackSession(): void {
+  if (watchingSession) {
+    return;
+  }
+
+  watchingSession = true;
+  useAppStore.subscribe((state, previous) => {
+    if (!sessionRecorder || loginInProgress) {
+      return;
+    }
+
+    const changed =
+      state.current !== previous.current ||
+      state.queue !== previous.queue ||
+      state.context !== previous.context ||
+      state.catalogContext !== previous.catalogContext ||
+      state.shuffle !== previous.shuffle ||
+      state.repeat !== previous.repeat;
+
+    if (!changed) {
+      return;
+    }
+
+    if (!state.current || state.current.phase === 'error') {
+      void sessionRecorder.clear();
+      return;
+    }
+
+    if (state.current.phase === 'playing') {
+      sessionRecorder.touch();
+    }
+  });
+}
+
+/** Seeks without failing playback when the player is not ready yet. */
+async function seekToPosition(positionSec: number): Promise<void> {
+  if (!Number.isFinite(positionSec)) {
+    return;
+  }
+
+  try {
+    await TrackPlayer.seekTo(Math.max(0, positionSec));
+  } catch {
+    // The player reports failures through its state.
+  }
+}
+
 export const useAppStore = create<AppState>((set, get) => {
   const metaLoading = new Set<string>();
+
+  /** Error text shown to the user; uploader names stay out unless allowed. */
+  function shownError(message: string, usernames: readonly string[]): string {
+    return get().settings.showUploaders ? message : redactUploaderNames(message, usernames);
+  }
 
   function updateLibrary(change: (library: Library) => Library): void {
     const library = change(get().library);
@@ -793,7 +899,10 @@ export const useAppStore = create<AppState>((set, get) => {
       },
     });
 
-    const reach = beforeStart(playbackTimeouts.reachPeerMs, `Impossible de joindre ${hit.username}`);
+    const reach = beforeStart(
+      playbackTimeouts.reachPeerMs,
+      `Impossible de joindre ${uploaderPhrase(hit.username, get().settings.showUploaders)}`,
+    );
     await waitForTransfer(
       id,
       sequence,
@@ -805,7 +914,7 @@ export const useAppStore = create<AppState>((set, get) => {
 
     const accepted = beforeStart(
       hit.slotFree ? playbackTimeouts.acceptFreeSlotMs : playbackTimeouts.acceptNoSlotMs,
-      `${hit.username} vous a mis en file d'attente`,
+      `${uploaderPhrase(hit.username, get().settings.showUploaders)} vous a mis en file d'attente`,
     );
     await waitForTransfer(
       id,
@@ -818,7 +927,7 @@ export const useAppStore = create<AppState>((set, get) => {
 
     const opened = beforeStart(
       playbackTimeouts.openFileMs,
-      `${hit.username} n'a pas ouvert le transfert`,
+      `${uploaderPhrase(hit.username, get().settings.showUploaders)} n'a pas ouvert le transfert`,
     );
     await waitForTransfer(
       id,
@@ -1082,6 +1191,7 @@ export const useAppStore = create<AppState>((set, get) => {
   async function playWithFallback(first: SearchHit): Promise<void> {
     const sequence = ++playSequence;
     const tried = new Set<string>();
+    const triedNames = new Set<string>();
     let hit: SearchHit | null = first;
     let fallback: CurrentPlayback['fallback'] = null;
     let lastError = 'Lecture impossible';
@@ -1094,6 +1204,7 @@ export const useAppStore = create<AppState>((set, get) => {
 
     for (let attempt = 1; hit && attempt <= playbackLimits.maxAttempts; attempt++) {
       tried.add(hitKey(hit));
+      triedNames.add(hit.username);
 
       try {
         // Stop the previous track before releasing its local HTTP source.
@@ -1155,10 +1266,10 @@ export const useAppStore = create<AppState>((set, get) => {
         ? {
             ...state.current,
             phase: 'error',
-            error:
-              tried.size > 1
-                ? `${lastError} (${tried.size} sources essayées)`
-                : lastError,
+            error: shownError(
+              tried.size > 1 ? `${lastError} (${tried.size} sources essayées)` : lastError,
+              [...triedNames],
+            ),
           }
         : null,
     }));
@@ -1184,7 +1295,7 @@ export const useAppStore = create<AppState>((set, get) => {
         searching: false,
         fileSearch: 'idle',
         searchError:
-          deviceResults.length > 0 || get().catalogResults ? null : 'Non connecté au réseau Soulseek',
+          deviceResults.length > 0 || get().catalogResults ? null : messages.notConnected,
       });
       return;
     }
@@ -1540,7 +1651,7 @@ export const useAppStore = create<AppState>((set, get) => {
   }
 
   /** Plays a file (from the device cache when it is there). */
-  async function startHit(hit: SearchHit): Promise<void> {
+  async function startHit(hit: SearchHit, positionSec?: number): Promise<void> {
     if (!isStreamableFile(hit.filename)) {
       set({ notice: 'Seuls les fichiers MP3 sont proposés par SoulStream.' });
       return;
@@ -1567,14 +1678,21 @@ export const useAppStore = create<AppState>((set, get) => {
 
       const playing = get().current;
       if (playing && playing.phase === 'playing') {
+        if (positionSec !== undefined) {
+          await seekToPosition(positionSec);
+        }
         completeTrack(playing.hit);
       }
     } catch (error) {
       set(state => ({
         current: state.current
-          ? { ...state.current, phase: 'error', error: errorMessage(error) }
+          ? {
+              ...state.current,
+              phase: 'error',
+              error: shownError(errorMessage(error), [hit.username]),
+            }
           : null,
-        searchError: state.current ? state.searchError : errorMessage(error),
+        searchError: state.current ? state.searchError : shownError(errorMessage(error), [hit.username]),
       }));
     }
   }
@@ -1628,7 +1746,7 @@ export const useAppStore = create<AppState>((set, get) => {
 
     const reason =
       resolution.status === 'error'
-        ? 'Non connecté au réseau Soulseek'
+        ? 'Non connecté au réseau'
         : `Aucune source pour « ${track.title} »`;
 
     const nextIndex = context ? nextCatalogIndex(context) : null;
@@ -1654,6 +1772,7 @@ export const useAppStore = create<AppState>((set, get) => {
       shareWifiOnly: true,
       cacheMb: 1024,
       catalogEnabled: true,
+      showUploaders: false,
     },
 
     username: null,
@@ -1764,6 +1883,25 @@ export const useAppStore = create<AppState>((set, get) => {
           set({ prefillUsername: credentials.username });
           await get().login(credentials.username, credentials.password, 'saved');
         }
+
+        // Only once login is over: its mass reset must not erase the session
+        // the restart is about to restore.
+        sessionRecorder = createSessionRecorder({
+          store: defaultSessionStore,
+          snapshot: playbackSnapshot,
+          // A hard kill loses at most ~1 s: the position tick writes shortly
+          // after each read, and going to the background flushes immediately.
+          debounceMs: 600,
+          tickMs: 1000,
+          position: async () => {
+            try {
+              return (await TrackPlayer.getProgress()).position ?? 0;
+            } catch {
+              return 0;
+            }
+          },
+        });
+        watchPlaybackSession();
       } finally {
         set({ ready: true });
       }
@@ -1773,10 +1911,16 @@ export const useAppStore = create<AppState>((set, get) => {
       const settings = get().settings;
       const previousUsername = get().username;
 
+      loginInProgress = true;
       searchSequence++;
       playSequence++;
       deniedPeers.clear();
       await resetPlayer();
+
+      // A new account must not inherit the previous one's resume point.
+      if (session === 'new') {
+        await clearSession();
+      }
 
       if (service) {
         await service.stop();
@@ -1819,6 +1963,12 @@ export const useAppStore = create<AppState>((set, get) => {
           httpPort: instance.httpPort,
           tab: session === 'new' ? 'home' : get().tab,
         });
+        loginInProgress = false;
+
+        if (session === 'saved') {
+          void get().restorePlayback();
+        }
+
         return true;
       } catch (error) {
         const refused = error instanceof LoginError;
@@ -1851,6 +2001,7 @@ export const useAppStore = create<AppState>((set, get) => {
           loginRejection: refused ? error.reason : null,
         });
 
+        loginInProgress = false;
         return false;
       }
     },
@@ -1859,6 +2010,8 @@ export const useAppStore = create<AppState>((set, get) => {
       playSequence++;
       searchSequence++;
       await resetPlayer();
+      await sessionRecorder?.clear();
+      await clearSession();
 
       if (service) {
         await service.stop();
@@ -2025,7 +2178,7 @@ export const useAppStore = create<AppState>((set, get) => {
         }
 
         // Nothing in the catalog, or it is unreachable: search the files.
-        debugLog('play', 'rien dans le catalogue : recherche des fichiers sur Soulseek');
+        debugLog('play', `rien dans le catalogue : ${messages.fileSearchOnNetwork}`);
       }
 
       await searchFiles(sequence, rawQuery, networkQuery, [], deviceResults);
@@ -2053,9 +2206,9 @@ export const useAppStore = create<AppState>((set, get) => {
       }));
     },
 
-    playHit: async hit => {
+    playHit: async (hit, options) => {
       cancelCatalogPlay();
-      await startHit(hit);
+      await startHit(hit, options?.positionSec);
     },
 
     playNextSource: async () => {
@@ -2089,8 +2242,51 @@ export const useAppStore = create<AppState>((set, get) => {
       cancelCatalogPlay();
       // Clear the UI first: the native reset can take a while.
       set({ current: null, playerOpen: false });
+      await sessionRecorder?.clear();
+      await clearSession();
       await resetPlayer();
       service?.cancelActive();
+    },
+
+    restorePlayback: async () => {
+      const saved = await loadSession();
+
+      if (!saved || get().current) {
+        return;
+      }
+
+      const cached = !!trackCache?.findByHit(saved.hit);
+      const plan = planRestore(saved, { online: get().connection === 'online', cached });
+
+      // Offline with no local copy: keep the session for the next launch.
+      if (plan === 'wait') {
+        return;
+      }
+
+      set({
+        queue: saved.queue,
+        context: saved.context,
+        catalogContext: saved.catalogContext,
+        shuffle: saved.shuffle,
+        repeat: saved.repeat,
+      });
+
+      await get().playHit(saved.hit, { positionSec: saved.positionSec });
+
+      const current = get().current;
+
+      if (!current || current.phase === 'error') {
+        set({
+          current: null,
+          playerOpen: false,
+          notice: 'La source de la dernière lecture n’est plus disponible.',
+        });
+        await clearSession();
+      }
+    },
+
+    flushPlaybackSession: async () => {
+      await sessionRecorder?.flush();
     },
 
     dismissNotice: () => set({ notice: null }),

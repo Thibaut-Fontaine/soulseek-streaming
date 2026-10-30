@@ -16,6 +16,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { LoginRejection, usernameProblem } from '../core/protocol';
 import { useAppStore } from '../state/store';
+import { messages } from '../strings';
 import { Button, CoverArt } from './components';
 import { Icon } from './Icon';
 import { colors, gutter, radius, spacing, type } from './theme';
@@ -92,7 +93,7 @@ export function LoginScreen() {
       }
     } else {
       if (!nick) {
-        setLocalError("Indiquez votre nom d'utilisateur Soulseek");
+        setLocalError(messages.loginUsernameRequired);
         return;
       }
 
@@ -143,16 +144,9 @@ export function LoginScreen() {
           </View>
           <Text style={styles.title}>{creating ? 'Créer un compte' : 'SoulStream'}</Text>
           {creating ? (
-            <Text style={styles.subtitle}>
-              Le compte Soulseek est créé dès la première connexion avec ce nom et ce mot de
-              passe. Notez le mot de passe : il ne peut pas être récupéré. Un nom inutilisé
-              pendant 30 jours est libéré.
-            </Text>
+            <Text style={styles.subtitle}>{messages.createAccountHint}</Text>
           ) : (
-            <Text style={styles.subtitle}>
-              Streaming musical pair-à-pair sur le réseau Soulseek. Vos identifiants restent
-              dans le trousseau sécurisé de l’appareil.
-            </Text>
+            <Text style={styles.subtitle}>{messages.loginSubtitle}</Text>
           )}
 
           <Text style={styles.label}>Nom d'utilisateur</Text>
@@ -259,7 +253,7 @@ export function LoginScreen() {
               <Text style={styles.inlineLink} onPress={() => Linking.openURL(TERMS_URL)} accessibilityRole="link">
                 conditions d’utilisation
               </Text>{' '}
-              de Soulseek.
+              {messages.acceptRulesSuffix}
             </Text>
           ) : null}
 
@@ -269,11 +263,7 @@ export function LoginScreen() {
             </Text>
           </Pressable>
 
-          <Text style={styles.legal}>
-            SoulStream ne fournit aucun contenu. Vous êtes responsable des œuvres que vous
-            écoutez et partagez. Le réseau Soulseek nécessite un port entrant accessible pour
-            de meilleures performances.
-          </Text>
+          <Text style={styles.legal}>{messages.loginLegal}</Text>
         </ScrollView>
       </KeyboardAvoidingView>
 
@@ -323,7 +313,7 @@ function ServerSheet({ visible, onClose }: { visible: boolean; onClose: () => vo
         <Pressable style={styles.sheetBackdrop} onPress={onClose} accessibilityLabel="Fermer" />
         <View style={[styles.sheet, { paddingBottom: insets.bottom + spacing.lg }]}>
           <View style={styles.sheetHandle} />
-          <Text style={styles.sheetTitle}>Serveur Soulseek</Text>
+          <Text style={styles.sheetTitle}>{messages.serverTitle}</Text>
           <Text style={styles.sheetBody}>
             Le serveur officiel est server.slsknet.org:2242. Ne le changez que si vous utilisez
             un proxy ou un serveur compatible.

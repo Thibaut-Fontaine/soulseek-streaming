@@ -4,6 +4,7 @@ import LinearGradient from 'react-native-linear-gradient';
 import TrackPlayer, { State, usePlaybackState, useProgress } from 'react-native-track-player';
 
 import { useAppStore } from '../state/store';
+import { uploaderPhrase } from '../strings';
 import { MarqueeText, ProgressBar } from './components';
 import { useCurrentTransfer, useReceivedRatio } from './hooks';
 import { Icon } from './Icon';
@@ -25,6 +26,7 @@ export function MiniPlayer() {
   const playNext = useAppStore(state => state.playNext);
   const playPrevious = useAppStore(state => state.playPrevious);
   const playerReady = useAppStore(state => state.playerReady);
+  const showUploaders = useAppStore(state => state.settings.showUploaders);
 
   const playbackState = usePlaybackState();
   const info = useTrackInfo(current?.hit);
@@ -110,7 +112,7 @@ export function MiniPlayer() {
           <View style={styles.textBlock}>
             <MarqueeText style={styles.title}>{info.title}</MarqueeText>
             <MiniSubtitle
-              username={hit.username}
+              uploader={uploaderPhrase(hit.username, showUploaders)}
               artist={info.artist}
               preparing={preparing}
               error={error}
@@ -147,13 +149,13 @@ export function MiniPlayer() {
 // does not redraw with them.
 
 function MiniSubtitle({
-  username,
+  uploader,
   artist,
   preparing,
   error,
   bufferTarget,
 }: {
-  username: string;
+  uploader: string;
   artist: string;
   preparing: boolean;
   error: boolean;
@@ -166,11 +168,11 @@ function MiniSubtitle({
     : preparing
       ? transfer?.state === 'queued'
         ? transfer.queuePosition
-          ? `En file chez ${username} · position ${transfer.queuePosition}`
-          : `En file chez ${username}…`
+          ? `En file chez ${uploader} · position ${transfer.queuePosition}`
+          : `En file chez ${uploader}…`
         : transfer?.state === 'streaming'
           ? `Mise en mémoire · ${formatBytes(Math.min(received, bufferTarget))} / ${formatBytes(bufferTarget)}`
-          : `Connexion à ${username}…`
+          : `Connexion à ${uploader}…`
       : artist;
 
   return (

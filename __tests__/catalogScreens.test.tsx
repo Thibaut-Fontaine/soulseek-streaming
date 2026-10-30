@@ -422,7 +422,7 @@ describe('search with the catalog', () => {
     const out = text(screen);
     expect(out).toContain('Get Lucky');
     expect(out).not.toMatch(/Aucune source|\d+ sources?\b|recherche des sources/);
-    press(screen, 'Chercher les fichiers sur Soulseek');
+    press(screen, 'Chercher les fichiers sur le réseau');
     expect(actions.searchFilesToo).toHaveBeenCalled();
   });
 
