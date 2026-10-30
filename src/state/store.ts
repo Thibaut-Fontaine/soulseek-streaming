@@ -1,4 +1,4 @@
-import { PermissionsAndroid, Platform } from 'react-native';
+import { AppState as RNAppState, PermissionsAndroid, Platform } from 'react-native';
 import TrackPlayer, { Event } from 'react-native-track-player';
 import { create } from 'zustand';
 import {
@@ -9,6 +9,7 @@ import {
   types,
 } from '@react-native-documents/picker';
 
+import { bufferTargetFor } from '../core/buffer';
 import { id3TagSize, parseId3 } from '../core/id3';
 import { LoginError } from '../core/soulseekClient';
 import type { ConnectionState } from '../core/soulseekClient';
@@ -38,7 +39,7 @@ import type {
   Resolution,
   TrackGroup,
 } from '../core/catalogTypes';
-import { displayArtist, displayTitle, hitKey, isStreamableFile } from '../core/types';
+import { displayArtist, displayTitle, hitKey, isStreamableFile, parseTrackName } from '../core/types';
 import type { SearchHit, TrackMeta } from '../core/types';
 import type { StreamTransfer } from '../core/transfer';
 import { ensurePlayer, resetPlayer } from '../player/player';
@@ -275,6 +276,12 @@ interface AppState {
 let service: StreamingService | null = null;
 /** Tracks already played; also our shared folder. Created on init. */
 let trackCache: TrackCache | null = null;
+
+/** Tests inject a cache without running `init` (which needs native modules). */
+export function setTrackCacheForTests(cache: TrackCache | null): void {
+  trackCache = cache;
+}
+
 let initStarted = false;
 let searchSequence = 0;
 let playSequence = 0;
@@ -302,6 +309,42 @@ export function setCatalogProvider(provider: CatalogProvider): void {
   catalog = provider;
 }
 
+/**
+ * The app came back to the foreground: phone sockets are often dead after a
+ * sleep, and the state can still say "online". Check an online connection;
+ * otherwise skip the backoff and reconnect now. Nothing runs before a login.
+ */
+export function onAppForeground(): void {
+  const state = useAppStore.getState();
+
+  if (!state.username) {
+    return;
+  }
+
+  if (!service) {
+    void state.reconnect();
+    return;
+  }
+
+  if (state.connection === 'online') {
+    void state.checkConnection();
+    return;
+  }
+
+  service.reconnectNow();
+}
+
+/** Listens for foreground returns. Returns an unsubscribe function for tests. */
+export function watchAppState(): () => void {
+  const subscription = RNAppState.addEventListener('change', next => {
+    if (next === 'active') {
+      onAppForeground();
+    }
+  });
+
+  return () => subscription.remove();
+}
+
 /** Peers that refused us during this session, by lower-cased username. */
 const deniedPeers = new Map<string, string>();
 
@@ -313,8 +356,7 @@ class PlaybackCancelled extends Error {
 
 const MAX_TRANSFER_HISTORY = 20;
 
-/** How many sources to try for one track before giving up. */
-const MAX_ATTEMPTS = 5;
+const START_TIMEOUT = 'La source n’a pas démarré à temps';
 const SEARCH_DURATION_MS = 10000;
 /** Weaker matches are still listed; the user picks what to play. */
 const LIST_SCORE = 0.55;
@@ -360,6 +402,8 @@ const RESTART_THRESHOLD_SEC = 3;
  * shorten them.
  */
 export const playbackTimeouts = {
+  /** Total time a peer gets to start sending bytes before another is tried. */
+  startMs: 5000,
   reachPeerMs: 25000,
   acceptFreeSlotMs: 20000,
   acceptNoSlotMs: 12000,
@@ -368,21 +412,22 @@ export const playbackTimeouts = {
   bufferTotalMs: 90000,
 };
 
+/**
+ * Attempts made for one track. Exported so tests can shorten the fresh
+ * search; the app always keeps the same small ceiling.
+ */
+export const playbackLimits = {
+  maxAttempts: 5,
+  /** New searches launched when every known source failed. */
+  freshSearches: 1,
+  freshSearchMs: 5000,
+};
+
 /** Errors that mean "this peer will not send to us", worth remembering. */
-const DENIED_PATTERN = /refus|denied|banned|not shared|ne partage/i;
+const DENIED_PATTERN = /refus|denied|banned|not shared|ne partage|too many megabytes|quota|too many files/i;
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
-}
-
-function bufferTargetFor(size: number, bufferMb: number): number {
-  if (size <= 0) {
-    return 256 * 1024;
-  }
-
-  const cap = Math.max(256 * 1024, bufferMb * 1024 * 1024);
-  const proportional = Math.floor(size * 0.15);
-  return Math.min(size, Math.max(256 * 1024, Math.min(cap, proportional)));
 }
 
 function rememberTransfers(
@@ -712,8 +757,20 @@ export const useAppStore = create<AppState>((set, get) => {
     const prepared = service.prepareStream(hit);
     const id = prepared.transferId;
     const startedAt = Date.now();
+    const startDeadline = startedAt + playbackTimeouts.startMs;
     const step = (name: string) =>
       debugLog('play', `${name} après ${Date.now() - startedAt} ms`);
+    /**
+     * Timeout for a step before any byte arrives. The peer as a whole gets
+     * `startMs`: a refused, queued or silent uploader must not keep the user
+     * waiting when another source may start right away.
+     */
+    const beforeStart = (configuredMs: number, message: string) => {
+      const left = startDeadline - Date.now();
+      return left < configuredMs
+        ? { timeout: Math.max(1, left), message: START_TIMEOUT }
+        : { timeout: configuredMs, message };
+    };
 
     debugLog(
       'play',
@@ -736,33 +793,55 @@ export const useAppStore = create<AppState>((set, get) => {
       },
     });
 
+    const reach = beforeStart(playbackTimeouts.reachPeerMs, `Impossible de joindre ${hit.username}`);
     await waitForTransfer(
       id,
       sequence,
       t => t.state !== 'requesting',
-      playbackTimeouts.reachPeerMs,
-      `Impossible de joindre ${hit.username}`,
+      reach.timeout,
+      reach.message,
     );
     step('pair joint, QueueUpload envoyé');
 
+    const accepted = beforeStart(
+      hit.slotFree ? playbackTimeouts.acceptFreeSlotMs : playbackTimeouts.acceptNoSlotMs,
+      `${hit.username} vous a mis en file d'attente`,
+    );
     await waitForTransfer(
       id,
       sequence,
       t => t.state === 'awaiting-file' || t.state === 'streaming' || t.state === 'complete',
-      hit.slotFree ? playbackTimeouts.acceptFreeSlotMs : playbackTimeouts.acceptNoSlotMs,
-      `${hit.username} vous a mis en file d'attente`,
+      accepted.timeout,
+      accepted.message,
     );
     step('transfert accepté');
 
+    const opened = beforeStart(
+      playbackTimeouts.openFileMs,
+      `${hit.username} n'a pas ouvert le transfert`,
+    );
     await waitForTransfer(
       id,
       sequence,
       t => t.state === 'streaming' || t.state === 'complete',
-      playbackTimeouts.openFileMs,
-      `${hit.username} n'a pas ouvert le transfert`,
+      opened.timeout,
+      opened.message,
     );
     step('connexion F ouverte, octets en route');
     void readStreamMeta(id, hit);
+
+    // The connection being open is not enough: some peers accept then never
+    // send a byte. Until the first bytes arrive the same deadline applies.
+    const firstBytes = beforeStart(playbackTimeouts.bufferTotalMs, START_TIMEOUT);
+    await waitForTransfer(
+      id,
+      sequence,
+      t => t.state === 'complete' || t.buffer.total > 0,
+      firstBytes.timeout,
+      firstBytes.message,
+      playbackTimeouts.stallMs,
+    );
+    step('premiers octets reçus');
 
     await waitForTransfer(
       id,
@@ -796,20 +875,24 @@ export const useAppStore = create<AppState>((set, get) => {
   /**
    * The next source to try for the same track: same title, not tried yet,
    * not a peer that refused us. Read lazily, so results that arrived during
-   * the previous attempt are considered.
+   * the previous attempt (or a fresh search) are considered.
    */
-  function nextCandidate(original: SearchHit, tried: Set<string>): SearchHit | null {
-    // A catalog track: its own matched sources, best first.
+  function nextCandidate(
+    original: SearchHit,
+    tried: Set<string>,
+    fresh: SearchHit[] = [],
+  ): SearchHit | null {
+    // A catalog track: its own matched sources, best first, plus anything a
+    // fresh search just found.
     const track = get().hitTracks[hitKey(original)];
-    const pool = track ? knownSources(track) : [];
 
-    for (const { hit } of pool) {
-      if (!tried.has(hitKey(hit)) && !deniedPeers.has(hit.username.toLowerCase())) {
-        return hit;
+    if (track) {
+      for (const hit of [...knownSources(track).map(source => source.hit), ...fresh]) {
+        if (!tried.has(hitKey(hit)) && !deniedPeers.has(hit.username.toLowerCase())) {
+          return hit;
+        }
       }
-    }
 
-    if (track && pool.length > 0) {
       return null;
     }
 
@@ -825,7 +908,56 @@ export const useAppStore = create<AppState>((set, get) => {
       }
     }
 
+    for (const hit of fresh) {
+      if (tried.has(hitKey(hit)) || deniedPeers.has(hit.username.toLowerCase())) {
+        continue;
+      }
+
+      if (sameSongTitle(title, displayTitle(hit.filename))) {
+        return hit;
+      }
+    }
+
     return null;
+  }
+
+  /**
+   * A fresh Soulseek search when every known source failed: peers come and
+   * go, so another one may have the same file. One search, same query the
+   * title would use, and only the hits the caller has not tried yet.
+   */
+  async function searchMoreSources(original: SearchHit): Promise<SearchHit[]> {
+    const searchService = service;
+
+    if (!searchService || get().connection !== 'online') {
+      return [];
+    }
+
+    const track = get().hitTracks[hitKey(original)];
+    const parsed = parseTrackName(original.filename);
+    const query = track
+      ? soulseekQueryFor(track)
+      : [parsed.artist, parsed.title].filter(Boolean).join(' ');
+
+    if (!query) {
+      return [];
+    }
+
+    const spelling = query.normalize('NFC').toLowerCase();
+    debugLog('play', `plus aucune source connue : nouvelle recherche « ${spelling} »`);
+
+    try {
+      const hits = await searchService.search(
+        spelling,
+        undefined,
+        playbackLimits.freshSearchMs,
+        { exclusive: false },
+      );
+      return track ? sourcesForTrack(track, hits).map(source => source.hit) : hits;
+    } catch (error) {
+      debugLog('play', `recherche de secours en erreur : ${errorMessage(error)}`);
+      return [];
+    }
   }
 
   /**
@@ -953,12 +1085,14 @@ export const useAppStore = create<AppState>((set, get) => {
     let hit: SearchHit | null = first;
     let fallback: CurrentPlayback['fallback'] = null;
     let lastError = 'Lecture impossible';
+    let freshSearches = 0;
+    let fresh: SearchHit[] = [];
 
     await ensurePlayer();
     set({ playerReady: true });
     void requestNotificationPermission();
 
-    for (let attempt = 1; hit && attempt <= MAX_ATTEMPTS; attempt++) {
+    for (let attempt = 1; hit && attempt <= playbackLimits.maxAttempts; attempt++) {
       tried.add(hitKey(hit));
 
       try {
@@ -993,7 +1127,21 @@ export const useAppStore = create<AppState>((set, get) => {
 
         service?.cancelActive();
         fallback = { username: hit.username, reason: lastError };
-        hit = nextCandidate(first, tried);
+        hit = nextCandidate(first, tried, fresh);
+
+        // Every source we knew failed: look for a peer that appeared since.
+        // Only once, and only while an attempt is still allowed, so a dead
+        // track ends with one clear error instead of an endless search loop.
+        if (!hit && attempt < playbackLimits.maxAttempts && freshSearches < playbackLimits.freshSearches) {
+          freshSearches++;
+          fresh = await searchMoreSources(first);
+
+          if (sequence !== playSequence) {
+            return;
+          }
+
+          hit = nextCandidate(first, tried, fresh);
+        }
       }
     }
 
@@ -1393,16 +1541,20 @@ export const useAppStore = create<AppState>((set, get) => {
 
   /** Plays a file (from the device cache when it is there). */
   async function startHit(hit: SearchHit): Promise<void> {
-    if (!service) {
-      return;
-    }
-
     if (!isStreamableFile(hit.filename)) {
       set({ notice: 'Seuls les fichiers MP3 sont proposés par SoulStream.' });
       return;
     }
 
     const cached = trackCache?.findByHit(hit);
+
+    // Downloads and imported files play with no network and no client. Without
+    // this check, a cached track was silently ignored while offline (the old
+    // `if (!service) return` came first) and the app looked broken.
+    if (!cached && !service) {
+      set({ notice: 'Ce morceau n’est pas téléchargé : impossible de le lire hors ligne.' });
+      return;
+    }
 
     try {
       lastPlayStartedAt = Date.now();
@@ -1497,7 +1649,7 @@ export const useAppStore = create<AppState>((set, get) => {
       serverPort: 2242,
       listenPort: 22345,
       streamPort: 0,
-      bufferMb: 2,
+      bufferMb: 0.5,
       shareEnabled: true,
       shareWifiOnly: true,
       cacheMb: 1024,
@@ -1552,6 +1704,10 @@ export const useAppStore = create<AppState>((set, get) => {
       }
 
       initStarted = true;
+
+      // The phone may sleep for a long time: on return, verify or restore the
+      // Soulseek connection instead of waiting for a socket to time out.
+      watchAppState();
 
       try {
         const lastCrash = await takeLastCrash();
@@ -1665,10 +1821,18 @@ export const useAppStore = create<AppState>((set, get) => {
         });
         return true;
       } catch (error) {
-        await instance.stop();
+        const refused = error instanceof LoginError;
+        // A network failure must leave the client alive: it backs off, the
+        // NetworkInfo listener and the foreground handler can reconnect it.
+        // Typed credentials on the login screen have no session to keep yet.
+        const keepClient = !refused && session !== 'new';
 
-        if (service === instance) {
-          service = null;
+        if (!keepClient) {
+          await instance.stop();
+
+          if (service === instance) {
+            service = null;
+          }
         }
 
         // Without network, stored credentials keep the user in the app (offline
@@ -1676,15 +1840,15 @@ export const useAppStore = create<AppState>((set, get) => {
         const keptUsername =
           session === 'keep'
             ? previousUsername
-            : session === 'saved' && !(error instanceof LoginError)
+            : session === 'saved' && !refused
               ? username
               : null;
 
         set({
           username: keptUsername,
-          connection: 'error',
+          connection: keepClient ? instance.state : 'error',
           connectionError: errorMessage(error),
-          loginRejection: error instanceof LoginError ? error.reason : null,
+          loginRejection: refused ? error.reason : null,
         });
 
         return false;
@@ -1735,7 +1899,7 @@ export const useAppStore = create<AppState>((set, get) => {
 
       // The client is already retrying: skip its backoff instead of tearing
       // everything down (that would stop the current track).
-      if (service && get().connection === 'reconnecting') {
+      if (service) {
         service.reconnectNow();
         return;
       }

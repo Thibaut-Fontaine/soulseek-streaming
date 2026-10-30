@@ -14,6 +14,7 @@ import type { KeyboardTypeOptions } from 'react-native';
 import LinearGradient from 'react-native-linear-gradient';
 
 import type { Settings } from '../services/settings';
+import { formatBufferMb } from '../services/settings';
 import { useAppStore } from '../state/store';
 import { Button, Dot, ListRow, StepSlider, Toggle, connectionStatus } from './components';
 import { DebugLogScreen } from './DebugLogScreen';
@@ -22,10 +23,6 @@ import { colors, formatBytes, gutter, radius, spacing, type } from './theme';
 
 /** Buffer sizes offered by the slider, within the 0.25–64 MB bounds of `loadSettings`. */
 const BUFFER_STEPS = [0.25, 0.5, 1, 2, 4, 8, 16, 32, 64] as const;
-
-function formatMb(value: number): string {
-  return `${String(value).replace('.', ',')} Mo`;
-}
 
 function nearestBufferIndex(value: number): number {
   let best = 0;
@@ -207,13 +204,13 @@ function MainSettings({
                 Plus grand = démarrage plus lent mais moins de coupures.
               </Text>
             </View>
-            <Text style={styles.sliderValue}>{formatMb(bufferMb)}</Text>
+            <Text style={styles.sliderValue}>{formatBufferMb(bufferMb)}</Text>
           </View>
           <StepSlider
             values={BUFFER_STEPS}
             index={bufferIndex}
             onChange={setPicked}
-            format={formatMb}
+            format={formatBufferMb}
             accessibilityLabel="Taille du tampon"
           />
           {bufferDirty ? (

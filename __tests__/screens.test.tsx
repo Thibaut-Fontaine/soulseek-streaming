@@ -50,6 +50,7 @@ import { MarqueeText } from '../src/ui/components';
 import { MiniPlayer } from '../src/ui/MiniPlayer';
 import { PlayerSheet } from '../src/ui/PlayerScreen';
 import { SearchScreen } from '../src/ui/SearchScreen';
+import { SettingsScreen } from '../src/ui/SettingsScreen';
 import { SheetHost } from '../src/ui/Sheets';
 
 function hit(filename: string, username = 'peer', slotFree = true): SearchHit {
@@ -160,6 +161,16 @@ test('library shows collections and history', () => {
   expect(out).toContain('Titres likés');
   expect(out).toContain('Historique');
   expect(out).toContain('Sur l’appareil');
+});
+
+test('settings shows the 500 Ko playback buffer', () => {
+  act(() =>
+    useAppStore.setState({ settings: { ...useAppStore.getState().settings, bufferMb: 0.5 } }),
+  );
+  const out = text(render(<SettingsScreen />));
+
+  expect(out).toContain('Tampon avant lecture');
+  expect(out).toContain('500 Ko');
 });
 
 test('mini player and full player render the current track with its cover', () => {

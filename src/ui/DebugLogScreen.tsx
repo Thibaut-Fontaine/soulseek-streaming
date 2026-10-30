@@ -9,6 +9,7 @@ import {
   subscribeDebugLog,
 } from '../services/debugLog';
 import type { LogEntry, LogTag } from '../services/debugLog';
+import { formatBufferMb } from '../services/settings';
 import { useAppStore } from '../state/store';
 import { Button } from './components';
 import { Icon } from './Icon';
@@ -48,7 +49,7 @@ export function DebugLogScreen({ onBack }: { onBack: () => void }) {
       `${Platform.OS} ${String(Platform.Version)}`,
       `serveur ${state.settings.serverHost}:${state.settings.serverPort}, connexion ${state.connection}`,
       `port d'écoute ${state.listenPort || state.settings.listenPort}, port lecteur ${state.httpPort}`,
-      `tampon ${state.settings.bufferMb} Mo, partage ${state.settings.shareEnabled ? 'oui' : 'non'}`,
+      `tampon ${formatBufferMb(state.settings.bufferMb)}, partage ${state.settings.shareEnabled ? 'oui' : 'non'}`,
       state.current
         ? `en cours : ${state.current.phase} ${state.current.hit.username} ${state.current.error ?? ''}`
         : 'aucune lecture en cours',

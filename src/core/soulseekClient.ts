@@ -508,11 +508,10 @@ export class SoulseekClient extends Emitter<SoulseekClientEvents> {
       const message = error instanceof Error ? error.message : 'Connexion impossible';
       this.setState('error', message);
 
-      if (
-        !this.manualDisconnect &&
-        this.reconnectAttempt > 0 &&
-        !(error instanceof LoginError)
-      ) {
+      // Keep trying after any network or server failure, including the very
+      // first connection (the attempt counter is still zero then). A refused
+      // login is final: retrying the same credentials would loop forever.
+      if (!this.manualDisconnect && !(error instanceof LoginError)) {
         this.scheduleReconnect();
       }
 

@@ -236,7 +236,9 @@ describe('login without network', () => {
     expect(await useAppStore.getState().login('tester', 'secret', 'saved')).toBe(false);
 
     expect(useAppStore.getState().username).toBe('tester');
-    expect(useAppStore.getState().connection).toBe('error');
+    // The client stays alive and keeps retrying: the app must not need a
+    // restart when the network comes back.
+    expect(useAppStore.getState().connection).toBe('reconnecting');
   });
 
   test('credentials typed on the login screen stay there', async () => {
