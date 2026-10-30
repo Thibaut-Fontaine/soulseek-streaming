@@ -116,7 +116,56 @@ an accent-free copy when they have accents.
 - Sharing is on by default (Wi-Fi only, one upload slot): extend
   `uploads.ts` + `trackCache.ts`, do not rebuild it.
 - Native: `newArchEnabled=false` (track-player 4.1.2 is not TurboModule
-  ready); keep `patches/react-native-track-player+4.1.2.patch`.
+  ready); keep `patches/react-native-track-player+4.1.2.patch` and
+  `patches/react-native-tcp-socket+6.4.3.patch` (cached thread pool + native
+  base64, see below).
+
+## Pitfalls already hit (do not reintroduce)
+
+Each was a real bug; the commit body has the details.
+
+- **Overlays must not wait for `Animated` `finished`** to unmount: the
+  callback can be interrupted, late or missing, leaving an invisible
+  full-screen layer that eats every tap. Stop catching touches when closing
+  starts, unmount when the slide ends (`c9b7ddc`).
+- **Covers: pick the size shown, decode at that size** (`pickArtwork`,
+  `resizeMethod="resize"`). 1000 px covers in 150 dp tiles filled Fresco's
+  bitmap pool ("Pool hard cap violation") and every later cover fell back
+  to its letter (`a8f74e9`). A cover that fails tries its other sizes
+  (`9ca0bef`). Blurs use a small (250 px) cover (`096bcd2`).
+- **react-native-tcp-socket runs connects on its threads, blocking up to
+  15 s**: with its stock 2-thread pool, file (F) connections queued behind
+  unreachable peers and uploads failed. Keep the cached-pool patch, cap
+  indirect P connects at 12, never decline F requests (`b9d7861`).
+- **Declined work must be free**: no journal line, no server reply, no
+  bridge write per declined ConnectToPeer; a storm of ~9,500 froze JS for
+  seconds (`51cbe52`). Same idea for any per-message path.
+- **Kept-mounted tabs keep their state**: blur inputs / close the keyboard
+  on leave (`7df5eb5`), reset per-visit UI state such as filters
+  (`14594cb`). Check this for any new state in a tab screen.
+- **Async plays must check they are still current** after each await:
+  stopping or picking another file cancels a catalog play still waiting for
+  sources (`b6455cc`); next-track lookups run only while that play is
+  current (`39b5312`). Clear the UI before the slow native player reset.
+- **Fallback sources must be the same song**: titles must also match
+  numbers ("Part 1" ≠ "Part 2", `sameSongTitle`, `91500df`).
+- **Soulseek queries**: no lone `-` (means exclude), keep accents, drop
+  feat./apostrophe leftovers; peers need every word in the path
+  (`64eebf6`, `02bb14b`).
+- **A dead socket can look online** after sleep or a network switch:
+  `checkConnection` probes and drops it (`9fb609e`). Logins from stored
+  credentials that fail for lack of network stay in the app (offline
+  banner), only a refused password returns to login (`37fe99c`).
+- **Never encode or copy whole files on the JS thread**: write in 192 KB
+  pieces, native base64, 64 MB stream cap (`9900f4d`, `9df80ab`,
+  `1fbc99b`). Long work in ≤ 8 ms slices (`d6ab8ff`).
+- **Stall watcher**: timers pause in background, so reset it on resume or
+  the time away is logged as a stall (`9a535d8`).
+- **"No source" is cached 5 min while moving through a list**, and a whole
+  source lookup is capped at 9 s; a slow re-search with music stopped
+  preceded a crash report (`6bb2ab1`).
+
+Full measurements: `docs/performance-audit.md`.
 
 ## Conventions
 
@@ -164,6 +213,7 @@ an accent-free copy when they have accents.
 | `docs/unified-catalog-research.md` | Why and how the catalog works (sources, matching) |
 | `docs/catalog-ui-design.md` | Catalog screens, components and states |
 | `docs/performance-audit.md` | Responsiveness audit: measurements, fixes, open checks |
+| `docs/superpowers/` | Specs and plans of past work (e.g. low-end performance run) |
 | `docs/peer-search-research.md` | How peers match queries; query problems and the query ladder |
 | `docs/library-import-research.md` | Importing a library from other music apps (parked) |
 | `docs/vps-apis.md` | VPS log ingest API, version manifest, deployment and update procedure |

@@ -103,6 +103,9 @@ debug journal, search fixes, and the first QR showcase.
 
 ## 4. Recent fixes/features — do not regress
 
+> This list stops at 0.2.0. Later fixes and the mistakes behind them are in
+> `AGENTS.md` → "Pitfalls already hit" and `docs/performance-audit.md`.
+
 1. **Overlapping searches / blank UI** (`fef33bd`): per-search timers,
    cancellation, ErrorBoundary.
 2. **MP3-only** (`fef33bd`): `STREAMABLE_EXTENSIONS = new Set(['mp3'])` in
@@ -401,7 +404,7 @@ Then:
   folders (Android document picker imports copies).
 - One stream and one upload at a time.
 - Seeking only within buffered bytes.
-- In-memory buffer 256 MiB cap; cache 1 GiB default.
+- Streamed files capped at 64 MB (bigger ones left out); cache 1 GiB default.
 - Short previews (<45 s) are penalized and may not auto-play.
 - NAT/CGNAT: indirect `ConnectToPeer`/`PierceFirewall` is implemented; a
   reachable listening port still gives the best results.
