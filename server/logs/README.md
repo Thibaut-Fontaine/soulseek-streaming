@@ -54,8 +54,8 @@ atomically after each batch.
 
 ```bash
 # Compile only the server (no new dependency; the repo already has tsc).
-npx tsc server/logs/index.ts --outDir server/logs/dist --module commonjs \
-  --target es2022 --moduleResolution node --esModuleInterop --skipLibCheck
+npx tsc -p server/logs/tsconfig.json
+node server/logs/dist/server/logs/index.js
 
 # Example systemd unit (new unit name, do not reuse llmcheck/instabot/nginx).
 # Environment=PORT=8099 SOULSTREAM_LOG_FILE=/var/lib/soulstream-logs/events.json

@@ -80,3 +80,6 @@ yarn-error.log
 # Personal agent settings (not shared)
 CLAUDE.local.md
 .claude/settings.local.json
+
+# Log ingest build output
+server/logs/dist/
