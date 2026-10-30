@@ -1730,10 +1730,10 @@ export const useAppStore = create<AppState>((set, get) => {
         sessionRecorder = createSessionRecorder({
           store: defaultSessionStore,
           snapshot: playbackSnapshot,
-          // A crash loses at most ~1.5 s: the position tick writes shortly
+          // A hard kill loses at most ~1 s: the position tick writes shortly
           // after each read, and going to the background flushes immediately.
-          debounceMs: 1000,
-          tickMs: 1500,
+          debounceMs: 600,
+          tickMs: 1000,
           position: async () => {
             try {
               return (await TrackPlayer.getProgress()).position ?? 0;
