@@ -13,8 +13,10 @@ debugging the SoulStream server endpoints.
 - `src/core/update.ts` — manifest validation and version comparison.
 - App clients: `src/services/logUploader.ts`, `src/services/remoteLog.ts`,
   `src/services/updates.ts`, `src/state/updateStore.ts`, `src/ui/UpdatePrompt.tsx`.
-  These app clients are currently on the `dev` branch; `main` stays on the
-  public 1.3.0-beta15 app. The server code is on `main`.
+  These app clients were prototyped on the old `dev` branch, which is **not
+  accepted** as done and must be reimplemented/verified from the feature
+  requirements. `main` stays on the public 1.3.0-beta15 app. The server code is
+  on `main`.
 
 ## Public endpoints
 

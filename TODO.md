@@ -5,6 +5,29 @@ Ordered by priority, highest first. When an item is done, remove it in the
 commit that finishes it (git history keeps the record); add new items where
 they belong in the order, with enough context to start without asking.
 
+## Owner-requested feature backlog (14) — open, redo/verify
+
+These are the owner's current priorities. The previous `dev` branch is **not
+accepted** as done: reimplement and verify from the requirements below and in
+`AGENTS.md` → “Requested feature backlog (14)”. The audit items below remain
+open unless independently fixed. Do not mark a feature done from a branch or
+an APK alone; tests plus the relevant device check are required.
+
+- [ ] 1. Default playback buffer **500 KiB** (`bufferMb: 0.5`, "500 Ko"), with migration and the 15 %/256 KiB floor.
+- [ ] 2. Prefer the **lightest usable source** (24/96/128 kbps before 320); keep a lone 320 playable.
+- [ ] 3. **Automatic Soulseek reconnect** after any disconnect, including failed first connection and foreground; bounded backoff; no auth loop.
+- [ ] 4. **Automatic peer fallback after 5 s** without bytes, refusal, queue or quota; try another peer and run a fresh search if needed; no manual "Relancer".
+- [ ] 5. **Music Map** of related artists + opt-in **autoplay** recommendations, no repeats, clean stop.
+- [ ] 6. **Hide uploader names** by default with a reveal setting; remove visible Soulseek branding from the UI.
+- [ ] 7. **Opt-in VPS logs API**: server ingest deployed at `/logs/v1/logs`; app uploader/redaction/reimplementation remains open.
+- [ ] 8. **Android Auto**: library browsing + controls; JVM/build checks and a DHU/device acceptance test.
+- [ ] 9. **Offline mode**: navigation, downloaded/imported playback with no network/client; clear error for uncached tracks.
+- [ ] 10. **Smallest-source storage + 94 kbps transcode**: native encoder decision (LAME/NDK preferred; no fake transcode test); fall back to original on failure.
+- [ ] 11. **Playback persistence**: restore current track, queue/context, shuffle/repeat and exact position after crash/manual close; clear on logout; missing-source fallback.
+- [ ] 12. **Update proposal**: startup check of `/api/app/version`, strictly newer `versionCode`, download + SHA-256 verification + Android installer; server manifest deployed, app client open.
+- [ ] 13. **Library-only “Changer” action**: when the played file does not match the displayed/saved song (e.g. censored version), search and choose another source/version, update the saved entry and playback identity/history without touching the main search flow. Add component/store tests and a manual library test.
+- [ ] 14. **Screen-off playback**: verify and fix playback with the screen off/locked, including foreground service, notification controls, Doze and the local HTTP proxy; add a device acceptance test and no background regression.
+
 ## 1. Open findings from the October 2026 audit (emulator + real network)
 
 Seen on the emulator (fake network and real Soulseek, test account

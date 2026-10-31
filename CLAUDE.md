@@ -8,7 +8,27 @@
 - VPS APIs and the app update manifest: read `docs/vps-apis.md`. The log
   ingest endpoint is `https://thibautfontaine.space/logs/v1/logs`; the version
   manifest is `https://thibautfontaine.space/api/app/version`. Server code is
-  on `main`; the app-side log uploader/updater is on `dev`.
+  on `main`; the app-side log uploader/updater was prototyped on the old `dev`
+  branch, which is **not accepted** and must be reimplemented/verified.
+- **Feature backlog (14).** The authoritative requirements are in
+  `AGENTS.md` → “Requested feature backlog (14)”, with the checklist in
+  `TODO.md`. The previous `dev` branch is **not accepted** as done; Claude must
+  redo/verify these items from the requirements and tests, not copy the old
+  implementation.
+  1. 500 KiB playback buffer.
+  2. Prefer the lightest source (24/96/128 kbps before 320).
+  3. Automatic Soulseek reconnection, including initial failure/foreground.
+  4. Automatic peer fallback after 5 s without bytes, with a fresh search.
+  5. Music Map + opt-in autoplay.
+  6. Uploader names hidden by default; remove visible Soulseek branding.
+  7. Opt-in VPS logs API (server deployed; app client open).
+  8. Android Auto browsing/controls (device/DHU acceptance pending).
+  9. Offline navigation and playback of downloaded/imported tracks.
+  10. Smallest-source download; native 94 kbps transcode decision.
+  11. Exact playback/queue/position persistence across crash or close.
+  12. Version manifest update proposal (server deployed; app client open).
+  13. Library-only “Changer” action for a mismatched/censored track.
+  14. Screen-off playback acceptance and fixes.
 - Cloud sessions run `.claude/hooks/session-start.sh` (registered in
   `.claude/settings.json`) before starting: dependencies, Android SDK and the
   Maven mirror are ready, so `cd android && ./gradlew assembleRelease` works

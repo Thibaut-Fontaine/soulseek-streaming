@@ -180,6 +180,34 @@ Each was a real bug; the commit body has the details.
 
 Full measurements: `docs/performance-audit.md`.
 
+## Requested feature backlog (14)
+
+Owner's current list (2026-10-30), in priority order. **All 14 are open for
+implementation and acceptance.** The previous `dev` branch is **not an accepted
+implementation** and must not be used as proof or copied as-is; Claude will
+redo/verify these items from the requirements and tests. `TODO.md` carries the
+actionable checklist.
+
+| # | Feature | Requirement |
+| --- | --- | --- |
+| 1 | Playback buffer | Default buffer before playback = **500 KiB** (`bufferMb: 0.5`, shown "500 Ko"), persisted and migrated; keep the 15 %/256 KiB floor. |
+| 2 | Lightest sources | Prefer the smallest usable bitrate (24/96/128 kbps before 320), balancing upload speed and file size; a heavy file stays playable when it is the only source. |
+| 3 | Soulseek reconnection | Reconnect automatically after any disconnection, including a failed first connection and app foreground; bounded retries/backoff, no restart needed, no retry loop on bad credentials. |
+| 4 | Automatic peer fallback | On refusal, upload queue, quota/"too many megabytes", or **no bytes within 5 s**, cancel and try another peer; if needed, automatically run a fresh search for another peer. No "Relancer" button required. |
+| 5 | Music Map and autoplay | A Music Map of related artists, and an opt-in automatic queue that recommends/enqueues similar tracks when a list ends; no repeats, clean stop. |
+| 6 | Anonymisation | Hide uploader names by default (player, sources, search, errors, shared journal) with a setting to reveal them; remove visible Soulseek branding from the UI. |
+| 7 | Centralised logs API | Small VPS API to receive, redact and store opt-in app logs; bounded body/rate limits/retention; app uploader must be reimplemented/verified. Server endpoint is deployed on the VPS; the app side is open. |
+| 8 | Android Auto | Browse the library and control playback from Android Auto, including a device/DHU acceptance test. |
+| 9 | Offline mode | The app remains navigable offline; downloaded/imported tracks play without network or a Soulseek client; uncached tracks fail clearly. |
+| 10 | Small storage / 94 kbps | Download the smallest viable source (24–128 kbps first); if none or the uploader is too slow, transcode the MP3 to 94 kbps. Native encoder/library decision (LAME/NDK vs alternatives) must be made explicitly. |
+| 11 | Playback persistence | After a crash or manual close, restore the same track, queue/context and exact position (minute + second), with a clear fallback if the source is gone. |
+| 12 | Update proposal | At startup, check the VPS version manifest; for a strictly newer `versionCode`, propose download, verify SHA-256 and open the Android installer. Never silent. Server manifest endpoint is deployed; the app client is open. |
+| 13 | Change a mismatched track (library only) | In the library, add a "Changer" action when the file played does not match the displayed song (e.g. censored version): search/choose another source or version and update the saved entry/playback without losing its identity or history. Library only, not the main search flow. |
+| 14 | Screen-off playback | Playback must continue reliably with the screen off/locked (foreground media service, notification controls, Doze/HTTP proxy included); add a device acceptance test and do not regress background playback. |
+
+Acceptance requires tests plus the relevant device check (Android Auto/DHU,
+screen-off, offline). Do not mark an item done from a branch alone.
+
 ## Conventions
 
 - **Brand colour is amber** (`#FFB627`, `colors.accent` in `src/ui/theme.ts`,
