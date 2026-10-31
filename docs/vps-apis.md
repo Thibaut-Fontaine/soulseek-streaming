@@ -13,8 +13,7 @@ debugging the SoulStream server endpoints.
 - `src/core/update.ts` — manifest validation and version comparison.
 - App clients: `src/services/logUploader.ts`, `src/services/remoteLog.ts`,
   `src/services/updates.ts`, `src/state/updateStore.ts`, `src/ui/UpdatePrompt.tsx`.
-  These app clients were prototyped on the old `dev` branch, which is **not
-  accepted** as done and must be reimplemented/verified from the feature
+  These app clients remain to be implemented and verified from the feature
   requirements. `main` stays on the public 1.3.0-beta15 app. The server code is
   on `main`.
 
@@ -126,7 +125,7 @@ silently.
 ### Publishing a new version
 
 1. Bump `versionCode` and `versionName` in `android/app/build.gradle` and the
-   `version` in `package.json` (dev branch until the release is promoted).
+   `version` in `package.json` on the branch being built.
 2. Build: `cd android && ./gradlew assembleRelease --no-daemon`.
 3. Compute `sha256sum` and the byte size of the APK.
 4. Copy the APK over `https://thibautfontaine.space/streaming/dev/SoulStream.apk`
@@ -158,6 +157,6 @@ only the dev APK does.
 ## Current deployment state
 
 - `main` contains the server code and this document.
-- `dev` contains the app clients and the beta16 APK source; the beta16 APK is
-  published under `/streaming/dev/`.
+- The app clients and the beta16 APK source still need to be implemented and
+  verified; the beta16 APK is published under `/streaming/dev/`.
 - Stable public site/APK: 1.3.0-beta15, unchanged.

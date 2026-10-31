@@ -183,10 +183,9 @@ Full measurements: `docs/performance-audit.md`.
 ## Requested feature backlog (14)
 
 Owner's current list (2026-10-30), in priority order. **All 14 are open for
-implementation and acceptance.** The previous `dev` branch is **not an accepted
-implementation** and must not be used as proof or copied as-is; Claude will
-redo/verify these items from the requirements and tests. `TODO.md` carries the
-actionable checklist.
+implementation and acceptance.** Treat the list and its acceptance criteria as
+the only definition of done; do not mark an item complete without passing tests
+and the relevant device check. `TODO.md` carries the actionable checklist.
 
 | # | Feature | Requirement |
 | --- | --- | --- |

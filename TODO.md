@@ -7,11 +7,11 @@ they belong in the order, with enough context to start without asking.
 
 ## Owner-requested feature backlog (14) — open, redo/verify
 
-These are the owner's current priorities. The previous `dev` branch is **not
-accepted** as done: reimplement and verify from the requirements below and in
-`AGENTS.md` → “Requested feature backlog (14)”. The audit items below remain
-open unless independently fixed. Do not mark a feature done from a branch or
-an APK alone; tests plus the relevant device check are required.
+These are the owner's current priorities. Implement and verify them from the
+requirements below and in `AGENTS.md` → “Requested feature backlog (14)”. The
+audit items below remain open unless independently fixed. Do not mark a feature
+done from a branch or an APK alone; tests plus the relevant device check are
+required.
 
 - [ ] 1. Default playback buffer **500 KiB** (`bufferMb: 0.5`, "500 Ko"), with migration and the 15 %/256 KiB floor.
 - [ ] 2. Prefer the **lightest usable source** (24/96/128 kbps before 320); keep a lone 320 playable.

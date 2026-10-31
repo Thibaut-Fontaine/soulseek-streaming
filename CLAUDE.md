@@ -8,13 +8,12 @@
 - VPS APIs and the app update manifest: read `docs/vps-apis.md`. The log
   ingest endpoint is `https://thibautfontaine.space/logs/v1/logs`; the version
   manifest is `https://thibautfontaine.space/api/app/version`. Server code is
-  on `main`; the app-side log uploader/updater was prototyped on the old `dev`
-  branch, which is **not accepted** and must be reimplemented/verified.
+  on `main`; the app-side log uploader/updater remains to be implemented and
+  verified from the requirements.
 - **Feature backlog (14).** The authoritative requirements are in
   `AGENTS.md` → “Requested feature backlog (14)”, with the checklist in
-  `TODO.md`. The previous `dev` branch is **not accepted** as done; Claude must
-  redo/verify these items from the requirements and tests, not copy the old
-  implementation.
+  `TODO.md`. Treat every item as open; do not mark it done without tests and
+  the relevant acceptance check.
   1. 500 KiB playback buffer.
   2. Prefer the lightest source (24/96/128 kbps before 320).
   3. Automatic Soulseek reconnection, including initial failure/foreground.
